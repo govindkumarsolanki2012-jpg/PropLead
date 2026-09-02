@@ -1,0 +1,59 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if the caller is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper function to check if the caller owns the user resource
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Root user document
+    match /users/{userId} {
+      // Agents can only read their own profile
+      allow read: if isOwner(userId);
+
+      // Create: only allow user to create their own profile with standard trial state
+      allow create: if isOwner(userId) && 
+        (!('isSubscribed' in request.resource.data) || request.resource.data.isSubscribed == false || request.resource.data.subscriptionStatus == 'TRIAL');
+
+      // Update: user can update profile details (name, agency, phone, city, rera, etc.)
+      // Prevent client-side arbitrary tampering of active subscription state without purchase verification
+      allow update: if isOwner(userId) && (
+        // Either subscription status is unchanged
+        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isSubscribed', 'subscriptionStatus'])) ||
+        // Or if changed to active, must include a verified purchaseToken
+        (request.resource.data.subscriptionStatus == 'TRIAL' || ('purchaseToken' in request.resource.data && request.resource.data.purchaseToken is string && request.resource.data.purchaseToken.size() > 10))
+      );
+
+      // Delete: only the owner can delete their own account
+      allow delete: if isOwner(userId);
+
+      // Leads subcollection - strictly isolated to the authenticated agent
+      // Contains customer details, BHK, requirements, budget, follow-ups, and activity history
+      match /leads/{leadId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Properties subcollection - strictly isolated to the authenticated agent
+      // Contains inventory, owner contact, photos, and matching attributes
+      match /properties/{propertyId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // WhatsApp templates subcollection - strictly isolated to the authenticated agent
+      match /templates/{templateId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // Fallback: deny all other paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

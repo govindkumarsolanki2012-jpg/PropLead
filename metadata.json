@@ -1,0 +1,6 @@
+{
+  "name": "Property Agent Lead Tracker",
+  "description": "A fast, intuitive lead and follow-up tracker for Indian property agents and brokers to capture leads in 10 seconds, track site visits, and close deals.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
