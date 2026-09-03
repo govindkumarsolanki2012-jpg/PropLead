@@ -170,6 +170,7 @@ export interface UserProfile {
   isTrialActive: boolean;
   trialStartDate: string;
   trialEndDate?: string;
+  serverTimestamp?: string;
   trialDaysRemaining: number;
   isSubscribed: boolean;
   subscriptionPlan?: string;

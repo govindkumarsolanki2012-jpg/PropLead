@@ -431,50 +431,71 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </button>
         </div>
 
-        <div className="space-y-2">
-          {recentLeads.map((lead) => {
-            const statusConfig = STATUS_CONFIG[lead.status] || STATUS_CONFIG.new;
-            return (
-              <div
-                key={lead.id}
-                onClick={() => onOpenLeadDetail(lead)}
-                className="p-3 bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200/90 dark:border-slate-700/80 flex items-center justify-between gap-3 shadow-2xs hover:border-slate-400 transition-all cursor-pointer"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                      {lead.name}
-                    </span>
-                    <span className={`text-[10px] font-bold px-2 py-0.2 rounded-full ${statusConfig.bg} ${statusConfig.text}`}>
-                      {translateStatus(lead.status)}
-                    </span>
+        {recentLeads.length === 0 ? (
+          <div className="p-6 bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200/90 dark:border-slate-700/80 text-center space-y-2">
+            <div className="w-10 h-10 rounded-full bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
+              <Users className="w-5 h-5" />
+            </div>
+            <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
+              {t('leads_no_found')}
+            </p>
+            <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
+              {t('leads_no_found_desc')}
+            </p>
+            <button
+              onClick={onOpenQuickAdd}
+              className="mt-2 inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-xs transition-all"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{t('leads_add_first')}</span>
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {recentLeads.map((lead) => {
+              const statusConfig = STATUS_CONFIG[lead.status] || STATUS_CONFIG.new;
+              return (
+                <div
+                  key={lead.id}
+                  onClick={() => onOpenLeadDetail(lead)}
+                  className="p-3 bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200/90 dark:border-slate-700/80 flex items-center justify-between gap-3 shadow-2xs hover:border-slate-400 transition-all cursor-pointer"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                        {lead.name}
+                      </span>
+                      <span className={`text-[10px] font-bold px-2 py-0.2 rounded-full ${statusConfig.bg} ${statusConfig.text}`}>
+                        {translateStatus(lead.status)}
+                      </span>
+                    </div>
+
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                      {lead.bhk || lead.propertyType} • {formatBudgetRange(lead.budgetMin, lead.budgetMax)}
+                    </div>
                   </div>
 
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                    {lead.bhk || lead.propertyType} • {formatBudgetRange(lead.budgetMin, lead.budgetMax)}
+                  <div className="flex items-center gap-1.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => openDialer(lead.phone)}
+                      className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold"
+                      title={t('dash_call')}
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => onOpenWhatsApp(lead)}
+                      className="p-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-2xs"
+                      title={t('dash_whatsapp')}
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-1.5 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    onClick={() => openDialer(lead.phone)}
-                    className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold"
-                    title={t('dash_call')}
-                  >
-                    <Phone className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => onOpenWhatsApp(lead)}
-                    className="p-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-2xs"
-                    title={t('dash_whatsapp')}
-                  >
-                    <MessageSquare className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

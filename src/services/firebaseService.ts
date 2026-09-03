@@ -22,7 +22,14 @@ import {
 import { db, storage, auth, googleProvider, FirebaseUser } from '../lib/firebase';
 import { signInWithPopup, signOut as fbSignOut, onAuthStateChanged } from 'firebase/auth';
 import { Lead, Property, UserProfile, WhatsAppTemplate } from '../types';
-import { INITIAL_LEADS, INITIAL_PROPERTIES, INITIAL_USER_PROFILE } from '../data/initialData';
+
+// Known legacy demo IDs to filter out and purge from Firestore if ever present
+const DEMO_LEAD_IDS = new Set([
+  'lead_100', 'lead_101', 'lead_102', 'lead_103', 'lead_104', 'lead_105', 'lead_106', 'lead_107'
+]);
+const DEMO_PROP_IDS = new Set([
+  'prop_201', 'prop_202', 'prop_203', 'prop_204', 'prop_205', 'prop_206', 'prop_207', 'prop_208'
+]);
 
 // --- AUTHENTICATION HELPERS ---
 
@@ -100,7 +107,15 @@ export async function getLeadsFromFirestore(userId: string): Promise<Lead[]> {
     const leadsRef = collection(db, 'users', userId, 'leads');
     const q = query(leadsRef, orderBy('createdAt', 'desc'));
     const snapshot = await getDocs(q);
-    return snapshot.docs.map((docSnap) => docSnap.data() as Lead);
+    const validLeads: Lead[] = [];
+    snapshot.docs.forEach((docSnap) => {
+      if (DEMO_LEAD_IDS.has(docSnap.id)) {
+        deleteDoc(docSnap.ref).catch(() => {});
+      } else {
+        validLeads.push(docSnap.data() as Lead);
+      }
+    });
+    return validLeads;
   } catch (err) {
     console.error('Error getting leads from Firestore:', err);
     return [];
@@ -116,14 +131,21 @@ export function subscribeLeadsFromFirestore(
   return onSnapshot(
     q,
     (snapshot) => {
-      const leadsList = snapshot.docs.map((docSnap) => docSnap.data() as Lead);
+      const validLeads: Lead[] = [];
+      snapshot.docs.forEach((docSnap) => {
+        if (DEMO_LEAD_IDS.has(docSnap.id)) {
+          deleteDoc(docSnap.ref).catch(() => {});
+        } else {
+          validLeads.push(docSnap.data() as Lead);
+        }
+      });
       // Sort in memory by createdAt descending or updatedAt
-      leadsList.sort((a, b) => {
+      validLeads.sort((a, b) => {
         const dateA = new Date(a.updatedAt || a.createdAt).getTime();
         const dateB = new Date(b.updatedAt || b.createdAt).getTime();
         return dateB - dateA;
       });
-      onUpdate(leadsList);
+      onUpdate(validLeads);
     },
     (err) => {
       console.warn('Firestore Leads subscription offline/error:', err);
@@ -167,7 +189,15 @@ export async function getPropertiesFromFirestore(userId: string): Promise<Proper
   try {
     const propsRef = collection(db, 'users', userId, 'properties');
     const snapshot = await getDocs(propsRef);
-    return snapshot.docs.map((docSnap) => docSnap.data() as Property);
+    const validProps: Property[] = [];
+    snapshot.docs.forEach((docSnap) => {
+      if (DEMO_PROP_IDS.has(docSnap.id)) {
+        deleteDoc(docSnap.ref).catch(() => {});
+      } else {
+        validProps.push(docSnap.data() as Property);
+      }
+    });
+    return validProps;
   } catch (err) {
     console.error('Error getting properties from Firestore:', err);
     return [];
@@ -182,13 +212,20 @@ export function subscribePropertiesFromFirestore(
   return onSnapshot(
     propsRef,
     (snapshot) => {
-      const propList = snapshot.docs.map((docSnap) => docSnap.data() as Property);
-      propList.sort((a, b) => {
+      const validProps: Property[] = [];
+      snapshot.docs.forEach((docSnap) => {
+        if (DEMO_PROP_IDS.has(docSnap.id)) {
+          deleteDoc(docSnap.ref).catch(() => {});
+        } else {
+          validProps.push(docSnap.data() as Property);
+        }
+      });
+      validProps.sort((a, b) => {
         const dateA = new Date(a.updatedAt || a.createdAt).getTime();
         const dateB = new Date(b.updatedAt || b.createdAt).getTime();
         return dateB - dateA;
       });
-      onUpdate(propList);
+      onUpdate(validProps);
     },
     (err) => {
       console.warn('Firestore Properties subscription offline/error:', err);

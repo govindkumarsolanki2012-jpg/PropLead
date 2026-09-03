@@ -43,34 +43,6 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const handleSampleAdd = () => {
-    const sampleImages = [
-      {
-        name: 'Master_Bedroom_View.jpg',
-        url: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=600&auto=format&fit=crop&q=80',
-        size: '1.8 MB',
-        type: 'image' as const,
-      },
-      {
-        name: 'Draft_Allotment_Letter.pdf',
-        url: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?w=600&auto=format&fit=crop&q=80',
-        size: '540 KB',
-        type: 'document' as const,
-      },
-    ];
-    const item = sampleImages[Math.floor(Math.random() * sampleImages.length)];
-    const newAtt: Attachment = {
-      id: `att_${Date.now()}`,
-      leadId,
-      name: item.name,
-      type: item.type,
-      url: item.url,
-      size: item.size,
-      createdAt: new Date().toISOString().split('T')[0],
-    };
-    onAddAttachment(newAtt);
-  };
-
   return (
     <div className="space-y-4">
       {/* Upload Zone */}
@@ -80,7 +52,7 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
           Upload Property Photos & Client Documents
         </div>
         <p className="text-[11px] text-slate-400 mt-0.5">
-          Floor plans, sample flat photos, KYC documents, allotment letters
+          Floor plans, flat photos, KYC documents, allotment letters
         </p>
 
         <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
@@ -94,14 +66,6 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
               className="hidden"
             />
           </label>
-
-          <button
-            type="button"
-            onClick={handleSampleAdd}
-            className="px-3 py-1.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl text-xs border border-slate-300 dark:border-slate-600 hover:bg-slate-50 transition-all"
-          >
-            + Add Sample Photo / Doc
-          </button>
         </div>
       </div>
 

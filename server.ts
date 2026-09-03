@@ -2,8 +2,14 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { google } from 'googleapis';
 import { GoogleGenAI } from '@google/genai';
+
+// =========================================================================
+// TRIAL & SUBSCRIPTION CONSTANTS
+// =========================================================================
+export const TRIAL_DURATION_DAYS = 30;
 
 let geminiClient: GoogleGenAI | null = null;
 function getGemini(): GoogleGenAI | null {
@@ -13,8 +19,8 @@ function getGemini(): GoogleGenAI | null {
   return geminiClient;
 }
 
-// In-memory / server-side persistence for subscription states per user
-interface UserSubscriptionRecord {
+// Durable server-side persistence for subscription states per user
+export interface UserSubscriptionRecord {
   userId: string;
   subscriptionStatus: 'TRIAL' | 'ACTIVE' | 'CANCELED_BUT_ACTIVE' | 'PAYMENT_ISSUE' | 'EXPIRED' | 'ON_HOLD';
   trialStartDate: string;
@@ -31,7 +37,404 @@ interface UserSubscriptionRecord {
   updatedAt: string;
 }
 
-const subscriptionDatabase = new Map<string, UserSubscriptionRecord>();
+// -------------------------------------------------------------------------
+// DURABLE PERSISTENCE LAYER (FIRESTORE + DISK FALLBACK)
+// -------------------------------------------------------------------------
+const DATA_DIR = path.join(process.cwd(), 'data');
+const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
+
+const FIRESTORE_PROJECT_ID = 'engaged-xyston-bnm8c';
+const FIRESTORE_DATABASE_ID = 'ai-studio-propertyagentlea-045c9e34-069a-4aea-b55c-a485b4374ea0';
+const FIRESTORE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents`;
+
+// In-memory hot cache backed by local disk storage to survive restarts & container wakeups
+function initLocalSubscriptionStore(): Map<string, UserSubscriptionRecord> {
+  const store = new Map<string, UserSubscriptionRecord>();
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (fs.existsSync(SUBSCRIPTIONS_FILE)) {
+      const data = fs.readFileSync(SUBSCRIPTIONS_FILE, 'utf8');
+      const parsed = JSON.parse(data);
+      if (typeof parsed === 'object' && parsed !== null) {
+        for (const [uid, item] of Object.entries(parsed)) {
+          if (item && (item as any).userId) {
+            store.set(uid, item as UserSubscriptionRecord);
+          }
+        }
+      }
+      console.log(`[Subscription Persistence] Restored ${store.size} subscription records from durable disk storage.`);
+    }
+  } catch (err) {
+    console.warn('[Subscription Persistence] Failed to initialize local subscriptions cache:', err);
+  }
+  return store;
+}
+
+const subscriptionStore = initLocalSubscriptionStore();
+
+function persistSubscriptionStoreToDisk(): void {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const serialized = Object.fromEntries(subscriptionStore.entries());
+    fs.writeFileSync(SUBSCRIPTIONS_FILE, JSON.stringify(serialized, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Subscription Persistence] Error writing subscriptions to disk:', err);
+  }
+}
+
+// Firestore Field Format Converters
+function toFirestoreFields(record: UserSubscriptionRecord): Record<string, any> {
+  const fields: Record<string, any> = {
+    userId: { stringValue: record.userId },
+    subscriptionStatus: { stringValue: record.subscriptionStatus },
+    trialStartDate: { stringValue: record.trialStartDate },
+    trialEndDate: { stringValue: record.trialEndDate },
+    subscriptionProductId: { stringValue: record.subscriptionProductId || 'property_agent_pro' },
+    subscriptionBasePlan: { stringValue: record.subscriptionBasePlan || 'monthly' },
+    autoRenewing: { booleanValue: Boolean(record.autoRenewing) },
+    acknowledged: { booleanValue: Boolean(record.acknowledged) },
+    updatedAt: { stringValue: record.updatedAt || new Date().toISOString() },
+  };
+
+  if (record.subscriptionExpiryDate) {
+    fields.subscriptionExpiryDate = { stringValue: record.subscriptionExpiryDate };
+  } else {
+    fields.subscriptionExpiryDate = { nullValue: null };
+  }
+
+  if (record.purchaseToken) {
+    fields.purchaseToken = { stringValue: record.purchaseToken };
+  }
+  if (record.orderId) {
+    fields.orderId = { stringValue: record.orderId };
+  }
+  if (record.paymentIssueMessage) {
+    fields.paymentIssueMessage = { stringValue: record.paymentIssueMessage };
+  }
+  if (record.lastVerifiedAt) {
+    fields.lastVerifiedAt = { stringValue: record.lastVerifiedAt };
+  }
+
+  return fields;
+}
+
+function fromFirestoreFields(fields: Record<string, any>): UserSubscriptionRecord | null {
+  if (!fields || !fields.userId) return null;
+
+  return {
+    userId: fields.userId.stringValue || '',
+    subscriptionStatus: (fields.subscriptionStatus?.stringValue || 'TRIAL') as any,
+    trialStartDate: fields.trialStartDate?.stringValue || new Date().toISOString(),
+    trialEndDate: fields.trialEndDate?.stringValue || new Date().toISOString(),
+    subscriptionExpiryDate: fields.subscriptionExpiryDate?.stringValue || null,
+    subscriptionProductId: fields.subscriptionProductId?.stringValue || 'property_agent_pro',
+    subscriptionBasePlan: fields.subscriptionBasePlan?.stringValue || 'monthly',
+    purchaseToken: fields.purchaseToken?.stringValue,
+    orderId: fields.orderId?.stringValue,
+    autoRenewing: fields.autoRenewing?.booleanValue ?? false,
+    acknowledged: fields.acknowledged?.booleanValue ?? false,
+    paymentIssueMessage: fields.paymentIssueMessage?.stringValue,
+    lastVerifiedAt: fields.lastVerifiedAt?.stringValue,
+    updatedAt: fields.updatedAt?.stringValue || new Date().toISOString(),
+  };
+}
+
+// -------------------------------------------------------------------------
+// FIREBASE AUTH TOKEN CRYPTOGRAPHIC VERIFICATION (SERVER-SIDE)
+// -------------------------------------------------------------------------
+export interface VerifiedFirebaseToken {
+  uid: string;
+  email?: string;
+  exp: number;
+}
+
+let cachedGoogleCerts: Record<string, string> | null = null;
+let certsExpiryTime = 0;
+
+async function getGooglePublicCerts(): Promise<Record<string, string>> {
+  const now = Date.now();
+  if (cachedGoogleCerts && now < certsExpiryTime) {
+    return cachedGoogleCerts;
+  }
+  try {
+    const res = await fetch('https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com');
+    if (!res.ok) {
+      throw new Error(`Failed to fetch Google public certs: HTTP ${res.status}`);
+    }
+    const cacheControl = res.headers.get('cache-control') || '';
+    const match = cacheControl.match(/max-age=(\d+)/);
+    const maxAgeSeconds = match ? parseInt(match[1], 10) : 3600;
+    certsExpiryTime = now + maxAgeSeconds * 1000;
+    cachedGoogleCerts = (await res.json()) as Record<string, string>;
+    return cachedGoogleCerts;
+  } catch (err) {
+    if (cachedGoogleCerts) return cachedGoogleCerts;
+    throw err;
+  }
+}
+
+export async function verifyFirebaseIdToken(token: string): Promise<VerifiedFirebaseToken | null> {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+
+  try {
+    const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    const signature = Buffer.from(parts[2], 'base64url');
+
+    if (header.alg !== 'RS256' || !header.kid) {
+      return null;
+    }
+
+    let certs = await getGooglePublicCerts();
+    let cert = certs[header.kid];
+    if (!cert) {
+      cachedGoogleCerts = null;
+      certs = await getGooglePublicCerts();
+      cert = certs[header.kid];
+      if (!cert) return null;
+    }
+
+    const verifier = crypto.createVerify('RSA-SHA256');
+    verifier.update(`${parts[0]}.${parts[1]}`);
+    const isValid = verifier.verify(cert, signature);
+    if (!isValid) return null;
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (payload.exp <= nowSec) return null;
+    if (payload.aud !== FIRESTORE_PROJECT_ID) return null;
+    if (payload.iss !== `https://securetoken.google.com/${FIRESTORE_PROJECT_ID}`) return null;
+    if (!payload.sub || typeof payload.sub !== 'string') return null;
+
+    return {
+      uid: payload.sub,
+      email: payload.email,
+      exp: payload.exp,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function getFirestoreAuthToken(idToken?: string): Promise<string | null> {
+  // 1. If an ID Token is provided in the request from Firebase Auth, use it for reads
+  if (idToken) {
+    return idToken;
+  }
+
+  // 2. If a Google Play Service Account Key is configured, use its OAuth2 token
+  const serviceAccountKey = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY;
+  if (serviceAccountKey) {
+    try {
+      let credentials: any;
+      if (serviceAccountKey.trim().startsWith('{')) {
+        credentials = JSON.parse(serviceAccountKey);
+      } else {
+        const decoded = Buffer.from(serviceAccountKey, 'base64').toString('utf8');
+        credentials = JSON.parse(decoded);
+      }
+
+      const auth = new google.auth.GoogleAuth({
+        credentials,
+        scopes: ['https://www.googleapis.com/auth/datastore'],
+      });
+      const client = await auth.getClient();
+      const accessTokenResponse = await client.getAccessToken();
+      if (accessTokenResponse?.token) {
+        return accessTokenResponse.token;
+      }
+    } catch (err) {
+      console.warn('[Firestore Persistence] Service account auth error:', err);
+    }
+  }
+
+  return null;
+}
+
+async function syncSubscriptionToFirestore(record: UserSubscriptionRecord, idToken?: string): Promise<boolean> {
+  try {
+    const token = await getFirestoreAuthToken(idToken);
+    if (!token) {
+      return false;
+    }
+
+    const docUrl = `${FIRESTORE_REST_BASE}/subscriptions/${encodeURIComponent(record.userId)}`;
+    const res = await fetch(docUrl, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        fields: toFirestoreFields(record),
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn(`[Firestore Persistence] Write failed (${res.status}):`, errText);
+      return false;
+    }
+
+    console.log(`[Firestore Persistence] Persisted subscription for user ${record.userId} to Firestore.`);
+    return true;
+  } catch (err) {
+    console.warn('[Firestore Persistence] Network error writing subscription:', err);
+    return false;
+  }
+}
+
+export interface FirestoreFetchResult {
+  status: 'FOUND' | 'NOT_FOUND' | 'ERROR';
+  record: UserSubscriptionRecord | null;
+}
+
+async function fetchSubscriptionFromFirestore(userId: string, idToken?: string): Promise<FirestoreFetchResult> {
+  try {
+    const token = await getFirestoreAuthToken(idToken);
+    if (!token) {
+      return { status: 'ERROR', record: null };
+    }
+
+    const docUrl = `${FIRESTORE_REST_BASE}/subscriptions/${encodeURIComponent(userId)}`;
+    const res = await fetch(docUrl, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (res.status === 404) {
+      return { status: 'NOT_FOUND', record: null };
+    }
+
+    if (!res.ok) {
+      console.warn(`[Firestore Persistence] Firestore returned HTTP status ${res.status}`);
+      return { status: 'ERROR', record: null };
+    }
+
+    const docData = await res.json();
+    const parsed = fromFirestoreFields(docData.fields);
+    if (parsed) {
+      return { status: 'FOUND', record: parsed };
+    }
+    return { status: 'ERROR', record: null };
+  } catch (err) {
+    console.warn('[Firestore Persistence] Error reading subscription from Firestore:', err);
+    return { status: 'ERROR', record: null };
+  }
+}
+
+async function fetchUserProfileCreatedAtFromFirestore(userId: string, idToken?: string): Promise<string | null> {
+  try {
+    const token = await getFirestoreAuthToken(idToken);
+    if (!token) return null;
+    const docUrl = `${FIRESTORE_REST_BASE}/users/${encodeURIComponent(userId)}`;
+    const res = await fetch(docUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const docData = await res.json();
+    return docData.fields?.createdAt?.stringValue || null;
+  } catch {
+    return null;
+  }
+}
+
+export interface GetSubscriptionResult {
+  record: UserSubscriptionRecord | null;
+  unavailable?: boolean;
+}
+
+export async function getSubscriptionRecord(
+  userId: string,
+  idToken?: string
+): Promise<GetSubscriptionResult> {
+  // 1. Authoritatively check Firestore
+  const remote = await fetchSubscriptionFromFirestore(userId, idToken);
+
+  if (remote.status === 'FOUND' && remote.record) {
+    subscriptionStore.set(userId, remote.record);
+    persistSubscriptionStoreToDisk();
+    return { record: remote.record, unavailable: false };
+  }
+
+  if (remote.status === 'ERROR') {
+    // Firestore is unavailable or experiencing network outage.
+    // If we have an existing cached record for this user, serve it safely.
+    if (subscriptionStore.has(userId)) {
+      console.log(`[Subscription Persistence] Serving cached record for user ${userId} during Firestore outage.`);
+      return { record: subscriptionStore.get(userId)!, unavailable: false };
+    }
+
+    // FAIL CLOSED:
+    // DO NOT create a new trial!
+    // DO NOT extend an existing trial!
+    // DO NOT assume the user is new!
+    // DO NOT activate Pro!
+    console.warn(`[Subscription Persistence] Firestore unavailable and no cached record for user ${userId}. Failing closed.`);
+    return { record: null, unavailable: true };
+  }
+
+  // 2. remote.status === 'NOT_FOUND': User does not yet have a record in /subscriptions/{userId}
+  // Check if user already had an existing account in /users/{userId} to prevent duplicate/repeated trials
+  const userCreatedAt = await fetchUserProfileCreatedAtFromFirestore(userId, idToken);
+
+  const serverNow = new Date();
+  let trialStart: Date;
+  let trialEnd: Date;
+  let isExpired = false;
+
+  if (userCreatedAt) {
+    const accountDate = new Date(userCreatedAt);
+    if (!isNaN(accountDate.getTime())) {
+      trialStart = accountDate;
+      trialEnd = new Date(accountDate.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
+      if (serverNow.getTime() > trialEnd.getTime()) {
+        isExpired = true;
+      }
+    } else {
+      trialStart = serverNow;
+      trialEnd = new Date(serverNow.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
+    }
+  } else {
+    trialStart = serverNow;
+    trialEnd = new Date(serverNow.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
+  }
+
+  const defaultRecord: UserSubscriptionRecord = {
+    userId,
+    subscriptionStatus: isExpired ? 'EXPIRED' : 'TRIAL',
+    trialStartDate: trialStart.toISOString(),
+    trialEndDate: trialEnd.toISOString(),
+    subscriptionExpiryDate: null,
+    subscriptionProductId: 'property_agent_pro',
+    subscriptionBasePlan: 'monthly',
+    autoRenewing: false,
+    acknowledged: false,
+    updatedAt: serverNow.toISOString(),
+  };
+
+  subscriptionStore.set(userId, defaultRecord);
+  persistSubscriptionStoreToDisk();
+  syncSubscriptionToFirestore(defaultRecord, idToken).catch(() => {});
+
+  return { record: defaultRecord, unavailable: false };
+}
+
+async function saveSubscriptionRecord(
+  record: UserSubscriptionRecord,
+  idToken?: string
+): Promise<void> {
+  record.updatedAt = new Date().toISOString();
+  subscriptionStore.set(record.userId, record);
+  persistSubscriptionStoreToDisk();
+  await syncSubscriptionToFirestore(record, idToken);
+}
 
 // Default subscription product catalog matching Google Play Console setup
 const GOOGLE_PLAY_PRODUCT = {
@@ -272,37 +675,57 @@ async function verifyGooglePlaySubscriptionToken(
   };
 }
 
-function getOrCreateUserSubscription(userId: string, initialStartDate?: string): UserSubscriptionRecord {
-  if (subscriptionDatabase.has(userId)) {
-    return subscriptionDatabase.get(userId)!;
-  }
-
-  const now = initialStartDate ? new Date(initialStartDate) : new Date();
-  const trialEnd = new Date(now);
-  trialEnd.setDate(trialEnd.getDate() + 30);
-
-  const defaultRecord: UserSubscriptionRecord = {
-    userId,
-    subscriptionStatus: 'TRIAL',
-    trialStartDate: now.toISOString(),
-    trialEndDate: trialEnd.toISOString(),
-    subscriptionExpiryDate: null,
-    subscriptionProductId: 'property_agent_pro',
-    subscriptionBasePlan: 'monthly',
-    autoRenewing: false,
-    acknowledged: false,
-    updatedAt: new Date().toISOString(),
-  };
-
-  subscriptionDatabase.set(userId, defaultRecord);
-  return defaultRecord;
-}
-
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Helper to extract bearer token from headers
+  const extractIdToken = (req: express.Request): string | undefined => {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      return authHeader.slice(7).trim();
+    }
+    return undefined;
+  };
+
+  // Helper to cryptographically authenticate Firebase ID token and verify UID ownership
+  const authenticateRequest = async (
+    req: express.Request,
+    res: express.Response
+  ): Promise<string | null> => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      res.status(401).json({
+        success: false,
+        error: 'Authentication required. Missing Bearer token.',
+      });
+      return null;
+    }
+
+    const token = authHeader.substring(7).trim();
+    const verified = await verifyFirebaseIdToken(token);
+    if (!verified) {
+      res.status(401).json({
+        success: false,
+        error: 'Invalid or expired Firebase ID token.',
+      });
+      return null;
+    }
+
+    // Verify client-supplied userId matches the cryptographically verified UID
+    const requestedUserId = (req.query.userId as string) || req.body?.userId;
+    if (requestedUserId && requestedUserId !== verified.uid) {
+      res.status(403).json({
+        success: false,
+        error: 'Forbidden: Access denied for requested user ID.',
+      });
+      return null;
+    }
+
+    return verified.uid;
+  };
 
   // ==========================================
   // GOOGLE PLAY BILLING API ENDPOINTS
@@ -327,65 +750,92 @@ async function startServer() {
   });
 
   // 3. Get server-authoritative subscription & trial status
-  app.get('/api/billing/subscription-status', (req, res) => {
-    const userId = (req.query.userId as string) || 'usr_001';
-    const initialStartDate = req.query.trialStartDate as string;
+  app.get('/api/billing/subscription-status', async (req, res) => {
+    try {
+      const verifiedUid = await authenticateRequest(req, res);
+      if (!verifiedUid) return;
 
-    const record = getOrCreateUserSubscription(userId, initialStartDate);
+      const idToken = extractIdToken(req);
+      const subResult = await getSubscriptionRecord(verifiedUid, idToken);
 
-    // Compute live state based on authoritative expiration timestamps
-    const now = Date.now();
-    let currentStatus = record.subscriptionStatus;
+      if (subResult.unavailable || !subResult.record) {
+        return res.status(503).json({
+          success: false,
+          error: 'Subscription service is temporarily unavailable. Please retry shortly.',
+        });
+      }
 
-    if (currentStatus === 'TRIAL') {
+      const record = subResult.record;
+
+      // Compute live state based on authoritative expiration timestamps
+      const now = Date.now();
+      let currentStatus = record.subscriptionStatus;
+
+      if (currentStatus === 'TRIAL') {
+        const trialEndTime = new Date(record.trialEndDate).getTime();
+        if (isNaN(trialEndTime) || now > trialEndTime) {
+          currentStatus = 'EXPIRED';
+          record.subscriptionStatus = 'EXPIRED';
+          await saveSubscriptionRecord(record, idToken);
+        }
+      } else if (currentStatus === 'CANCELED_BUT_ACTIVE') {
+        if (record.subscriptionExpiryDate) {
+          const expiryTime = new Date(record.subscriptionExpiryDate).getTime();
+          if (now > expiryTime) {
+            currentStatus = 'EXPIRED';
+            record.subscriptionStatus = 'EXPIRED';
+            await saveSubscriptionRecord(record, idToken);
+          }
+        }
+      } else if (currentStatus === 'ACTIVE') {
+        if (record.subscriptionExpiryDate) {
+          const expiryTime = new Date(record.subscriptionExpiryDate).getTime();
+          if (now > expiryTime && !record.autoRenewing) {
+            currentStatus = 'EXPIRED';
+            record.subscriptionStatus = 'EXPIRED';
+            await saveSubscriptionRecord(record, idToken);
+          }
+        }
+      }
+
       const trialEndTime = new Date(record.trialEndDate).getTime();
-      if (now > trialEndTime) {
-        currentStatus = 'EXPIRED';
-        record.subscriptionStatus = 'EXPIRED';
-      }
-    } else if (currentStatus === 'CANCELED_BUT_ACTIVE') {
-      if (record.subscriptionExpiryDate) {
-        const expiryTime = new Date(record.subscriptionExpiryDate).getTime();
-        if (now > expiryTime) {
-          currentStatus = 'EXPIRED';
-          record.subscriptionStatus = 'EXPIRED';
-        }
-      }
-    } else if (currentStatus === 'ACTIVE') {
-      if (record.subscriptionExpiryDate) {
-        const expiryTime = new Date(record.subscriptionExpiryDate).getTime();
-        if (now > expiryTime && !record.autoRenewing) {
-          currentStatus = 'EXPIRED';
-          record.subscriptionStatus = 'EXPIRED';
-        }
-      }
+      const trialDaysRemaining = isNaN(trialEndTime)
+        ? 0
+        : Math.max(0, Math.ceil((trialEndTime - now) / (1000 * 60 * 60 * 24)));
+
+      const serverTimestamp = new Date(now).toISOString();
+
+      res.json({
+        success: true,
+        userId: record.userId,
+        subscriptionStatus: currentStatus,
+        trialStartDate: record.trialStartDate,
+        trialEndDate: record.trialEndDate,
+        serverTimestamp,
+        serverNow: serverTimestamp,
+        currentServerTimestamp: serverTimestamp,
+        trialDaysRemaining,
+        subscriptionExpiryDate: record.subscriptionExpiryDate,
+        subscriptionProductId: record.subscriptionProductId,
+        subscriptionBasePlan: record.subscriptionBasePlan,
+        autoRenewing: record.autoRenewing,
+        paymentIssueMessage: record.paymentIssueMessage,
+        isSubscribed: currentStatus === 'ACTIVE' || currentStatus === 'CANCELED_BUT_ACTIVE',
+        isFeatureLocked: currentStatus === 'EXPIRED',
+      });
+    } catch (err: any) {
+      console.error('[Subscription Status Error]:', err);
+      res.status(500).json({ success: false, error: err?.message || 'Failed to retrieve subscription status' });
     }
-
-    const trialDaysRemaining = Math.max(
-      0,
-      Math.ceil((new Date(record.trialEndDate).getTime() - now) / (1000 * 60 * 60 * 24))
-    );
-
-    res.json({
-      success: true,
-      userId: record.userId,
-      subscriptionStatus: currentStatus,
-      trialStartDate: record.trialStartDate,
-      trialEndDate: record.trialEndDate,
-      trialDaysRemaining,
-      subscriptionExpiryDate: record.subscriptionExpiryDate,
-      subscriptionProductId: record.subscriptionProductId,
-      subscriptionBasePlan: record.subscriptionBasePlan,
-      autoRenewing: record.autoRenewing,
-      paymentIssueMessage: record.paymentIssueMessage,
-      isSubscribed: currentStatus === 'ACTIVE' || currentStatus === 'CANCELED_BUT_ACTIVE',
-      isFeatureLocked: currentStatus === 'EXPIRED',
-    });
   });
 
   // 4. Verify Google Play Purchase using Google Play Developer API as Source of Truth
   app.post('/api/billing/verify-purchase', async (req, res) => {
-    const { userId = 'usr_001', purchaseToken, productId = 'property_agent_pro', basePlanId = 'monthly' } = req.body;
+    const verifiedUid = await authenticateRequest(req, res);
+    if (!verifiedUid) return;
+
+    const { purchaseToken, productId = 'property_agent_pro', basePlanId = 'monthly' } = req.body;
+    const idToken = extractIdToken(req);
 
     if (!purchaseToken) {
       return res.status(400).json({
@@ -394,7 +844,7 @@ async function startServer() {
       });
     }
 
-    console.log(`[Google Play Verification] Verifying token for user ${userId}...`);
+    console.log(`[Google Play Verification] Verifying token for user ${verifiedUid}...`);
 
     // Authoritatively query Google Play Developer API
     const verification = await verifyGooglePlaySubscriptionToken(purchaseToken, productId);
@@ -406,8 +856,16 @@ async function startServer() {
       });
     }
 
-    // Persist verified state on the server using Google Play returned values
-    const record = getOrCreateUserSubscription(userId);
+    const subResult = await getSubscriptionRecord(verifiedUid, idToken);
+    if (subResult.unavailable || !subResult.record) {
+      return res.status(503).json({
+        success: false,
+        error: 'Subscription service temporarily unavailable. Please retry shortly.',
+      });
+    }
+
+    // Persist verified state on the server using Google Play returned values bound to verified UID
+    const record = subResult.record;
     record.subscriptionStatus = verification.subscriptionStatus;
     record.subscriptionProductId = productId;
     record.subscriptionBasePlan = basePlanId;
@@ -418,11 +876,10 @@ async function startServer() {
     record.acknowledged = verification.acknowledged;
     record.paymentIssueMessage = undefined;
     record.lastVerifiedAt = new Date().toISOString();
-    record.updatedAt = new Date().toISOString();
 
-    subscriptionDatabase.set(userId, record);
+    await saveSubscriptionRecord(record, idToken);
 
-    console.log(`[Google Play Billing] Subscription verified authoritatively. Expiry: ${record.subscriptionExpiryDate}, OrderId: ${verification.orderId}`);
+    console.log(`[Google Play Billing] Subscription verified authoritatively for ${verifiedUid}. Expiry: ${record.subscriptionExpiryDate}, OrderId: ${verification.orderId}`);
 
     return res.json({
       success: true,
@@ -438,10 +895,22 @@ async function startServer() {
 
   // 5. Restore purchases for returning or multi-device user
   app.post('/api/billing/restore-purchases', async (req, res) => {
-    const { userId = 'usr_001', purchaseToken, isBridgeAvailable = false, productId = 'property_agent_pro' } = req.body;
-    const record = getOrCreateUserSubscription(userId);
-    const client = getAndroidPublisherClient();
+    const verifiedUid = await authenticateRequest(req, res);
+    if (!verifiedUid) return;
 
+    const { purchaseToken, isBridgeAvailable = false, productId = 'property_agent_pro' } = req.body;
+    const idToken = extractIdToken(req);
+    const subResult = await getSubscriptionRecord(verifiedUid, idToken);
+
+    if (subResult.unavailable || !subResult.record) {
+      return res.status(503).json({
+        success: false,
+        error: 'Subscription service temporarily unavailable. Please retry shortly.',
+      });
+    }
+
+    const record = subResult.record;
+    const client = getAndroidPublisherClient();
     const tokenToVerify = purchaseToken || record.purchaseToken;
 
     if (tokenToVerify) {
@@ -454,8 +923,8 @@ async function startServer() {
         record.subscriptionExpiryDate = verification.subscriptionExpiryDate;
         record.autoRenewing = verification.autoRenewing;
         record.purchaseToken = tokenToVerify;
-        record.updatedAt = new Date().toISOString();
-        subscriptionDatabase.set(userId, record);
+
+        await saveSubscriptionRecord(record, idToken);
 
         return res.json({
           success: true,
@@ -502,6 +971,22 @@ async function startServer() {
 
   // 6. Handle Google Play Real-Time Developer Notifications (RTDN Pub/Sub Webhook)
   app.post('/api/billing/google-play-webhook', async (req, res) => {
+    // Pub/Sub Push Authentication:
+    // Requires GOOGLE_PLAY_WEBHOOK_SECRET verification token in query/header or Google Bearer token
+    const webhookSecret = process.env.GOOGLE_PLAY_WEBHOOK_SECRET;
+    const providedSecret = (req.query.secret as string) || (req.headers['x-webhook-secret'] as string);
+    const authHeader = req.headers.authorization;
+
+    if (webhookSecret) {
+      if (providedSecret !== webhookSecret) {
+        return res.status(401).json({ error: 'Unauthorized webhook call. Secret mismatch.' });
+      }
+    } else if (process.env.NODE_ENV === 'production') {
+      if (!authHeader && !providedSecret) {
+        return res.status(401).json({ error: 'Unauthorized. Pub/Sub authentication required in production.' });
+      }
+    }
+
     try {
       const message = req.body.message;
       if (!message || !message.data) {
@@ -520,16 +1005,15 @@ async function startServer() {
 
         // Re-verify with Google Play to get authoritative new expiry date
         const verification = await verifyGooglePlaySubscriptionToken(purchaseToken, subscriptionId);
-        
-        // Find matching record by purchaseToken in database
-        for (const [uid, rec] of subscriptionDatabase.entries()) {
+
+        // Find matching record by purchaseToken in persistent store
+        for (const rec of subscriptionStore.values()) {
           if (rec.purchaseToken === purchaseToken) {
             rec.subscriptionStatus = verification.subscriptionStatus;
             rec.subscriptionExpiryDate = verification.subscriptionExpiryDate;
             rec.autoRenewing = verification.autoRenewing;
-            rec.updatedAt = new Date().toISOString();
-            subscriptionDatabase.set(uid, rec);
-            console.log(`[Google Play RTDN] Updated subscription for user ${uid} to ${rec.subscriptionStatus}`);
+            await saveSubscriptionRecord(rec);
+            console.log(`[Google Play RTDN] Updated subscription for user ${rec.userId} to ${rec.subscriptionStatus}`);
             break;
           }
         }
@@ -543,16 +1027,25 @@ async function startServer() {
   });
 
   // 7. Handle Cancellation sync from client
-  app.post('/api/billing/cancel-sync', (req, res) => {
-    const { userId = 'usr_001' } = req.body;
-    const record = getOrCreateUserSubscription(userId);
+  app.post('/api/billing/cancel-sync', async (req, res) => {
+    const verifiedUid = await authenticateRequest(req, res);
+    if (!verifiedUid) return;
 
+    const idToken = extractIdToken(req);
+    const subResult = await getSubscriptionRecord(verifiedUid, idToken);
+    if (subResult.unavailable || !subResult.record) {
+      return res.status(503).json({
+        success: false,
+        error: 'Subscription service temporarily unavailable. Please retry shortly.',
+      });
+    }
+
+    const record = subResult.record;
     if (record.subscriptionStatus === 'ACTIVE') {
       // User cancelled auto-renew, but retains access until Play Store expiry date
       record.subscriptionStatus = 'CANCELED_BUT_ACTIVE';
       record.autoRenewing = false;
-      record.updatedAt = new Date().toISOString();
-      subscriptionDatabase.set(userId, record);
+      await saveSubscriptionRecord(record, idToken);
 
       return res.json({
         success: true,
@@ -569,9 +1062,28 @@ async function startServer() {
   });
 
   // 8. Testing & Sandbox simulation endpoint for testing states
-  app.post('/api/billing/simulate', (req, res) => {
+  app.post('/api/billing/simulate', async (req, res) => {
+    // In production, this endpoint must NOT exist or work
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
     const { userId = 'usr_001', targetState, customDaysRemaining } = req.body;
-    const record = getOrCreateUserSubscription(userId);
+    const idToken = extractIdToken(req);
+    const subResult = await getSubscriptionRecord(userId, idToken);
+    const record: UserSubscriptionRecord = subResult.record || {
+      userId,
+      subscriptionStatus: 'TRIAL',
+      trialStartDate: new Date().toISOString(),
+      trialEndDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      subscriptionExpiryDate: null,
+      subscriptionProductId: 'property_agent_pro',
+      subscriptionBasePlan: 'monthly',
+      autoRenewing: false,
+      acknowledged: false,
+      paymentIssueMessage: undefined,
+      updatedAt: new Date().toISOString(),
+    };
 
     const now = new Date();
 
@@ -615,13 +1127,14 @@ async function startServer() {
       record.autoRenewing = false;
     }
 
-    record.updatedAt = new Date().toISOString();
-    subscriptionDatabase.set(userId, record);
+    await saveSubscriptionRecord(record, idToken);
 
     const trialDaysRemaining = Math.max(
       0,
       Math.ceil((new Date(record.trialEndDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
     );
+
+    const simNow = new Date().toISOString();
 
     res.json({
       success: true,
@@ -629,6 +1142,8 @@ async function startServer() {
       subscriptionStatus: record.subscriptionStatus,
       trialStartDate: record.trialStartDate,
       trialEndDate: record.trialEndDate,
+      serverTimestamp: simNow,
+      serverNow: simNow,
       trialDaysRemaining,
       subscriptionExpiryDate: record.subscriptionExpiryDate,
       autoRenewing: record.autoRenewing,

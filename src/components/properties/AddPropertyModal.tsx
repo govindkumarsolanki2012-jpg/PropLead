@@ -55,27 +55,6 @@ const COMMON_AMENITIES = [
   'Solar Water Heating',
 ];
 
-const SAMPLE_PHOTO_PACKS = {
-  flat: [
-    'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=800&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1600566753376-12c8ab7fb75b?w=800&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&auto=format&fit=crop&q=80',
-  ],
-  villa: [
-    'https://images.unsplash.com/photo-1613977257363-707ba9348227?w=800&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?w=800&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?w=800&auto=format&fit=crop&q=80',
-  ],
-  commercial: [
-    'https://images.unsplash.com/photo-1497366216548-37526070297c?w=800&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1497215728101-856f4ea42174?w=800&auto=format&fit=crop&q=80',
-  ],
-  plot: [
-    'https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=800&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?w=800&auto=format&fit=crop&q=80',
-  ],
-};
-
 export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
   isOpen,
   onClose,
@@ -146,11 +125,6 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
     });
   };
 
-  const handleLoadSamplePhotos = () => {
-    const pack = SAMPLE_PHOTO_PACKS[propertyType as keyof typeof SAMPLE_PHOTO_PACKS] || SAMPLE_PHOTO_PACKS.flat;
-    setPhotos(pack);
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -185,7 +159,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
       floor: floor.trim() || undefined,
       facing,
       status,
-      photos: photos.length > 0 ? photos : SAMPLE_PHOTO_PACKS.flat,
+      photos: photos,
       ownerName: ownerName.trim() || 'Direct Owner',
       ownerPhone: ownerPhone.trim(),
       ownerWhatsApp: ownerWhatsApp.trim() || ownerPhone.trim(),
@@ -526,14 +500,6 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
                 3. Property Photos ({photos.length})
               </span>
-              <button
-                type="button"
-                onClick={handleLoadSamplePhotos}
-                className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Auto-fill Sample Photos</span>
-              </button>
             </div>
 
             {/* Photo Previews Grid */}

@@ -1,4 +1,6 @@
+import { Capacitor } from '@capacitor/core';
 import { UserProfile, SubscriptionStatus, GooglePlaySubscriptionProduct } from '../types';
+import { auth } from '../lib/firebase';
 
 export const GOOGLE_PLAY_PRODUCT_ID = 'property_agent_pro';
 export const GOOGLE_PLAY_BASE_PLAN_ID = 'monthly';
@@ -50,23 +52,72 @@ export const DEFAULT_PRODUCT_DETAILS: GooglePlaySubscriptionProduct = {
   ],
 };
 
-/**
- * Calculates remaining trial days accurately based on real trial start date
- */
-export function calculateTrialDaysRemaining(startDateStr: string, endDateStr?: string): number {
-  try {
-    const now = Date.now();
-    let endTimestamp: number;
+let authoritativeServerTimestamp: number | null = null;
+let authoritativeLocalClockSync: number = 0;
 
+/**
+ * Stores authoritative server timestamp and baseline monotonic clock to prevent device clock tampering
+ */
+export function setAuthoritativeServerTime(serverTimestamp: string | number): void {
+  const ts = typeof serverTimestamp === 'number' ? serverTimestamp : new Date(serverTimestamp).getTime();
+  if (!isNaN(ts) && ts > 0) {
+    authoritativeServerTimestamp = ts;
+    authoritativeLocalClockSync = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now()
+      : Date.now();
+  }
+}
+
+/**
+ * Returns current authoritative server timestamp, immune to device clock tampering
+ */
+export function getAuthoritativeServerNow(): number {
+  if (authoritativeServerTimestamp !== null) {
+    const elapsed = (typeof performance !== 'undefined' && performance.now)
+      ? (performance.now() - authoritativeLocalClockSync)
+      : (Date.now() - authoritativeLocalClockSync);
+    return authoritativeServerTimestamp + Math.max(0, elapsed);
+  }
+  return Date.now();
+}
+
+/**
+ * Calculates remaining trial days dynamically from authoritative trialEndDate and serverNow.
+ * Safe fallback: returns 0 when trialEndDate is invalid or missing.
+ * Does NOT assume a fresh 30-day trial.
+ */
+export function calculateTrialDaysRemaining(
+  startDateStr?: string,
+  endDateStr?: string,
+  serverNow?: number | string | Date
+): number {
+  try {
+    // 1. Resolve authoritative reference time
+    let now: number;
+    if (serverNow !== undefined && serverNow !== null) {
+      now = typeof serverNow === 'number' ? serverNow : new Date(serverNow).getTime();
+      if (isNaN(now)) {
+        now = getAuthoritativeServerNow();
+      }
+    } else {
+      now = getAuthoritativeServerNow();
+    }
+
+    // 2. Resolve end timestamp from authoritative trialEndDate
+    let endTimestamp: number;
     if (endDateStr) {
       endTimestamp = new Date(endDateStr).getTime();
-    } else {
+    } else if (startDateStr) {
       const start = new Date(startDateStr).getTime();
       endTimestamp = start + 30 * 24 * 60 * 60 * 1000;
+    } else {
+      // Safe fallback: missing dates, return 0 (never grant 30 days)
+      return 0;
     }
 
     if (isNaN(endTimestamp)) {
-      return 30;
+      // Safe fallback: invalid timestamp, return 0 (never grant 30 days)
+      return 0;
     }
 
     const diffMs = endTimestamp - now;
@@ -74,14 +125,18 @@ export function calculateTrialDaysRemaining(startDateStr: string, endDateStr?: s
     return Math.max(0, days);
   } catch (err) {
     console.error('Error calculating trial days:', err);
-    return 30;
+    // Safe fallback: never grant 30 days on error
+    return 0;
   }
 }
 
 /**
  * Normalized resolution of the current subscription status and feature entitlement
  */
-export function getEffectiveSubscriptionStatus(profile: UserProfile): {
+export function getEffectiveSubscriptionStatus(
+  profile: UserProfile,
+  customServerNow?: number | string | Date
+): {
   status: SubscriptionStatus;
   daysRemaining: number;
   isSubscribed: boolean;
@@ -89,17 +144,23 @@ export function getEffectiveSubscriptionStatus(profile: UserProfile): {
   expiryFormatted?: string;
   displayStatusText: string;
 } {
-  const days = calculateTrialDaysRemaining(profile.trialStartDate, profile.trialEndDate);
-
   // Normalize legacy string flags if present
   let rawStatus = profile.subscriptionStatus;
   if (rawStatus === 'subscribed') rawStatus = 'ACTIVE';
-  if (rawStatus === 'trial') rawStatus = days > 0 ? 'TRIAL' : 'EXPIRED';
   if (rawStatus === 'expired') rawStatus = 'EXPIRED';
 
+  // Server authoritative status takes precedence
   let status: SubscriptionStatus = (rawStatus as SubscriptionStatus) || (profile.isSubscribed ? 'ACTIVE' : 'TRIAL');
 
-  // Check trial expiration
+  const serverNow = customServerNow ?? (profile.serverTimestamp ? new Date(profile.serverTimestamp).getTime() : undefined);
+  let days = calculateTrialDaysRemaining(profile.trialStartDate, profile.trialEndDate, serverNow);
+
+  // If server has authoritatively set status to EXPIRED, days remaining is strictly 0
+  if (status === 'EXPIRED') {
+    days = 0;
+  }
+
+  // Check trial expiration: if trial days reached 0, transition to EXPIRED
   if (status === 'TRIAL' && days <= 0) {
     status = 'EXPIRED';
   }
@@ -116,7 +177,9 @@ export function getEffectiveSubscriptionStatus(profile: UserProfile): {
       });
 
       if (status === 'CANCELED_BUT_ACTIVE' || status === 'ACTIVE') {
-        if (Date.now() > expDate.getTime() && !profile.autoRenewing) {
+        const refNow = serverNow ?? getAuthoritativeServerNow();
+        const refNowMs = typeof refNow === 'number' ? refNow : new Date(refNow).getTime();
+        if (refNowMs > expDate.getTime() && !profile.autoRenewing) {
           status = 'EXPIRED';
         }
       }
@@ -218,9 +281,16 @@ export async function launchGooglePlayPurchase(
       }
     }
 
-    // Standard Google Play Transaction Token Generation
+    // Standard Google Play Transaction Token Handling
     if (!purchaseToken) {
-      // Generate genuine Google Play transaction token structure
+      if (Capacitor.isNativePlatform()) {
+        // Do not use mock purchases in production Android shell
+        return {
+          success: false,
+          error: 'Google Play Billing native bridge is not installed in this Android build. To enable live Google Play purchases, install @capacitor-community/in-app-purchases.',
+        };
+      }
+      // Web / Dev sandbox environment fallback
       const timestamp = Date.now();
       const randomEntropy = Math.random().toString(36).substring(2, 15);
       purchaseToken = `play_tok_${timestamp}_${randomEntropy}_property_agent_pro`;
@@ -228,10 +298,18 @@ export async function launchGooglePlayPurchase(
 
     onProgress?.('Verifying subscription with Google Play Developer API...');
 
-    // Backend verification endpoint
+    // Backend verification endpoint with user auth token
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (idToken) {
+        headers['Authorization'] = `Bearer ${idToken}`;
+      }
+    } catch {}
+
     const verifyRes = await fetch('/api/billing/verify-purchase', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         userId,
         purchaseToken,
@@ -364,9 +442,17 @@ export async function restoreGooglePlayPurchases(
     }
 
     // 3. Query backend verification & restore endpoint
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (idToken) {
+        headers['Authorization'] = `Bearer ${idToken}`;
+      }
+    } catch {}
+
     const res = await fetch('/api/billing/restore-purchases', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         userId,
         purchaseToken,
@@ -461,12 +547,16 @@ export async function simulateBillingState(
     });
     const data = await res.json();
     if (data.success) {
+      if (data.serverTimestamp || data.serverNow) {
+        setAuthoritativeServerTime(data.serverTimestamp || data.serverNow);
+      }
       return {
         success: true,
         profileUpdates: {
           subscriptionStatus: data.subscriptionStatus,
           trialStartDate: data.trialStartDate,
           trialEndDate: data.trialEndDate,
+          serverTimestamp: data.serverTimestamp || data.serverNow,
           trialDaysRemaining: data.trialDaysRemaining,
           subscriptionExpiryDate: data.subscriptionExpiryDate,
           autoRenewing: data.autoRenewing,

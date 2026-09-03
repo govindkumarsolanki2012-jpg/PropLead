@@ -39,7 +39,7 @@ import {
 } from './utils/storage';
 import { Lead, Property, UserProfile, WhatsAppTemplate, FollowUpType, TabType } from './types';
 import { formatRelativeDate } from './utils/formatters';
-import { getEffectiveSubscriptionStatus } from './utils/billing';
+import { getEffectiveSubscriptionStatus, setAuthoritativeServerTime } from './utils/billing';
 import {
   subscribeToAuth,
   signInWithGoogle,
@@ -171,15 +171,29 @@ export function App() {
   // Sync with backend subscription API on startup
   useEffect(() => {
     const syncSubscription = async () => {
+      if (!currentUser) return;
       try {
-        const res = await fetch(`/api/billing/subscription-status?userId=${profile.id}`);
+        const token = await currentUser.getIdToken();
+        if (!token) return;
+
+        const res = await fetch(`/api/billing/subscription-status?userId=${currentUser.uid}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
         if (res.ok) {
           const data = await res.json();
           if (data && data.subscriptionStatus) {
+            if (data.serverTimestamp || data.serverNow) {
+              setAuthoritativeServerTime(data.serverTimestamp || data.serverNow);
+            }
             setProfile((prev) => {
               const updated: UserProfile = {
                 ...prev,
                 subscriptionStatus: data.subscriptionStatus,
+                trialStartDate: data.trialStartDate ?? prev.trialStartDate,
+                trialEndDate: data.trialEndDate ?? prev.trialEndDate,
+                serverTimestamp: data.serverTimestamp || data.serverNow || prev.serverTimestamp,
                 trialDaysRemaining: data.trialDaysRemaining ?? prev.trialDaysRemaining,
                 isSubscribed: data.isSubscribed ?? prev.isSubscribed,
                 subscriptionExpiryDate: data.subscriptionExpiryDate ?? prev.subscriptionExpiryDate,
@@ -196,7 +210,7 @@ export function App() {
       }
     };
     syncSubscription();
-  }, [profile.id]);
+  }, [currentUser]);
 
   // Dark mode effect with local storage persistence & class syncing
   useEffect(() => {

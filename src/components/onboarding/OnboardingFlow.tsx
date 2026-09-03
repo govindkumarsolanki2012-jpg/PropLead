@@ -11,15 +11,15 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
   // Step 1: Splash, Step 2: Welcome, Step 3: Login/Register, Step 4: 3-screen Walkthrough, Step 5: Trial Activation
   const [step, setStep] = useState<number>(1);
   const [loginMethod, setLoginMethod] = useState<'selection' | 'otp'>('selection');
-  const [phoneInput, setPhoneInput] = useState<string>('9820123456');
-  const [otpInput, setOtpInput] = useState<string>('5491');
+  const [phoneInput, setPhoneInput] = useState<string>('');
+  const [otpInput, setOtpInput] = useState<string>('');
   const [isOtpSent, setIsOtpSent] = useState<boolean>(false);
   const [isSigningInGoogle, setIsSigningInGoogle] = useState<boolean>(false);
   const [googleEmail, setGoogleEmail] = useState<string>('');
   const [walkthroughIndex, setWalkthroughIndex] = useState<number>(0);
-  const [agentName, setAgentName] = useState<string>('Rajesh Sharma');
-  const [agencyName, setAgencyName] = useState<string>('Sharma Real Estate Realty');
-  const [city, setCity] = useState<string>('Mumbai / Pune');
+  const [agentName, setAgentName] = useState<string>('');
+  const [agencyName, setAgencyName] = useState<string>('');
+  const [city, setCity] = useState<string>('');
 
   // Auto transition from Splash (Step 1) to Welcome (Step 2) after 1.5 seconds
   useEffect(() => {
@@ -74,16 +74,17 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
 
   const handleFinishOnboarding = () => {
     onComplete({
-      name: agentName || 'Rajesh Sharma',
-      agencyName: agencyName || 'Sharma Real Estate',
-      phone: phoneInput || '9820123456',
+      name: agentName.trim() || 'Property Agent',
+      agencyName: agencyName.trim() || '',
+      phone: phoneInput.trim() || '',
       email: googleEmail || '',
-      city: city || 'Mumbai',
+      city: city.trim() || '',
       isTrialActive: true,
       trialStartDate: new Date().toISOString(),
       trialDaysRemaining: 30,
       isSubscribed: false,
       hasCompletedOnboarding: true,
+      isOnboarded: true,
     });
   };
 
@@ -216,7 +217,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
                     <label className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
                       Enter 4-Digit OTP
                     </label>
-                    <span className="text-[10px] text-emerald-600 font-medium">OTP: 5491 (Auto-filled)</span>
+                    <span className="text-[10px] text-emerald-600 font-medium">OTP: 5491</span>
                   </div>
                   <input
                     type="text"

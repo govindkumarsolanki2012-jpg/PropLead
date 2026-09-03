@@ -120,6 +120,25 @@
         "variables": { "type": "array", "description": "Interpolation variable tags" },
         "isDefault": { "type": "boolean", "description": "System default template" }
       }
+    },
+    "SubscriptionRecord": {
+      "collection": "subscriptions",
+      "path": "subscriptions/{userId}",
+      "description": "Durable verified Google Play subscription and trial status per user",
+      "fields": {
+        "userId": { "type": "string", "description": "Agent User ID" },
+        "subscriptionStatus": { "type": "string", "description": "TRIAL | ACTIVE | CANCELED_BUT_ACTIVE | PAYMENT_ISSUE | EXPIRED" },
+        "trialStartDate": { "type": "string", "description": "ISO timestamp of trial commencement" },
+        "trialEndDate": { "type": "string", "description": "ISO timestamp of trial completion" },
+        "subscriptionExpiryDate": { "type": "string", "description": "ISO timestamp of Play Store expiration", "optional": true },
+        "subscriptionProductId": { "type": "string", "description": "Product ID (property_agent_pro)" },
+        "subscriptionBasePlan": { "type": "string", "description": "Base Plan ID (monthly)" },
+        "purchaseToken": { "type": "string", "description": "Google Play purchase token", "optional": true },
+        "orderId": { "type": "string", "description": "Google Play Order ID", "optional": true },
+        "autoRenewing": { "type": "boolean", "description": "Auto renew state" },
+        "acknowledged": { "type": "boolean", "description": "Play Store acknowledgment state" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
+      }
     }
   }
 }

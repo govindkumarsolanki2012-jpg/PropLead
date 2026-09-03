@@ -22,13 +22,19 @@ service cloud.firestore {
         (!('isSubscribed' in request.resource.data) || request.resource.data.isSubscribed == false || request.resource.data.subscriptionStatus == 'TRIAL');
 
       // Update: user can update profile details (name, agency, phone, city, rera, etc.)
-      // Prevent client-side arbitrary tampering of active subscription state without purchase verification
-      allow update: if isOwner(userId) && (
-        // Either subscription status is unchanged
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['isSubscribed', 'subscriptionStatus'])) ||
-        // Or if changed to active, must include a verified purchaseToken
-        (request.resource.data.subscriptionStatus == 'TRIAL' || ('purchaseToken' in request.resource.data && request.resource.data.purchaseToken is string && request.resource.data.purchaseToken.size() > 10))
-      );
+      // Prevent client-side arbitrary tampering of active subscription state
+      allow update: if isOwner(userId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'isSubscribed',
+          'subscriptionStatus',
+          'subscriptionExpiryDate',
+          'purchaseToken',
+          'orderId',
+          'trialStartDate',
+          'trialEndDate',
+          'subscriptionProductId',
+          'subscriptionBasePlan'
+        ]);
 
       // Delete: only the owner can delete their own account
       allow delete: if isOwner(userId);
@@ -49,6 +55,13 @@ service cloud.firestore {
       match /templates/{templateId} {
         allow read, write: if isOwner(userId);
       }
+    }
+
+    // Subscriptions collection - isolated to the owning agent / authenticated user for reading
+    // Client-side writes are strictly forbidden. Only backend/service-account infrastructure may write.
+    match /subscriptions/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if false;
     }
 
     // Fallback: deny all other paths

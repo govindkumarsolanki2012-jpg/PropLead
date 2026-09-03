@@ -10,10 +10,18 @@ export interface MigrationResult {
   error?: string;
 }
 
+const DEMO_LEAD_IDS = new Set([
+  'lead_100', 'lead_101', 'lead_102', 'lead_103', 'lead_104', 'lead_105', 'lead_106', 'lead_107'
+]);
+const DEMO_PROP_IDS = new Set([
+  'prop_201', 'prop_202', 'prop_203', 'prop_204', 'prop_205', 'prop_206', 'prop_207', 'prop_208'
+]);
+
 /**
  * Safely migrates existing device localStorage leads, properties, and profile
  * to the authenticated agent's Firestore cloud container.
  * Guaranteed zero data loss and prevents duplicate imports.
+ * Filters out and purges any legacy demo data from ever reaching or staying in Firestore.
  */
 export async function syncLocalDataToFirestore(
   userId: string,
@@ -25,7 +33,6 @@ export async function syncLocalDataToFirestore(
   }
 
   const migrationKey = `proplead_migrated_v1_${userId}`;
-  const alreadyMigrated = localStorage.getItem(migrationKey);
 
   try {
     // 1. Check if user profile already exists in Firestore
@@ -47,15 +54,38 @@ export async function syncLocalDataToFirestore(
     const localProperties = getStoredProperties();
 
     const batch = writeBatch(db);
+    let batchOperations = 0;
     let leadsToUpload = 0;
     let propsToUpload = 0;
 
+    // Purge any legacy demo leads from user's Firestore collection if present
+    for (const docSnap of existingLeadsSnap.docs) {
+      if (DEMO_LEAD_IDS.has(docSnap.id)) {
+        batch.delete(docSnap.ref);
+        batchOperations++;
+      }
+    }
+
+    // Purge any legacy demo properties from user's Firestore collection if present
+    for (const docSnap of existingPropsSnap.docs) {
+      if (DEMO_PROP_IDS.has(docSnap.id)) {
+        batch.delete(docSnap.ref);
+        batchOperations++;
+      }
+    }
+
     // A. Migrate Profile if not already in Firestore
     if (!userSnap.exists()) {
+      const isDemoName = localProfile.name === 'Rajesh Sharma' || localProfile.name === 'Vikram Malhotra';
+      const isDemoPhone = localProfile.phone === '9820123456';
+      const cleanName = userName || (!isDemoName ? localProfile.name : '') || 'Property Agent';
+      const cleanPhone = !isDemoPhone ? (localProfile.phone || '') : '';
+
       const mergedProfile: Partial<UserProfile> = {
         ...localProfile,
         id: userId,
-        name: userName || localProfile.name || 'Property Agent',
+        name: cleanName,
+        phone: cleanPhone,
         email: userEmail || localProfile.email || '',
         isOnboarded: true,
         isTrialActive: localProfile.isTrialActive ?? true,
@@ -65,27 +95,32 @@ export async function syncLocalDataToFirestore(
         isSubscribed: localProfile.isSubscribed || false,
       };
       batch.set(userDocRef, mergedProfile, { merge: true });
+      batchOperations++;
     }
 
-    // B. Migrate Leads (only those not already in Firestore)
-    for (const lead of localLeads) {
+    // B. Migrate Leads (only real user-created leads, never demo data)
+    const validLocalLeads = localLeads.filter((l) => l && !DEMO_LEAD_IDS.has(l.id));
+    for (const lead of validLocalLeads) {
       if (!existingLeadIds.has(lead.id)) {
         const leadRef = doc(db, 'users', userId, 'leads', lead.id);
         batch.set(leadRef, lead, { merge: true });
         leadsToUpload++;
+        batchOperations++;
       }
     }
 
-    // C. Migrate Properties (only those not already in Firestore)
-    for (const property of localProperties) {
+    // C. Migrate Properties (only real user-created properties, never demo data)
+    const validLocalProperties = localProperties.filter((p) => p && !DEMO_PROP_IDS.has(p.id));
+    for (const property of validLocalProperties) {
       if (!existingPropIds.has(property.id)) {
         const propRef = doc(db, 'users', userId, 'properties', property.id);
         batch.set(propRef, property, { merge: true });
         propsToUpload++;
+        batchOperations++;
       }
     }
 
-    if (leadsToUpload > 0 || propsToUpload > 0 || !userSnap.exists()) {
+    if (batchOperations > 0) {
       await batch.commit();
     }
 
@@ -102,7 +137,7 @@ export async function syncLocalDataToFirestore(
       migrated: false,
       leadsUploaded: 0,
       propertiesUploaded: 0,
-      error: err?.message || 'Failed to sync local data to cloud',
+      error: err?.message || 'Migration failed',
     };
   }
 }

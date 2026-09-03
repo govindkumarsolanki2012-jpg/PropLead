@@ -1,7 +1,7 @@
-import { Lead, UserProfile, PhoneContact, WhatsAppTemplate, Property } from '../types';
-import { INITIAL_LEADS, INITIAL_USER_PROFILE, INITIAL_PROPERTIES } from '../data/initialData';
+import { Lead, UserProfile, WhatsAppTemplate, Property } from '../types';
+import { INITIAL_USER_PROFILE } from '../data/initialData';
 import { WHATSAPP_TEMPLATES } from './whatsapp';
-import { formatIndianCurrency, formatBudgetRange } from './formatters';
+import { formatBudgetRange } from './formatters';
 
 const STORAGE_KEYS = {
   LEADS: 'proplead_leads_v1',
@@ -12,17 +12,30 @@ const STORAGE_KEYS = {
   THEME: 'proplead_theme_v1',
 };
 
+// Known legacy demo IDs to prevent old cached demo items from showing up
+const DEMO_LEAD_IDS = new Set([
+  'lead_100', 'lead_101', 'lead_102', 'lead_103', 'lead_104', 'lead_105', 'lead_106', 'lead_107'
+]);
+const DEMO_PROP_IDS = new Set([
+  'prop_201', 'prop_202', 'prop_203', 'prop_204', 'prop_205', 'prop_206', 'prop_207', 'prop_208'
+]);
+
 export function getStoredProperties(): Property[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.PROPERTIES);
     if (!raw) {
-      localStorage.setItem(STORAGE_KEYS.PROPERTIES, JSON.stringify(INITIAL_PROPERTIES));
-      return INITIAL_PROPERTIES;
+      return [];
     }
-    return JSON.parse(raw);
+    const parsed: Property[] = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const cleaned = parsed.filter(p => p && !DEMO_PROP_IDS.has(p.id));
+    if (cleaned.length !== parsed.length) {
+      localStorage.setItem(STORAGE_KEYS.PROPERTIES, JSON.stringify(cleaned));
+    }
+    return cleaned;
   } catch (err) {
     console.error('Error loading properties from storage:', err);
-    return INITIAL_PROPERTIES;
+    return [];
   }
 }
 
@@ -38,13 +51,18 @@ export function getStoredLeads(): Lead[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.LEADS);
     if (!raw) {
-      localStorage.setItem(STORAGE_KEYS.LEADS, JSON.stringify(INITIAL_LEADS));
-      return INITIAL_LEADS;
+      return [];
     }
-    return JSON.parse(raw);
+    const parsed: Lead[] = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const cleaned = parsed.filter(l => l && !DEMO_LEAD_IDS.has(l.id));
+    if (cleaned.length !== parsed.length) {
+      localStorage.setItem(STORAGE_KEYS.LEADS, JSON.stringify(cleaned));
+    }
+    return cleaned;
   } catch (err) {
     console.error('Error loading leads from storage:', err);
-    return INITIAL_LEADS;
+    return [];
   }
 }
 
@@ -60,10 +78,15 @@ export function getStoredProfile(): UserProfile {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.PROFILE);
     if (!raw) {
-      localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(INITIAL_USER_PROFILE));
       return INITIAL_USER_PROFILE;
     }
-    return JSON.parse(raw);
+    const parsed: UserProfile = JSON.parse(raw);
+    // If the profile was previously seeded with the demo agent 'Rajesh Sharma'
+    if (parsed && (parsed.id === 'usr_001' || (parsed.name === 'Rajesh Sharma' && parsed.phone === '9820123456'))) {
+      localStorage.removeItem(STORAGE_KEYS.PROFILE);
+      return INITIAL_USER_PROFILE;
+    }
+    return parsed || INITIAL_USER_PROFILE;
   } catch (err) {
     console.error('Error loading profile from storage:', err);
     return INITIAL_USER_PROFILE;
@@ -88,13 +111,6 @@ export function saveStoredTemplates(templates: WhatsAppTemplate[]): void {
   } catch (err) {
     console.error('Error saving templates to storage:', err);
   }
-}
-
-export function resetToSampleData(): { leads: Lead[]; properties: Property[]; profile: UserProfile } {
-  localStorage.setItem(STORAGE_KEYS.LEADS, JSON.stringify(INITIAL_LEADS));
-  localStorage.setItem(STORAGE_KEYS.PROPERTIES, JSON.stringify(INITIAL_PROPERTIES));
-  localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(INITIAL_USER_PROFILE));
-  return { leads: INITIAL_LEADS, properties: INITIAL_PROPERTIES, profile: INITIAL_USER_PROFILE };
 }
 
 export function clearAllData(): void {
@@ -171,17 +187,3 @@ export function exportLeadsToCSV(leads: Lead[], agentName?: string): void {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
-
-/**
- * Sample phone contacts for import simulation
- */
-export const SAMPLE_PHONE_CONTACTS: PhoneContact[] = [
-  { id: 'c1', name: 'Alok Nath Mishra', phone: '9820011223', email: 'alok.mishra@gmail.com' },
-  { id: 'c2', name: 'Dr. Smita Kulkarni', phone: '9845099881', email: 'dr.smita.k@apollo.org' },
-  { id: 'c3', name: 'Harish Rathi (Builder Rep)', phone: '9988112233', email: 'harish.rathi@lodha.com' },
-  { id: 'c4', name: 'Mohit Agarwal (Investor)', phone: '9765123488', email: 'mohit.agarwal@invest.co' },
-  { id: 'c5', name: 'Shalini Narang', phone: '9810554433', email: 'shalini.narang@yahoo.com' },
-  { id: 'c6', name: 'Deepak Chawla', phone: '9899123400', email: 'deepak.c@techm.com' },
-  { id: 'c7', name: 'Gautam Singhania', phone: '9821887766', email: 'gautam.s@gmail.com' },
-  { id: 'c8', name: 'Ritu Kapoor', phone: '9440998877', email: 'ritu.kapoor@tcs.com' },
-];
