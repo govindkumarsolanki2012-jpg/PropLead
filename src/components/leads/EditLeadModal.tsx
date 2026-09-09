@@ -34,9 +34,9 @@ export const EditLeadModal: React.FC<EditLeadModalProps> = ({
   const [email, setEmail] = useState<string>(lead.email || '');
   const [requirement, setRequirement] = useState<RequirementType>(lead.requirement);
   const [propertyType, setPropertyType] = useState<PropertyType>(lead.propertyType);
-  const [bhk, setBhk] = useState<string>(lead.bhk || '2 BHK');
+  const [bhk, setBhk] = useState<string>(lead.bhk || '');
   const [budgetMin, setBudgetMin] = useState<number | undefined>(lead.budgetMin);
-  const [budgetMax, setBudgetMax] = useState<number>(lead.budgetMax || 6500000);
+  const [budgetMax, setBudgetMax] = useState<number | undefined>(lead.budgetMax);
   
   const [preferredCity, setPreferredCity] = useState<string>(
     lead.preferredCity || initialLoc.preferredCity || ''

@@ -140,7 +140,7 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
         whatsapp: c.phone || '',
         requirement: defaultRequirement,
         propertyType: 'flat',
-        bhk: '2 BHK',
+        bhk: undefined,
         budgetMin: undefined,
         budgetMax: undefined,
         preferredLocations: c.suggestedLocality ? [c.suggestedLocality] : [],

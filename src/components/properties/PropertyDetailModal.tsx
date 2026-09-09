@@ -332,7 +332,10 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
               </h2>
               <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 dark:text-slate-400">
                 <span className="font-bold text-slate-700 dark:text-slate-300">
-                  {property.bhk} • {FURNISHING_LABELS[property.furnishing]}
+                  {property.bhk}
+                  {property.furnishing && FURNISHING_LABELS[property.furnishing]
+                    ? ` • ${FURNISHING_LABELS[property.furnishing]}`
+                    : ''}
                 </span>
                 {property.facing && <span>• {property.facing} Facing</span>}
               </div>
@@ -449,7 +452,9 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
                 <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
                   <span className="text-[10px] text-slate-400 block font-bold uppercase">Furnishing</span>
                   <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                    {FURNISHING_LABELS[property.furnishing]}
+                    {property.furnishing && FURNISHING_LABELS[property.furnishing]
+                      ? FURNISHING_LABELS[property.furnishing]
+                      : 'Not Specified'}
                   </span>
                 </div>
 

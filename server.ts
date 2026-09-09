@@ -221,45 +221,111 @@ export async function verifyFirebaseIdToken(token: string): Promise<VerifiedFire
   }
 }
 
-async function getFirestoreAuthToken(idToken?: string): Promise<string | null> {
-  // 1. If an ID Token is provided in the request from Firebase Auth, use it for reads
-  if (idToken) {
-    return idToken;
+function parseServiceAccountCredentials(raw?: string): any | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  // If user provided a standard Google API key (starts with 'AIza'), this is NOT a service account JSON
+  if (trimmed.startsWith('AIza')) {
+    return null;
   }
 
-  // 2. If a Google Play Service Account Key is configured, use its OAuth2 token
-  const serviceAccountKey = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY;
-  if (serviceAccountKey) {
+  // 1. Raw JSON string
+  if (trimmed.startsWith('{')) {
     try {
-      let credentials: any;
-      if (serviceAccountKey.trim().startsWith('{')) {
-        credentials = JSON.parse(serviceAccountKey);
-      } else {
-        const decoded = Buffer.from(serviceAccountKey, 'base64').toString('utf8');
-        credentials = JSON.parse(decoded);
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object' && (parsed.client_email || parsed.type === 'service_account')) {
+        return parsed;
       }
+    } catch {
+      // Invalid JSON string
+    }
+  }
 
-      const auth = new google.auth.GoogleAuth({
-        credentials,
-        scopes: ['https://www.googleapis.com/auth/datastore'],
-      });
-      const client = await auth.getClient();
-      const accessTokenResponse = await client.getAccessToken();
-      if (accessTokenResponse?.token) {
-        return accessTokenResponse.token;
+  // 2. File path to credentials JSON file
+  if ((trimmed.endsWith('.json') || trimmed.startsWith('/') || trimmed.startsWith('./')) && fs.existsSync(trimmed)) {
+    try {
+      const content = fs.readFileSync(trimmed, 'utf8').trim();
+      if (content.startsWith('{')) {
+        const parsed = JSON.parse(content);
+        if (parsed && typeof parsed === 'object' && (parsed.client_email || parsed.type === 'service_account')) {
+          return parsed;
+        }
       }
-    } catch (err) {
-      console.warn('[Firestore Persistence] Service account auth error:', err);
+    } catch {
+      // Ignore file error
+    }
+  }
+
+  // 3. Base64 encoded JSON string
+  // A base64-encoded JSON object starting with '{' begins with 'ey' in base64
+  if (trimmed.startsWith('ey')) {
+    try {
+      const decoded = Buffer.from(trimmed, 'base64').toString('utf8').trim();
+      if (decoded.startsWith('{')) {
+        const parsed = JSON.parse(decoded);
+        if (parsed && typeof parsed === 'object' && (parsed.client_email || parsed.type === 'service_account')) {
+          return parsed;
+        }
+      }
+    } catch {
+      // Ignore base64 error
     }
   }
 
   return null;
 }
 
+let cachedDatastoreToken: { token: string; expiresAt: number } | null = null;
+
+async function getFirestoreServiceAccountToken(): Promise<string | null> {
+  const credentials = parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY);
+  if (!credentials) return null;
+
+  const now = Date.now();
+  if (cachedDatastoreToken && now < cachedDatastoreToken.expiresAt) {
+    return cachedDatastoreToken.token;
+  }
+
+  try {
+    const auth = new google.auth.GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/datastore'],
+    });
+    const client = await auth.getClient();
+    const tokenResponse = await client.getAccessToken();
+    if (tokenResponse?.token) {
+      // Cache token for 50 minutes (tokens typically valid for 60 min)
+      cachedDatastoreToken = {
+        token: tokenResponse.token,
+        expiresAt: now + 50 * 60 * 1000,
+      };
+      return tokenResponse.token;
+    }
+  } catch (err) {
+    console.warn('[Firestore Persistence] Service account auth error:', err);
+  }
+
+  return null;
+}
+
+async function getFirestoreReadToken(idToken?: string): Promise<string | null> {
+  // 1. If an ID Token is provided in the request from Firebase Auth, use it for reads
+  if (idToken) {
+    return idToken;
+  }
+  // 2. Otherwise try service account token if configured
+  return getFirestoreServiceAccountToken();
+}
+
 async function syncSubscriptionToFirestore(record: UserSubscriptionRecord, idToken?: string): Promise<boolean> {
   try {
-    const token = await getFirestoreAuthToken(idToken);
+    // Only a Service Account token can write to /subscriptions/{userId}
+    // (Firebase Security Rules specify: allow write: if false; which denies client ID tokens)
+    const token = await getFirestoreServiceAccountToken();
     if (!token) {
+      // Remote Firestore sync skipped (no service account configured; disk persistence active)
       return false;
     }
 
@@ -296,9 +362,9 @@ export interface FirestoreFetchResult {
 
 async function fetchSubscriptionFromFirestore(userId: string, idToken?: string): Promise<FirestoreFetchResult> {
   try {
-    const token = await getFirestoreAuthToken(idToken);
+    const token = await getFirestoreReadToken(idToken);
     if (!token) {
-      return { status: 'ERROR', record: null };
+      return { status: 'NOT_FOUND', record: null };
     }
 
     const docUrl = `${FIRESTORE_REST_BASE}/subscriptions/${encodeURIComponent(userId)}`;
@@ -322,7 +388,7 @@ async function fetchSubscriptionFromFirestore(userId: string, idToken?: string):
     if (parsed) {
       return { status: 'FOUND', record: parsed };
     }
-    return { status: 'ERROR', record: null };
+    return { status: 'NOT_FOUND', record: null };
   } catch (err) {
     console.warn('[Firestore Persistence] Error reading subscription from Firestore:', err);
     return { status: 'ERROR', record: null };
@@ -331,7 +397,7 @@ async function fetchSubscriptionFromFirestore(userId: string, idToken?: string):
 
 async function fetchUserProfileCreatedAtFromFirestore(userId: string, idToken?: string): Promise<string | null> {
   try {
-    const token = await getFirestoreAuthToken(idToken);
+    const token = await getFirestoreReadToken(idToken);
     if (!token) return null;
     const docUrl = `${FIRESTORE_REST_BASE}/users/${encodeURIComponent(userId)}`;
     const res = await fetch(docUrl, {
@@ -363,24 +429,13 @@ export async function getSubscriptionRecord(
     return { record: remote.record, unavailable: false };
   }
 
-  if (remote.status === 'ERROR') {
-    // Firestore is unavailable or experiencing network outage.
-    // If we have an existing cached record for this user, serve it safely.
-    if (subscriptionStore.has(userId)) {
-      console.log(`[Subscription Persistence] Serving cached record for user ${userId} during Firestore outage.`);
-      return { record: subscriptionStore.get(userId)!, unavailable: false };
-    }
-
-    // FAIL CLOSED:
-    // DO NOT create a new trial!
-    // DO NOT extend an existing trial!
-    // DO NOT assume the user is new!
-    // DO NOT activate Pro!
-    console.warn(`[Subscription Persistence] Firestore unavailable and no cached record for user ${userId}. Failing closed.`);
-    return { record: null, unavailable: true };
+  // 2. If cached in durable disk store, return it
+  if (subscriptionStore.has(userId)) {
+    return { record: subscriptionStore.get(userId)!, unavailable: false };
   }
 
-  // 2. remote.status === 'NOT_FOUND': User does not yet have a record in /subscriptions/{userId}
+  // 3. remote.status === 'NOT_FOUND' or remote store unconfigured:
+  // User does not yet have a record in /subscriptions/{userId}
   // Check if user already had an existing account in /users/{userId} to prevent duplicate/repeated trials
   const userCreatedAt = await fetchUserProfileCreatedAtFromFirestore(userId, idToken);
 
@@ -492,20 +547,12 @@ let androidPublisherClient: any = null;
 function getAndroidPublisherClient() {
   if (androidPublisherClient) return androidPublisherClient;
 
-  const serviceAccountKey = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY;
-  if (!serviceAccountKey) {
+  const credentials = parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY);
+  if (!credentials) {
     return null;
   }
 
   try {
-    let credentials: any;
-    if (serviceAccountKey.trim().startsWith('{')) {
-      credentials = JSON.parse(serviceAccountKey);
-    } else {
-      const decoded = Buffer.from(serviceAccountKey, 'base64').toString('utf8');
-      credentials = JSON.parse(decoded);
-    }
-
     const auth = new google.auth.GoogleAuth({
       credentials,
       scopes: ['https://www.googleapis.com/auth/androidpublisher'],
@@ -736,7 +783,7 @@ async function startServer() {
     res.json({
       status: 'ok',
       service: 'proplead-billing-server',
-      googlePlayApiConfigured: Boolean(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY),
+      googlePlayApiConfigured: Boolean(parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY)),
       timestamp: new Date().toISOString(),
     });
   });

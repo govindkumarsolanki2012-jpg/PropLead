@@ -394,9 +394,11 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
                           {property.facing}
                         </span>
                       )}
-                      <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium rounded-md">
-                        {FURNISHING_LABELS[property.furnishing]}
-                      </span>
+                      {property.furnishing && FURNISHING_LABELS[property.furnishing] && (
+                        <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium rounded-md">
+                          {FURNISHING_LABELS[property.furnishing]}
+                        </span>
+                      )}
                     </div>
 
                     {/* Matching Leads Pill & Action Bar */}

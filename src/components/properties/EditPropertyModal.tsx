@@ -67,7 +67,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
   const [title, setTitle] = useState<string>(property?.title || '');
   const [transactionType, setTransactionType] = useState<PropertyTransactionType>(property?.transactionType || 'sale');
   const [propertyType, setPropertyType] = useState<PropertyType>(property?.propertyType || 'flat');
-  const [bhk, setBhk] = useState<string>(property?.bhk || '2 BHK');
+  const [bhk, setBhk] = useState<string>(property?.bhk || '');
   const [price, setPrice] = useState<number>(property?.price || 0);
   const [priceNegotiable, setPriceNegotiable] = useState<boolean>(property?.priceNegotiable ?? true);
   const [superBuiltUpAreaSqFt, setSuperBuiltUpAreaSqFt] = useState<number | undefined>(property?.superBuiltUpAreaSqFt);
@@ -97,7 +97,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
       setTitle(property.title || '');
       setTransactionType(property.transactionType || 'sale');
       setPropertyType(property.propertyType || 'flat');
-      setBhk(property.bhk || '2 BHK');
+      setBhk(property.bhk || '');
       setPrice(property.price || 0);
       setPriceNegotiable(property.priceNegotiable ?? true);
       setSuperBuiltUpAreaSqFt(property.superBuiltUpAreaSqFt);

@@ -4,10 +4,10 @@ import { RequirementType } from '../../types';
 import { formatIndianCurrency } from '../../utils/formatters';
 
 interface BudgetCustomizerProps {
-  requirement: RequirementType;
+  requirement?: RequirementType | '';
   budgetMin?: number;
-  budgetMax: number;
-  onChange: (min: number | undefined, max: number) => void;
+  budgetMax?: number;
+  onChange: (min: number | undefined, max: number | undefined) => void;
 }
 
 type BudgetUnit = 'lakh' | 'crore' | 'thousand' | 'exact';
@@ -21,19 +21,19 @@ export const BudgetCustomizer: React.FC<BudgetCustomizerProps> = ({
   const isRent = requirement === 'rent' || requirement === 'lease';
 
   const [isCustomOpen, setIsCustomOpen] = useState<boolean>(false);
-  const [isRangeMode, setIsRangeMode] = useState<boolean>(!!budgetMin && budgetMin < budgetMax);
+  const [isRangeMode, setIsRangeMode] = useState<boolean>(Boolean(budgetMin && budgetMax && budgetMin < budgetMax));
 
   // Unit selection
   const [unit, setUnit] = useState<BudgetUnit>(() => {
     if (isRent) {
-      return budgetMax >= 100000 ? 'lakh' : 'thousand';
+      return (budgetMax && budgetMax >= 100000) ? 'lakh' : 'thousand';
     }
-    return budgetMax >= 10000000 ? 'crore' : 'lakh';
+    return (budgetMax && budgetMax >= 10000000) ? 'crore' : 'lakh';
   });
 
   // Numeric inputs based on selected unit
-  const getUnitValue = (rupees: number, u: BudgetUnit): string => {
-    if (!rupees || isNaN(rupees)) return '0';
+  const getUnitValue = (rupees: number | undefined, u: BudgetUnit): string => {
+    if (!rupees || isNaN(rupees)) return '';
     if (u === 'crore') return (rupees / 10000000).toString();
     if (u === 'lakh') return (rupees / 100000).toString();
     if (u === 'thousand') return (rupees / 1000).toString();
@@ -52,6 +52,8 @@ export const BudgetCustomizer: React.FC<BudgetCustomizerProps> = ({
     setCustomValInput(getUnitValue(budgetMax, unit));
     if (budgetMin) {
       setCustomMinInput(getUnitValue(budgetMin, unit));
+    } else {
+      setCustomMinInput('');
     }
   }, [budgetMax, budgetMin, unit]);
 
@@ -112,7 +114,7 @@ export const BudgetCustomizer: React.FC<BudgetCustomizerProps> = ({
   };
 
   const handleStepDelta = (delta: number) => {
-    let currentRupees = budgetMax;
+    let currentRupees = budgetMax || (isRent ? 25000 : 5000000);
     let newRupees = Math.max(1000, currentRupees + delta);
     let newMin = budgetMin;
     if (budgetMin && isRangeMode) {
@@ -123,7 +125,7 @@ export const BudgetCustomizer: React.FC<BudgetCustomizerProps> = ({
   };
 
   // Convert number to full words representation
-  const formatInIndianWords = (amount: number): string => {
+  const formatInIndianWords = (amount?: number): string => {
     if (!amount) return 'Zero';
     if (amount >= 10000000) {
       const cr = (amount / 10000000).toFixed(2).replace(/\.00$/, '');
@@ -140,7 +142,7 @@ export const BudgetCustomizer: React.FC<BudgetCustomizerProps> = ({
     return `₹${amount.toLocaleString('en-IN')}`;
   };
 
-  const isCurrentPreset = presets.some((p) => p.max === budgetMax && (!isRangeMode || budgetMin === p.min));
+  const isCurrentPreset = Boolean(budgetMax && presets.some((p) => p.max === budgetMax && (!isRangeMode || budgetMin === p.min)));
 
   return (
     <div className="space-y-2.5">
@@ -154,16 +156,17 @@ export const BudgetCustomizer: React.FC<BudgetCustomizerProps> = ({
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/70 px-2.5 py-0.5 rounded-lg border border-emerald-200 dark:border-emerald-800/60 shadow-2xs">
-            {budgetMin && budgetMin < budgetMax
-              ? `${formatIndianCurrency(budgetMin)} - ${formatIndianCurrency(budgetMax)}`
-              : formatIndianCurrency(budgetMax)}
-            {isRent ? ' / mo' : ''}
+            {budgetMax
+              ? `${budgetMin && budgetMin < budgetMax
+                  ? `${formatIndianCurrency(budgetMin)} - ${formatIndianCurrency(budgetMax)}`
+                  : formatIndianCurrency(budgetMax)}${isRent ? ' / mo' : ''}`
+              : 'Flexible / Not Set'}
           </span>
           <button
             type="button"
             onClick={() => setIsCustomOpen(!isCustomOpen)}
             className={`p-1 rounded-lg border transition-all ${
-              isCustomOpen || !isCurrentPreset
+              isCustomOpen || (!isCurrentPreset && budgetMax !== undefined)
                 ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
                 : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
             }`}
@@ -177,16 +180,22 @@ export const BudgetCustomizer: React.FC<BudgetCustomizerProps> = ({
       {/* Quick Presets Grid */}
       <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
         {presets.map((preset) => {
-          const isSelected = budgetMax === preset.max;
+          const isSelected = Boolean(budgetMax && budgetMax === preset.max);
           return (
             <button
               key={preset.label}
               type="button"
               onClick={() => {
-                const minVal = isRangeMode ? preset.min : undefined;
-                onChange(minVal, preset.max);
-                setCustomValInput(getUnitValue(preset.max, unit));
-                if (minVal) setCustomMinInput(getUnitValue(minVal, unit));
+                if (isSelected) {
+                  onChange(undefined, undefined);
+                  setCustomValInput('');
+                  setCustomMinInput('');
+                } else {
+                  const minVal = isRangeMode ? preset.min : undefined;
+                  onChange(minVal, preset.max);
+                  setCustomValInput(getUnitValue(preset.max, unit));
+                  if (minVal) setCustomMinInput(getUnitValue(minVal, unit));
+                }
               }}
               className={`py-1.5 px-1 rounded-xl text-xs font-semibold border transition-all text-center ${
                 isSelected && !isCustomOpen
@@ -203,7 +212,7 @@ export const BudgetCustomizer: React.FC<BudgetCustomizerProps> = ({
       {/* Custom Budget Details Panel (Always accessible or expandable) */}
       <div
         className={`p-3 rounded-2xl border transition-all ${
-          isCustomOpen || !isCurrentPreset
+          isCustomOpen || (!isCurrentPreset && budgetMax !== undefined)
             ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800/70 shadow-xs'
             : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
         }`}
@@ -221,7 +230,7 @@ export const BudgetCustomizer: React.FC<BudgetCustomizerProps> = ({
             onClick={() => {
               const nextMode = !isRangeMode;
               setIsRangeMode(nextMode);
-              if (nextMode && !budgetMin) {
+              if (nextMode && !budgetMin && budgetMax) {
                 const autoMin = Math.round(budgetMax * 0.85);
                 onChange(autoMin, budgetMax);
                 setCustomMinInput(getUnitValue(autoMin, unit));
@@ -372,16 +381,22 @@ export const BudgetCustomizer: React.FC<BudgetCustomizerProps> = ({
 
         {/* Real-time description */}
         <div className="mt-2 text-center text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
-          Target:{' '}
-          <span className="font-extrabold">
-            {formatInIndianWords(budgetMax)}
-          </span>{' '}
-          ({formatIndianCurrency(budgetMax)})
-          {budgetMin && budgetMin < budgetMax && (
-            <span className="text-slate-500 dark:text-slate-400">
-              {' '}
-              • Range starts from {formatInIndianWords(budgetMin)}
-            </span>
+          {budgetMax ? (
+            <>
+              Target:{' '}
+              <span className="font-extrabold">
+                {formatInIndianWords(budgetMax)}
+              </span>{' '}
+              ({formatIndianCurrency(budgetMax)})
+              {budgetMin && budgetMin < budgetMax && (
+                <span className="text-slate-500 dark:text-slate-400">
+                  {' '}
+                  • Range starts from {formatInIndianWords(budgetMin)}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-slate-400 font-normal">No budget limit set (Flexible / Open Budget)</span>
           )}
         </div>
       </div>

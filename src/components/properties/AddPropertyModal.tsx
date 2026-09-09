@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   X,
   Building,
@@ -67,28 +67,19 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
   const [title, setTitle] = useState<string>('');
   const [transactionType, setTransactionType] = useState<PropertyTransactionType>('sale');
   const [propertyType, setPropertyType] = useState<PropertyType>('flat');
-  const [bhk, setBhk] = useState<string>('3 BHK');
-  const [price, setPrice] = useState<number>(7500000); // 75 Lakhs default
-  const [priceUnit, setPriceUnit] = useState<'lakh' | 'crore' | 'k' | 'exact'>('lakh');
-  const [priceNegotiable, setPriceNegotiable] = useState<boolean>(true);
-  const [superBuiltUpAreaSqFt, setSuperBuiltUpAreaSqFt] = useState<number>(1550);
-  const [carpetAreaSqFt, setCarpetAreaSqFt] = useState<number>(1250);
-  const [locality, setLocality] = useState<string>('MVP Colony');
-  const [city, setCity] = useState<string>(profile?.city?.split('/')[0]?.trim() || 'Visakhapatnam');
-  const [furnishing, setFurnishing] = useState<FurnishingStatus>('semi_furnished');
-  const [floor, setFloor] = useState<string>('3rd of 6 Floors');
-  const [facing, setFacing] = useState<FacingDirection>('East');
+  const [bhk, setBhk] = useState<string>('');
+  const [price, setPrice] = useState<number | ''>('');
+  const [priceNegotiable, setPriceNegotiable] = useState<boolean>(false);
+  const [superBuiltUpAreaSqFt, setSuperBuiltUpAreaSqFt] = useState<number | ''>('');
+  const [carpetAreaSqFt, setCarpetAreaSqFt] = useState<number | ''>('');
+  const [locality, setLocality] = useState<string>('');
+  const [city, setCity] = useState<string>('');
+  const [furnishing, setFurnishing] = useState<FurnishingStatus | ''>('');
+  const [floor, setFloor] = useState<string>('');
+  const [facing, setFacing] = useState<FacingDirection | ''>('');
   const [status, setStatus] = useState<PropertyStatus>('available');
-  const [amenities, setAmenities] = useState<string[]>([
-    'Lift with Power Backup',
-    '24/7 Security & CCTV',
-    'Covered Car Parking',
-    '100% Vastu Compliant',
-  ]);
-  const [photos, setPhotos] = useState<string[]>([
-    'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=800&auto=format&fit=crop&q=80',
-    'https://images.unsplash.com/photo-1600566753376-12c8ab7fb75b?w=800&auto=format&fit=crop&q=80',
-  ]);
+  const [amenities, setAmenities] = useState<string[]>([]);
+  const [photos, setPhotos] = useState<string[]>([]);
 
   // PRIVATE OWNER FIELDS
   const [ownerName, setOwnerName] = useState<string>('');
@@ -99,6 +90,44 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const resetForm = useCallback(() => {
+    setTitle('');
+    setTransactionType('sale');
+    setPropertyType('flat');
+    setBhk('');
+    setPrice('');
+    setPriceNegotiable(false);
+    setSuperBuiltUpAreaSqFt('');
+    setCarpetAreaSqFt('');
+    setLocality('');
+    setCity('');
+    setFurnishing('');
+    setFloor('');
+    setFacing('');
+    setStatus('available');
+    setAmenities([]);
+    setPhotos([]);
+    setOwnerName('');
+    setOwnerPhone('');
+    setOwnerWhatsApp('');
+    setExactAddress('');
+    setPrivateNotes('');
+    setErrorMessage(null);
+    setIsSubmitting(false);
+  }, []);
+
+  // Reset form whenever modal opens to guarantee a completely new, empty form
+  useEffect(() => {
+    if (isOpen) {
+      resetForm();
+    }
+  }, [isOpen, resetForm]);
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
+  };
 
   if (!isOpen) return null;
 
@@ -147,20 +176,20 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
       title: title.trim(),
       propertyType,
       transactionType,
-      price: Number(price) || 0,
+      price: typeof price === 'number' ? price : 0,
       priceNegotiable,
-      bhk: propertyType === 'plot' || propertyType === 'commercial' ? propertyType : bhk,
-      superBuiltUpAreaSqFt: Number(superBuiltUpAreaSqFt) || undefined,
-      carpetAreaSqFt: Number(carpetAreaSqFt) || undefined,
+      bhk: propertyType === 'plot' || propertyType === 'commercial' ? (bhk.trim() || propertyType) : bhk.trim(),
+      superBuiltUpAreaSqFt: typeof superBuiltUpAreaSqFt === 'number' && superBuiltUpAreaSqFt > 0 ? superBuiltUpAreaSqFt : undefined,
+      carpetAreaSqFt: typeof carpetAreaSqFt === 'number' && carpetAreaSqFt > 0 ? carpetAreaSqFt : undefined,
       locality: locality.trim(),
       city: city.trim(),
       amenities,
-      furnishing,
+      furnishing: (furnishing as FurnishingStatus) || 'unfurnished',
       floor: floor.trim() || undefined,
-      facing,
+      facing: facing ? (facing as FacingDirection) : undefined,
       status,
       photos: photos,
-      ownerName: ownerName.trim() || 'Direct Owner',
+      ownerName: ownerName.trim(),
       ownerPhone: ownerPhone.trim(),
       ownerWhatsApp: ownerWhatsApp.trim() || ownerPhone.trim(),
       exactAddress: exactAddress.trim(),
@@ -177,6 +206,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
         await saveFn(newProperty);
       }
       setIsSubmitting(false);
+      resetForm();
       onClose();
     } catch (err: any) {
       console.error('Error adding property:', err);
@@ -205,7 +235,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="w-8 h-8 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800 flex items-center justify-center transition-colors"
           >
             <X className="w-5 h-5" />
@@ -221,7 +251,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                 1. Basic Info & Pricing
               </span>
               <span className="text-xs font-extrabold text-emerald-600 dark:text-emerald-400">
-                {formatIndianCurrency(price)}
+                {typeof price === 'number' && price > 0 ? formatIndianCurrency(price) : ''}
               </span>
             </div>
 
@@ -234,7 +264,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                 required
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Spacious 3 BHK Sea View Flat in MVP Colony"
+                placeholder="e.g. 3 BHK Luxury Apartment with Balcony"
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-semibold"
               />
             </div>
@@ -293,7 +323,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   type="text"
                   value={bhk}
                   onChange={(e) => setBhk(e.target.value)}
-                  placeholder="2 BHK, 3 BHK, 4 BHK, Plot..."
+                  placeholder="e.g. 1 BHK, 2 BHK, 3 BHK, Plot, Shop..."
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
@@ -301,7 +331,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Price ({formatIndianCurrency(price)})
+                    Price {typeof price === 'number' && price > 0 ? `(${formatIndianCurrency(price)})` : ''}
                   </label>
                   <label className="flex items-center gap-1 cursor-pointer text-[10px] text-slate-500">
                     <input
@@ -317,9 +347,13 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   <span className="absolute left-3 text-xs font-bold text-slate-400">₹</span>
                   <input
                     type="number"
-                    step="50000"
-                    value={price}
-                    onChange={(e) => setPrice(Number(e.target.value))}
+                    step="10000"
+                    value={price === '' ? '' : price}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setPrice(val === '' ? '' : Number(val));
+                    }}
+                    placeholder="Enter price in ₹"
                     className="w-full pl-7 pr-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-bold"
                   />
                 </div>
@@ -343,21 +377,21 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   required
                   value={locality}
                   onChange={(e) => setLocality(e.target.value)}
-                  placeholder="e.g. MVP Colony, Whitefield..."
+                  placeholder="e.g. Indiranagar, Sector 62, Jubilee Hills..."
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-medium"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  City
+                  City *
                 </label>
                 <input
                   type="text"
                   required
                   value={city}
                   onChange={(e) => setCity(e.target.value)}
-                  placeholder="Visakhapatnam, Mumbai..."
+                  placeholder="e.g. Bengaluru, Hyderabad, Mumbai..."
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-medium"
                 />
               </div>
@@ -371,9 +405,12 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                 </label>
                 <input
                   type="number"
-                  value={superBuiltUpAreaSqFt || ''}
-                  onChange={(e) => setSuperBuiltUpAreaSqFt(Number(e.target.value))}
-                  placeholder="e.g. 1650"
+                  value={superBuiltUpAreaSqFt === '' ? '' : superBuiltUpAreaSqFt}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSuperBuiltUpAreaSqFt(val === '' ? '' : Number(val));
+                  }}
+                  placeholder="e.g. 1500"
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
@@ -384,9 +421,12 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                 </label>
                 <input
                   type="number"
-                  value={carpetAreaSqFt || ''}
-                  onChange={(e) => setCarpetAreaSqFt(Number(e.target.value))}
-                  placeholder="e.g. 1350"
+                  value={carpetAreaSqFt === '' ? '' : carpetAreaSqFt}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCarpetAreaSqFt(val === '' ? '' : Number(val));
+                  }}
+                  placeholder="e.g. 1200"
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
@@ -402,7 +442,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   type="text"
                   value={floor}
                   onChange={(e) => setFloor(e.target.value)}
-                  placeholder="4th of 8 Floors"
+                  placeholder="e.g. 2nd Floor, 4th of 8 Floors"
                   className="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden"
                 />
               </div>
@@ -413,9 +453,10 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                 </label>
                 <select
                   value={facing}
-                  onChange={(e) => setFacing(e.target.value as FacingDirection)}
+                  onChange={(e) => setFacing(e.target.value as FacingDirection | '')}
                   className="w-full px-2 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden"
                 >
+                  <option value="">Select Facing (Optional)</option>
                   <option value="East">East</option>
                   <option value="West">West</option>
                   <option value="North">North</option>
@@ -433,12 +474,13 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                 </label>
                 <select
                   value={furnishing}
-                  onChange={(e) => setFurnishing(e.target.value as FurnishingStatus)}
+                  onChange={(e) => setFurnishing(e.target.value as FurnishingStatus | '')}
                   className="w-full px-2 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden"
                 >
+                  <option value="">Select Furnishing (Optional)</option>
+                  <option value="unfurnished">Unfurnished</option>
                   <option value="semi_furnished">Semi-Furnished</option>
                   <option value="fully_furnished">Fully Furnished</option>
-                  <option value="unfurnished">Unfurnished</option>
                 </select>
               </div>
             </div>
@@ -571,7 +613,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   type="text"
                   value={ownerName}
                   onChange={(e) => setOwnerName(e.target.value)}
-                  placeholder="e.g. Suresh Reddy"
+                  placeholder="e.g. Rajesh Kumar"
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-amber-500"
                 />
               </div>
@@ -587,7 +629,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                     setOwnerPhone(e.target.value);
                     if (!ownerWhatsApp) setOwnerWhatsApp(e.target.value);
                   }}
-                  placeholder="e.g. 9848012345"
+                  placeholder="e.g. 9876543210"
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-amber-500"
                 />
               </div>
@@ -601,7 +643,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                 type="text"
                 value={exactAddress}
                 onChange={(e) => setExactAddress(e.target.value)}
-                placeholder="e.g. Flat 402, Royal Residency, Sector 3, Plot 18, MVP Double Road"
+                placeholder="e.g. Flat 402, Royal Heights, Main Road"
                 className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-amber-500"
               />
             </div>
@@ -614,7 +656,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                 rows={2}
                 value={privateNotes}
                 onChange={(e) => setPrivateNotes(e.target.value)}
-                placeholder="e.g. Owner willing to negotiate to 82L. Keys are with building watchman."
+                placeholder="e.g. Keys with watchman, negotiable on spot"
                 className="w-full p-2.5 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-amber-500 resize-none"
               />
             </div>

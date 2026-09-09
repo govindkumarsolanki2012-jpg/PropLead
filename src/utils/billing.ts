@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core';
+import { NativePurchases, PURCHASE_TYPE } from '@capgo/native-purchases';
 import { UserProfile, SubscriptionStatus, GooglePlaySubscriptionProduct } from '../types';
 import { auth } from '../lib/firebase';
 
@@ -219,9 +220,68 @@ export function getEffectiveSubscriptionStatus(
 }
 
 /**
- * Fetch product details from Google Play Catalog API
+ * Fetch product details from Google Play Catalog API or Native Google Play Client
  */
 export async function fetchGooglePlayProduct(): Promise<GooglePlaySubscriptionProduct> {
+  // If running in native Android shell, query Google Play directly via NativePurchases
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const supported = await NativePurchases.isBillingSupported();
+      if (supported.isBillingSupported) {
+        const res = await NativePurchases.getProducts({
+          productIdentifiers: [GOOGLE_PLAY_PRODUCT_ID],
+          productType: PURCHASE_TYPE.SUBS,
+        });
+
+        if (res.products && res.products.length > 0) {
+          const nativeProd =
+            res.products.find(
+              (p) => p.identifier === GOOGLE_PLAY_PRODUCT_ID || (p as any).planIdentifier === GOOGLE_PLAY_PRODUCT_ID
+            ) || res.products[0];
+
+          if (nativeProd) {
+            const priceString = nativeProd.priceString || DEFAULT_PRODUCT_DETAILS.priceFormatted;
+            const priceMicros = nativeProd.price
+              ? Math.round(nativeProd.price * 1000000)
+              : DEFAULT_PRODUCT_DETAILS.priceMicros;
+            const offerToken = (nativeProd as any).offerToken || undefined;
+
+            return {
+              ...DEFAULT_PRODUCT_DETAILS,
+              productId: GOOGLE_PLAY_PRODUCT_ID,
+              basePlanId: GOOGLE_PLAY_BASE_PLAN_ID,
+              title: nativeProd.title || DEFAULT_PRODUCT_DETAILS.title,
+              description: nativeProd.description || DEFAULT_PRODUCT_DETAILS.description,
+              priceFormatted: priceString,
+              priceMicros,
+              currencyCode: nativeProd.currencyCode || DEFAULT_PRODUCT_DETAILS.currencyCode,
+              offers: offerToken
+                ? [
+                    {
+                      offerId: GOOGLE_PLAY_BASE_PLAN_ID,
+                      offerToken,
+                      pricingPhases: [
+                        {
+                          priceFormatted: priceString,
+                          priceMicros,
+                          billingPeriod: 'P1M',
+                          recurrenceMode: 1,
+                          billingCycleCount: 0,
+                        },
+                      ],
+                    },
+                  ]
+                : DEFAULT_PRODUCT_DETAILS.offers,
+            };
+          }
+        }
+      }
+    } catch (nativeErr) {
+      console.warn('[NativePurchases] Could not query store product details, falling back to server catalog:', nativeErr);
+    }
+  }
+
+  // Fallback to server-side product-details endpoint
   try {
     const res = await fetch('/api/billing/product-details');
     if (res.ok) {
@@ -238,67 +298,125 @@ export async function fetchGooglePlayProduct(): Promise<GooglePlaySubscriptionPr
 
 /**
  * Launch Google Play In-App Purchase Flow
- * - Interacts with Android Digital Goods API if in TWA / Android PWA
- * - Interacts with Android native bridge if embedded
- * - Initiates secure purchase and verification with backend
+ * - Uses @capgo/native-purchases on native Android
+ * - Obtains purchaseToken from Google Play
+ * - Verifies purchase server-side with /api/billing/verify-purchase
+ * - Never marks user ACTIVE locally before server verification
+ * - Refreshes subscription status from /api/billing/subscription-status
  */
 export async function launchGooglePlayPurchase(
   userId: string,
   onProgress?: (step: string) => void
-): Promise<{ success: boolean; profileUpdates?: Partial<UserProfile>; error?: string }> {
+): Promise<{ success: boolean; profileUpdates?: Partial<UserProfile>; pending?: boolean; error?: string }> {
   try {
     onProgress?.('Connecting to Google Play Billing...');
 
-    let purchaseToken: string | undefined;
-
-    // Check for Android Digital Goods API (Google Play Billing on Chrome Android / PWA / TWA)
-    if (typeof window !== 'undefined' && 'getDigitalGoodsService' in window) {
-      try {
-        const service = await (window as any).getDigitalGoodsService('https://play.google.com/billing');
-        if (service) {
-          onProgress?.('Requesting offer from Google Play...');
-          const details = await service.getDetails([GOOGLE_PLAY_PRODUCT_ID]);
-          console.log('[DigitalGoodsService] Details:', details);
-        }
-      } catch (e) {
-        console.log('[DigitalGoodsService] Fallback to direct billing flow:', e);
-      }
+    if (!Capacitor.isNativePlatform()) {
+      return {
+        success: false,
+        error: 'Google Play Billing is only available on Android. Please install and run the app on an Android device to subscribe.',
+      };
     }
 
-    // Check for Native Android Javascript Interface (if app is packaged in Android WebView / Capacitor)
-    if (typeof window !== 'undefined' && (window as any).AndroidBilling) {
-      try {
-        const nativeRes = await (window as any).AndroidBilling.launchBillingFlow(
-          GOOGLE_PLAY_PRODUCT_ID,
-          GOOGLE_PLAY_BASE_PLAN_ID
-        );
-        if (nativeRes) {
-          const parsed = typeof nativeRes === 'string' ? JSON.parse(nativeRes) : nativeRes;
-          purchaseToken = parsed.purchaseToken;
-        }
-      } catch (e) {
-        console.log('[AndroidBilling Native Bridge] fallback:', e);
-      }
+    // 1. Check billing availability
+    const availability = await NativePurchases.isBillingSupported();
+    if (!availability.isBillingSupported) {
+      return {
+        success: false,
+        error: 'Google Play Billing is not supported or not available on this device.',
+      };
     }
 
-    // Standard Google Play Transaction Token Handling
-    if (!purchaseToken) {
-      if (Capacitor.isNativePlatform()) {
-        // Do not use mock purchases in production Android shell
+    // 2. Fetch available offer token if available
+    let offerToken: string | undefined;
+    try {
+      const prodsRes = await NativePurchases.getProducts({
+        productIdentifiers: [GOOGLE_PLAY_PRODUCT_ID],
+        productType: PURCHASE_TYPE.SUBS,
+      });
+      const matching =
+        prodsRes.products?.find(
+          (p) => p.identifier === GOOGLE_PLAY_PRODUCT_ID || (p as any).planIdentifier === GOOGLE_PLAY_PRODUCT_ID
+        ) || prodsRes.products?.[0];
+      if (matching && (matching as any).offerToken) {
+        offerToken = (matching as any).offerToken;
+      }
+    } catch {
+      // offerToken is optional if base plan has a single offer
+    }
+
+    // 3. Initiate native Google Play purchase flow
+    onProgress?.('Opening Google Play checkout...');
+
+    const appAccountToken =
+      userId && typeof userId === 'string' && userId.length <= 64 && !userId.includes('@')
+        ? userId
+        : undefined;
+
+    let transaction;
+    try {
+      transaction = await NativePurchases.purchaseProduct({
+        productIdentifier: GOOGLE_PLAY_PRODUCT_ID,
+        planIdentifier: GOOGLE_PLAY_BASE_PLAN_ID,
+        productType: PURCHASE_TYPE.SUBS,
+        ...(offerToken ? { offerToken } : {}),
+        ...(appAccountToken ? { appAccountToken } : {}),
+        autoAcknowledgePurchases: false, // Server acknowledges via Google Play Developer API upon verification
+      });
+    } catch (purchaseErr: any) {
+      const msg = (purchaseErr?.message || String(purchaseErr || '')).toLowerCase();
+      if (msg.includes('cancel') || msg.includes('user_canceled') || msg.includes('user cancelled')) {
         return {
           success: false,
-          error: 'Google Play Billing native bridge is not installed in this Android build. To enable live Google Play purchases, install @capacitor-community/in-app-purchases.',
+          error: 'Purchase was cancelled.',
         };
       }
-      // Web / Dev sandbox environment fallback
-      const timestamp = Date.now();
-      const randomEntropy = Math.random().toString(36).substring(2, 15);
-      purchaseToken = `play_tok_${timestamp}_${randomEntropy}_property_agent_pro`;
+      if (msg.includes('item_already_owned') || msg.includes('already owned')) {
+        return {
+          success: false,
+          error: 'You already own this subscription. Tap "Restore Subscription" to sync your access.',
+        };
+      }
+      if (msg.includes('network') || msg.includes('timeout')) {
+        return {
+          success: false,
+          error: 'Network connection issue with Google Play. Please check your internet and try again.',
+        };
+      }
+      return {
+        success: false,
+        error: purchaseErr?.message || 'Google Play purchase could not be completed.',
+      };
     }
 
-    onProgress?.('Verifying subscription with Google Play Developer API...');
+    if (!transaction) {
+      return {
+        success: false,
+        error: 'No purchase transaction returned from Google Play.',
+      };
+    }
 
-    // Backend verification endpoint with user auth token
+    // 4. Handle Pending Purchase State
+    if (transaction.purchaseState === '0' || (transaction as any).purchaseState === 0) {
+      return {
+        success: false,
+        pending: true,
+        error:
+          'Your payment is currently pending confirmation from Google Play. Pro access will be automatically activated once payment completes.',
+      };
+    }
+
+    const purchaseToken = transaction.purchaseToken;
+    if (!purchaseToken) {
+      return {
+        success: false,
+        error: 'Purchase token was not received from Google Play.',
+      };
+    }
+
+    // 5. Server-side purchase verification (server remains authoritative)
+    onProgress?.('Verifying subscription with server...');
+
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     try {
       const idToken = await auth.currentUser?.getIdToken();
@@ -321,12 +439,25 @@ export async function launchGooglePlayPurchase(
     const verifyData = await verifyRes.json();
 
     if (!verifyRes.ok || !verifyData.success) {
-      throw new Error(verifyData.error || 'Backend verification with Google Play failed');
+      throw new Error(verifyData.error || 'Server verification with Google Play failed.');
     }
 
     if (!verifyData.subscriptionExpiryDate) {
-      throw new Error('Google Play verification response did not include a valid subscription expiry timestamp');
+      throw new Error('Google Play verification response did not include a valid subscription expiry timestamp.');
     }
+
+    // 6. Refresh authoritative subscription status
+    try {
+      const statusRes = await fetch(`/api/billing/subscription-status?userId=${encodeURIComponent(userId)}`, {
+        headers,
+      });
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        if (statusData.serverNow || statusData.serverTimestamp) {
+          setAuthoritativeServerTime(statusData.serverNow || statusData.serverTimestamp);
+        }
+      }
+    } catch {}
 
     onProgress?.('Subscription verified & unlocked!');
 
@@ -339,14 +470,14 @@ export async function launchGooglePlayPurchase(
         subscriptionPlan: GOOGLE_PLAY_PRODUCT_ID,
         subscriptionProductId: GOOGLE_PLAY_PRODUCT_ID,
         subscriptionBasePlan: GOOGLE_PLAY_BASE_PLAN_ID,
-        subscriptionExpiryDate: verifyData.subscriptionExpiryDate, // Authoritative timestamp from Google Play
+        subscriptionExpiryDate: verifyData.subscriptionExpiryDate,
         purchaseToken,
         autoRenewing: verifyData.autoRenewing !== undefined ? verifyData.autoRenewing : true,
         paymentIssueMessage: undefined,
       },
     };
   } catch (err: any) {
-    console.error('Google Play purchase failed:', err);
+    console.error('Google Play purchase verification failed:', err?.message || err);
     return {
       success: false,
       error: err?.message || 'Failed to complete Google Play purchase. Please try again.',
@@ -355,7 +486,8 @@ export async function launchGooglePlayPurchase(
 }
 
 /**
- * Restore purchases from Google Play via native Android bridge and backend API
+ * Restore purchases from Google Play via NativePurchases and backend API
+ * Server remains authoritative.
  */
 export async function restoreGooglePlayPurchases(
   userId: string,
@@ -373,75 +505,44 @@ export async function restoreGooglePlayPurchases(
     let purchaseToken: string | undefined;
     let isBridgeAvailable = false;
 
-    // 1. Check Native Android Javascript Interface (Android WebView / Capacitor / Cordova)
-    if (typeof window !== 'undefined' && (window as any).AndroidBilling) {
-      isBridgeAvailable = true;
+    if (Capacitor.isNativePlatform()) {
       try {
-        const bridge = (window as any).AndroidBilling;
-        let nativeRes: any;
-        if (typeof bridge.restorePurchases === 'function') {
-          nativeRes = await bridge.restorePurchases(GOOGLE_PLAY_PRODUCT_ID);
-        } else if (typeof bridge.queryPurchases === 'function') {
-          nativeRes = await bridge.queryPurchases(GOOGLE_PLAY_PRODUCT_ID);
-        } else if (typeof bridge.getPurchases === 'function') {
-          nativeRes = await bridge.getPurchases();
-        } else if (typeof bridge.getPurchaseToken === 'function') {
-          nativeRes = await bridge.getPurchaseToken(GOOGLE_PLAY_PRODUCT_ID);
-        }
-
-        if (nativeRes) {
-          if (typeof nativeRes === 'string') {
-            try {
-              const parsed = JSON.parse(nativeRes);
-              purchaseToken =
-                parsed.purchaseToken ||
-                (parsed.purchases && parsed.purchases[0]?.purchaseToken) ||
-                (Array.isArray(parsed) && parsed[0]?.purchaseToken);
-            } catch {
-              if (nativeRes.startsWith('play_tok_') || nativeRes.length > 10) {
-                purchaseToken = nativeRes;
-              }
-            }
-          } else if (typeof nativeRes === 'object') {
-            purchaseToken =
-              nativeRes.purchaseToken ||
-              (nativeRes.purchases && nativeRes.purchases[0]?.purchaseToken) ||
-              (Array.isArray(nativeRes) && nativeRes[0]?.purchaseToken);
-          }
-        }
-      } catch (bridgeErr) {
-        console.warn('[AndroidBilling Native Bridge] restore error:', bridgeErr);
-      }
-    }
-
-    // 2. Check Digital Goods API (Chrome Android / PWA / TWA)
-    if (!purchaseToken && typeof window !== 'undefined' && 'getDigitalGoodsService' in window) {
-      try {
-        const service = await (window as any).getDigitalGoodsService('https://play.google.com/billing');
-        if (service) {
+        const supported = await NativePurchases.isBillingSupported();
+        if (supported.isBillingSupported) {
           isBridgeAvailable = true;
-          let purchases: any[] = [];
-          if (typeof service.listPurchases === 'function') {
-            purchases = await service.listPurchases();
-          } else if (typeof service.listPurchaseHistory === 'function') {
-            purchases = await service.listPurchaseHistory();
+
+          // Request native store restore
+          try {
+            await NativePurchases.restorePurchases();
+          } catch (e) {
+            console.warn('[NativePurchases] restorePurchases warning:', e);
           }
-          if (purchases && purchases.length > 0) {
+
+          // Query active subscription purchases
+          const result = await NativePurchases.getPurchases({
+            productType: PURCHASE_TYPE.SUBS,
+          });
+
+          if (result.purchases && result.purchases.length > 0) {
             const matching =
-              purchases.find(
-                (p: any) => p.itemId === GOOGLE_PLAY_PRODUCT_ID || p.productId === GOOGLE_PLAY_PRODUCT_ID
-              ) || purchases[0];
-            if (matching && matching.purchaseToken) {
+              result.purchases.find(
+                (p) =>
+                  (p.productIdentifier === GOOGLE_PLAY_PRODUCT_ID || !p.productIdentifier) &&
+                  p.purchaseToken &&
+                  p.purchaseState !== '0'
+              ) || result.purchases[0];
+
+            if (matching && matching.purchaseToken && matching.purchaseState !== '0') {
               purchaseToken = matching.purchaseToken;
             }
           }
         }
-      } catch (dgErr) {
-        console.warn('[DigitalGoodsService] list purchases:', dgErr);
+      } catch (nativeErr) {
+        console.warn('[NativePurchases] getPurchases failed:', nativeErr);
       }
     }
 
-    // 3. Query backend verification & restore endpoint
+    // Backend verification & restore endpoint
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     try {
       const idToken = await auth.currentUser?.getIdToken();
@@ -504,8 +605,8 @@ export async function restoreGooglePlayPurchases(
       restored: false,
       message: data.message || 'No active PropLead subscription was found for this Google Play account.',
     };
-  } catch (err) {
-    console.error('Restore purchases error:', err);
+  } catch (err: any) {
+    console.error('Restore purchases error:', err?.message || err);
     return {
       success: false,
       restored: false,
@@ -518,7 +619,15 @@ export async function restoreGooglePlayPurchases(
 /**
  * Open Google Play Subscription Management Screen
  */
-export function openGooglePlayManageSubscriptions(): void {
+export async function openGooglePlayManageSubscriptions(): Promise<void> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      await NativePurchases.manageSubscriptions();
+      return;
+    } catch (e) {
+      console.warn('[NativePurchases] manageSubscriptions fallback to web URL:', e);
+    }
+  }
   const url = `https://play.google.com/store/account/subscriptions?sku=${GOOGLE_PLAY_PRODUCT_ID}&package=${GOOGLE_PLAY_PACKAGE_NAME}`;
   window.open(url, '_blank', 'noopener,noreferrer');
 }
@@ -526,7 +635,15 @@ export function openGooglePlayManageSubscriptions(): void {
 /**
  * Open Google Play Payment Fix Screen
  */
-export function openGooglePlayFixPayment(): void {
+export async function openGooglePlayFixPayment(): Promise<void> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      await NativePurchases.manageSubscriptions();
+      return;
+    } catch (e) {
+      console.warn('[NativePurchases] manageSubscriptions fallback to web URL:', e);
+    }
+  }
   const url = 'https://play.google.com/store/account/subscriptions';
   window.open(url, '_blank', 'noopener,noreferrer');
 }

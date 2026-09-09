@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   X,
   Plus,
@@ -15,6 +15,7 @@ import {
   IndianRupee,
   Car,
   CalendarDays,
+  Mail,
 } from 'lucide-react';
 import {
   Lead,
@@ -60,25 +61,24 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
   in3Days.setDate(in3Days.getDate() + 3);
   const in3DaysStr = in3Days.toISOString().split('T')[0];
 
-  // Form states
+  // Completely clean state - ZERO demo or prefilled values
   const [name, setName] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
-  const [requirement, setRequirement] = useState<RequirementType>('buy');
-  const [propertyType, setPropertyType] = useState<PropertyType>('flat');
-  const [bhk, setBhk] = useState<string>('2 BHK');
+  const [email, setEmail] = useState<string>('');
+  const [requirement, setRequirement] = useState<RequirementType | ''>('');
+  const [propertyType, setPropertyType] = useState<PropertyType | ''>('');
+  const [bhk, setBhk] = useState<string>('');
   const [budgetMin, setBudgetMin] = useState<number | undefined>(undefined);
-  const [budgetMax, setBudgetMax] = useState<number>(6500000);
-  const [preferredCity, setPreferredCity] = useState<string>(
-    profile?.city ? profile.city.split('/')[0].trim() : 'Gurgaon'
-  );
+  const [budgetMax, setBudgetMax] = useState<number | undefined>(undefined);
+  const [preferredCity, setPreferredCity] = useState<string>('');
   const [preferredLocality, setPreferredLocality] = useState<string>('');
   const [currentCity, setCurrentCity] = useState<string>('');
-  const [source, setSource] = useState<LeadSource>('WhatsApp');
-  const [priority, setPriority] = useState<LeadPriority>('hot');
+  const [source, setSource] = useState<LeadSource | ''>('');
+  const [priority, setPriority] = useState<LeadPriority | ''>('');
   const [notes, setNotes] = useState<string>('');
 
-  // Follow-up scheduling states
-  const [followUpPreset, setFollowUpPreset] = useState<'today' | 'tomorrow' | 'in3days' | 'weekend' | 'custom' | 'none'>('today');
+  // Follow-up scheduling states - none pre-selected
+  const [followUpPreset, setFollowUpPreset] = useState<'today' | 'tomorrow' | 'in3days' | 'weekend' | 'custom' | 'none'>('none');
   const [customFollowUpDate, setCustomFollowUpDate] = useState<string>(todayStr);
   const [followUpTime, setFollowUpTime] = useState<string>('11:30');
   const [followUpType, setFollowUpType] = useState<FollowUpType>('call');
@@ -86,6 +86,37 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
 
   // Success screen state
   const [createdLead, setCreatedLead] = useState<Lead | null>(null);
+
+  // Reset entire form to blank state
+  const resetForm = useCallback(() => {
+    setName('');
+    setPhone('');
+    setEmail('');
+    setRequirement('');
+    setPropertyType('');
+    setBhk('');
+    setBudgetMin(undefined);
+    setBudgetMax(undefined);
+    setPreferredCity('');
+    setPreferredLocality('');
+    setCurrentCity('');
+    setSource('');
+    setPriority('');
+    setNotes('');
+    setFollowUpPreset('none');
+    setCustomFollowUpDate(todayStr);
+    setFollowUpTime('11:30');
+    setFollowUpType('call');
+    setShowCustomCalendar(false);
+    setCreatedLead(null);
+  }, [todayStr]);
+
+  // Clean form every time modal opens
+  useEffect(() => {
+    if (isOpen) {
+      resetForm();
+    }
+  }, [isOpen, resetForm]);
 
   if (!isOpen) return null;
 
@@ -112,6 +143,7 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
           <div className="space-y-2 pt-1">
             <button
               onClick={() => {
+                resetForm();
                 onClose();
                 onOpenSubscription();
               }}
@@ -120,7 +152,10 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
               {t('unlock_unlimited')}
             </button>
             <button
-              onClick={onClose}
+              onClick={() => {
+                resetForm();
+                onClose();
+              }}
               className="w-full py-2 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-semibold"
             >
               {t('btn_cancel')}
@@ -130,26 +165,6 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
       </div>
     );
   }
-
-  // Quick budget presets
-  const buyBudgetPresets = [
-    { label: '₹35L', val: 3500000 },
-    { label: '₹50L', val: 5000000 },
-    { label: '₹75L', val: 7500000 },
-    { label: '₹1.2Cr', val: 12000000 },
-    { label: '₹2Cr', val: 20000000 },
-    { label: '₹3Cr+', val: 30000000 },
-  ];
-
-  const rentBudgetPresets = [
-    { label: '₹15k', val: 15000 },
-    { label: '₹25k', val: 25000 },
-    { label: '₹40k', val: 40000 },
-    { label: '₹60k', val: 60000 },
-    { label: '₹1L+', val: 100000 },
-  ];
-
-  const currentBudgetPresets = requirement === 'rent' ? rentBudgetPresets : buyBudgetPresets;
 
   const handlePresetSelect = (preset: 'today' | 'tomorrow' | 'in3days' | 'weekend' | 'custom' | 'none') => {
     setFollowUpPreset(preset);
@@ -205,22 +220,28 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
       ...(preferredCity.trim() ? [preferredCity.trim()] : []),
     ];
 
+    const leadReq = (requirement || 'buy') as RequirementType;
+    const leadPropType = (propertyType || 'flat') as PropertyType;
+    const leadSource = (source || 'WhatsApp') as LeadSource;
+    const leadPriority = (priority || 'warm') as LeadPriority;
+
     const newLead: Lead = {
       id: `lead_${Date.now()}`,
       name: name.trim(),
       phone: phone.trim(),
       whatsapp: phone.trim(),
-      requirement,
-      propertyType,
-      bhk: requirement === 'sell' && propertyType === 'plot' ? 'Plot/Land' : bhk,
-      budgetMin: budgetMin || Math.round(budgetMax * 0.8),
+      email: email.trim() || undefined,
+      requirement: leadReq,
+      propertyType: leadPropType,
+      bhk: leadReq === 'sell' && leadPropType === 'plot' ? 'Plot/Land' : bhk.trim() || undefined,
+      budgetMin: budgetMin,
       budgetMax: budgetMax,
       currentCity: currentCity.trim() || undefined,
       preferredCity: preferredCity.trim() || undefined,
       preferredLocality: preferredLocality.trim() || undefined,
       preferredLocations: preferredLocationsList,
-      source,
-      priority,
+      source: leadSource,
+      priority: leadPriority,
       status: followUpType === 'site_visit' ? 'site_visit_scheduled' : 'new',
       notes: notes.trim(),
       nextFollowUpDate: followUpDate,
@@ -239,7 +260,7 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
           leadId: `lead_${Date.now()}`,
           type: 'created',
           title: 'Lead Created',
-          description: `Captured from ${source} • ${requirement.toUpperCase()} ${bhk}${
+          description: `Captured from ${leadSource} • ${leadReq.toUpperCase()}${bhk ? ` ${bhk}` : ''}${
             preferredCity ? ` in ${preferredCity}` : ''
           }${followUpDate ? ` • Reminder on ${followUpDate} at ${followUpTime}` : ''}`,
           timestamp: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
@@ -252,16 +273,7 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
   };
 
   const handleResetAndClose = () => {
-    setCreatedLead(null);
-    setName('');
-    setPhone('');
-    setPreferredLocality('');
-    setCurrentCity('');
-    setNotes('');
-    setFollowUpPreset('today');
-    setCustomFollowUpDate(todayStr);
-    setFollowUpTime('11:30');
-    setShowCustomCalendar(false);
+    resetForm();
     onClose();
   };
 
@@ -278,15 +290,15 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
           year: 'numeric',
         });
       }
+      return dateStr;
     } catch {
-      // fallback
+      return dateStr;
     }
-    return dateStr;
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[92vh] flex flex-col overflow-hidden animate-slide-up">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200">
+      <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[92vh] flex flex-col overflow-hidden">
         {/* SUCCESS POST-SAVE VIEW */}
         {createdLead ? (
           <div className="p-6 text-center space-y-5">
@@ -302,7 +314,8 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
                 {t('modal_saved_success')}
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                {createdLead.name} • {createdLead.phone} • {formatIndianCurrency(createdLead.budgetMax)}
+                {createdLead.name} • {createdLead.phone} •{' '}
+                {createdLead.budgetMax ? formatIndianCurrency(createdLead.budgetMax) : 'Flexible Budget'}
               </p>
             </div>
 
@@ -338,12 +351,23 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
               </div>
             </div>
 
-            <button
-              onClick={handleResetAndClose}
-              className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 font-bold rounded-xl text-sm shadow-sm transition-all"
-            >
-              {t('modal_done_return')}
-            </button>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={resetForm}
+                className="py-3 px-4 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-bold rounded-xl text-xs border border-emerald-300 dark:border-emerald-800 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Another Lead</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleResetAndClose}
+                className="py-3 px-4 bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 font-bold rounded-xl text-xs shadow-sm transition-all"
+              >
+                {t('modal_done_return')}
+              </button>
+            </div>
           </div>
         ) : (
           /* QUICK CAPTURE FORM */
@@ -362,7 +386,8 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
                 </div>
               </div>
               <button
-                onClick={onClose}
+                type="button"
+                onClick={handleResetAndClose}
                 className="w-8 h-8 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center"
               >
                 <X className="w-4 h-4" />
@@ -383,7 +408,7 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
                       required
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      placeholder="e.g. Rahul Sharma"
+                      placeholder="e.g. Customer Name"
                       className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-emerald-500 outline-hidden font-medium"
                       autoFocus
                     />
@@ -410,32 +435,41 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
                     />
                   </div>
                 </div>
+
+                {/* Optional Email */}
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Email (Optional)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="e.g. client@example.com"
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs focus:ring-2 focus:ring-emerald-500 outline-hidden font-medium"
+                    />
+                    <Mail className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
+                  </div>
+                </div>
               </div>
 
               {/* Requirement Type Chips (Buy / Sell / Rent / Lease) */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  {t('modal_requirement_type')}
-                </label>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    {t('modal_requirement_type')}
+                  </label>
+                  <span className="text-[11px] text-slate-400 font-medium">
+                    {requirement ? requirement.toUpperCase() : 'None Selected'}
+                  </span>
+                </div>
                 <div className="grid grid-cols-4 gap-1.5">
                   {(['buy', 'rent', 'sell', 'lease'] as RequirementType[]).map((req) => (
                     <button
                       key={req}
                       type="button"
-                      onClick={() => {
-                        setRequirement(req);
-                        if (req === 'rent' || req === 'lease') {
-                          if (budgetMax > 500000) {
-                            setBudgetMax(25000);
-                            setBudgetMin(20000);
-                          }
-                        } else {
-                          if (budgetMax < 500000) {
-                            setBudgetMax(6500000);
-                            setBudgetMin(5500000);
-                          }
-                        }
-                      }}
+                      onClick={() => setRequirement(requirement === req ? '' : req)}
                       className={`py-2 px-1 rounded-xl text-xs font-bold capitalize transition-all text-center border ${
                         requirement === req
                           ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
@@ -454,20 +488,53 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
                 </div>
               </div>
 
+              {/* Property Type Chips */}
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Property Type
+                  </label>
+                  <span className="text-[11px] text-slate-400 font-medium">
+                    {propertyType ? propertyType.toUpperCase() : 'None Selected'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                  {[
+                    { id: 'flat', label: '🏢 Apartment / Flat' },
+                    { id: 'house', label: '🏠 House / Villa' },
+                    { id: 'plot', label: '📐 Plot / Land' },
+                    { id: 'commercial', label: '🏬 Commercial' },
+                  ].map((pt) => (
+                    <button
+                      key={pt.id}
+                      type="button"
+                      onClick={() => setPropertyType(propertyType === pt.id ? '' : (pt.id as PropertyType))}
+                      className={`py-2 px-2 rounded-xl text-xs font-semibold border transition-all text-center ${
+                        propertyType === pt.id
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs font-bold'
+                          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      {pt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* BHK & Configuration Quick Chips */}
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
                     {t('prop_bhk')}
                   </label>
-                  <span className="text-[11px] text-slate-400 font-medium">{bhk}</span>
+                  <span className="text-[11px] text-slate-400 font-medium">{bhk || 'None Selected'}</span>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {['1 BHK', '2 BHK', '3 BHK', '4+ BHK', 'Studio', 'Plot/Land', 'Commercial Shop'].map((item) => (
                     <button
                       key={item}
                       type="button"
-                      onClick={() => setBhk(item)}
+                      onClick={() => setBhk(bhk === item ? '' : item)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
                         bhk === item
                           ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-500 font-bold'
@@ -506,13 +573,13 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                      {t('modal_preferred_city')} <span className="text-emerald-600">*</span>
+                      {t('modal_preferred_city')}
                     </label>
                     <input
                       type="text"
                       value={preferredCity}
                       onChange={(e) => setPreferredCity(e.target.value)}
-                      placeholder="e.g. Gurgaon, Bangalore, Mumbai..."
+                      placeholder="e.g. City Name..."
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs focus:ring-2 focus:ring-emerald-500 outline-hidden font-medium"
                     />
                   </div>
@@ -525,7 +592,7 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
                       type="text"
                       value={preferredLocality}
                       onChange={(e) => setPreferredLocality(e.target.value)}
-                      placeholder="e.g. Sector 57, Golf Course Road..."
+                      placeholder="e.g. Locality or Area..."
                       className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs focus:ring-2 focus:ring-emerald-500 outline-hidden"
                     />
                   </div>
@@ -539,7 +606,7 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
                     type="text"
                     value={currentCity}
                     onChange={(e) => setCurrentCity(e.target.value)}
-                    placeholder="e.g. Mumbai (if customer lives elsewhere)"
+                    placeholder="e.g. Current City (if customer lives elsewhere)"
                     className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs focus:ring-2 focus:ring-emerald-500 outline-hidden"
                   />
                   <p className="text-[10px] text-slate-400 mt-1">
@@ -559,6 +626,7 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
                     onChange={(e) => setSource(e.target.value as LeadSource)}
                     className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs focus:ring-2 focus:ring-emerald-500 outline-hidden"
                   >
+                    <option value="">Select Lead Source (Optional)</option>
                     <option value="WhatsApp">WhatsApp</option>
                     <option value="99acres">99acres</option>
                     <option value="MagicBricks">MagicBricks</option>
@@ -582,7 +650,7 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
                       <button
                         key={p}
                         type="button"
-                        onClick={() => setPriority(p)}
+                        onClick={() => setPriority(priority === p ? '' : p)}
                         className={`flex-1 py-2 rounded-xl text-xs font-bold border transition-all ${
                           priority === p
                             ? p === 'hot'
@@ -814,11 +882,18 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
                 />
               </div>
 
-              {/* Submit Button */}
-              <div className="pt-2">
+              {/* Actions: Cancel & Submit */}
+              <div className="pt-2 grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={handleResetAndClose}
+                  className="py-3.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs transition-all text-center"
+                >
+                  {t('btn_cancel')}
+                </button>
                 <button
                   type="submit"
-                  className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold rounded-xl shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 text-sm transition-all"
+                  className="col-span-2 py-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold rounded-xl shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2 text-sm transition-all"
                 >
                   <Plus className="w-4 h-4" />
                   <span>{t('modal_save_lead_btn')}</span>

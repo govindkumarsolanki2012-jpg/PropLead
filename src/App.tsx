@@ -601,13 +601,15 @@ export function App() {
 
       {/* LEAD MODALS */}
       {/* 1. Quick Add Lead Modal (10s capture) */}
-      <QuickAddLeadModal
-        isOpen={isQuickAddOpen}
-        onClose={() => setIsQuickAddOpen(false)}
-        onSaveLead={handleSaveLead}
-        profile={profile}
-        onOpenSubscription={() => setIsSubscriptionOpen(true)}
-      />
+      {isQuickAddOpen && (
+        <QuickAddLeadModal
+          isOpen={isQuickAddOpen}
+          onClose={() => setIsQuickAddOpen(false)}
+          onSaveLead={handleSaveLead}
+          profile={profile}
+          onOpenSubscription={() => setIsSubscriptionOpen(true)}
+        />
+      )}
 
       {/* 2. WhatsApp Modal (1-tap templates) */}
       {whatsAppLead && (
@@ -662,12 +664,14 @@ export function App() {
 
       {/* PROPERTY MODALS */}
       {/* 1. Add Property Modal */}
-      <AddPropertyModal
-        isOpen={isAddPropertyOpen}
-        onClose={() => setIsAddPropertyOpen(false)}
-        onSaveProperty={handleSaveProperty}
-        profile={profile}
-      />
+      {isAddPropertyOpen && (
+        <AddPropertyModal
+          isOpen={isAddPropertyOpen}
+          onClose={() => setIsAddPropertyOpen(false)}
+          onSaveProperty={handleSaveProperty}
+          profile={profile}
+        />
+      )}
 
       {/* 2. Edit Property Modal */}
       {editProperty && (
