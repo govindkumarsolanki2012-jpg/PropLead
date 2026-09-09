@@ -37,6 +37,71 @@ jobs:
           unzip -q gradle-8.14.3-bin.zip -d $HOME/gradle
           echo "$HOME/gradle/gradle-8.14.3/bin" >> $GITHUB_PATH
 
+      - name: Restore upload keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/upload-keystore.jks
+
+      - name: Create signing properties
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          cat > android/signing.properties <<EOF
+          storeFile=upload-keystore.jks
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=proplead-upload
+          keyPassword=$KEYSTORE_PASSWORD
+          EOF
+
+      - name: Configure Android signing
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("android/app/build.gradle")
+          text = path.read_text()
+
+          if "signing.properties" not in text:
+              text = text.replace(
+                  "android {",
+                  """def signingPropertiesFile = rootProject.file("signing.properties")
+          def signingProperties = new Properties()
+          if (signingPropertiesFile.exists()) {
+              signingProperties.load(new FileInputStream(signingPropertiesFile))
+          }
+
+          android {""",
+                  1
+              )
+
+              text = text.replace(
+                  "buildTypes {",
+                  """signingConfigs {
+              release {
+                  if (signingPropertiesFile.exists()) {
+                      storeFile file(signingProperties["storeFile"])
+                      storePassword signingProperties["storePassword"]
+                      keyAlias signingProperties["keyAlias"]
+                      keyPassword signingProperties["keyPassword"]
+                  }
+              }
+          }
+
+          buildTypes {""",
+                  1
+              )
+
+              text = text.replace(
+                  "release {",
+                  """release {
+                      signingConfig signingConfigs.release""",
+                  1
+              )
+
+              path.write_text(text)
+          PY
+
       - name: Build Android App Bundle
         working-directory: android
         run: gradle bundleRelease
