@@ -31,6 +31,9 @@ jobs:
       - name: Sync Android project
         run: npx cap sync android
 
+      - name: Give Gradle permission
+        run: chmod +x android/gradlew
+
       - name: Build Android App Bundle
         working-directory: android
         run: ./gradlew bundleRelease
