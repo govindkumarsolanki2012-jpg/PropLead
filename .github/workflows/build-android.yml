@@ -42,6 +42,8 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           echo "$KEYSTORE_BASE64" | base64 --decode > android/upload-keystore.jks
+          test -f android/upload-keystore.jks
+          echo "Upload keystore restored successfully."
 
       - name: Create signing properties
         env:
@@ -63,26 +65,25 @@ jobs:
           path = Path("android/app/build.gradle")
           text = path.read_text()
 
-          # Add signing properties loader before the android block.
-          if "signingPropertiesFile" not in text:
-              signing_loader = '''def signingPropertiesFile = rootProject.file("signing.properties")
+          signing_loader = '''def signingPropertiesFile = rootProject.file("signing.properties")
           def signingProperties = new Properties()
           if (signingPropertiesFile.exists()) {
               signingProperties.load(new FileInputStream(signingPropertiesFile))
           }
 
           '''
+
+          if "signingPropertiesFile" not in text:
               text = text.replace(
                   "android {",
                   signing_loader + "android {",
                   1
               )
 
-          # Add the release signing configuration.
           if "signingConfigs {" not in text:
               signing_config = '''signingConfigs {
               release {
-                  storeFile file(signingProperties["storeFile"])
+                  storeFile rootProject.file(signingProperties["storeFile"])
                   storePassword signingProperties["storePassword"]
                   keyAlias signingProperties["keyAlias"]
                   keyPassword signingProperties["keyPassword"]
@@ -95,8 +96,12 @@ jobs:
                   signing_config + "buildTypes {",
                   1
               )
+          else:
+              text = text.replace(
+                  'storeFile file(signingProperties["storeFile"])',
+                  'storeFile rootProject.file(signingProperties["storeFile"])'
+              )
 
-          # Attach the signing configuration specifically to buildTypes.release.
           if "signingConfig signingConfigs.release" not in text:
               text = re.sub(
                   r'(buildTypes\s*\{\s*release\s*\{)',
@@ -107,6 +112,12 @@ jobs:
 
           path.write_text(text)
           PY
+
+      - name: Verify signing files
+        run: |
+          test -f android/upload-keystore.jks
+          test -f android/signing.properties
+          echo "Signing files are ready."
 
       - name: Build Android App Bundle
         working-directory: android
