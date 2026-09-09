@@ -1,0 +1,43 @@
+name: Create Upload Key
+
+on:
+  workflow_dispatch:
+
+jobs:
+  create-key:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create upload keystore
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          keytool -genkeypair \
+            -v \
+            -keystore upload-keystore.jks \
+            -alias proplead-upload \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -keypass "$KEYSTORE_PASSWORD" \
+            -dname "CN=PropLead, OU=PropLead, O=PropLead, L=India, ST=India, C=IN"
+
+      - name: Create upload certificate
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          keytool -exportcert \
+            -rfc \
+            -keystore upload-keystore.jks \
+            -alias proplead-upload \
+            -storepass "$KEYSTORE_PASSWORD" \
+            -file upload_certificate.pem
+
+      - name: Upload signing files
+        uses: actions/upload-artifact@v4
+        with:
+          name: proplead-upload-key
+          path: |
+            upload-keystore.jks
+            upload_certificate.pem
