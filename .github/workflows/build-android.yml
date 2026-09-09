@@ -58,55 +58,61 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("android/app/build.gradle")
           text = path.read_text()
 
-          if "signing.properties" not in text:
-              text = text.replace(
-                  "android {",
-                  """def signingPropertiesFile = rootProject.file("signing.properties")
+          # Add signing properties loader before the android block.
+          if "signingPropertiesFile" not in text:
+              signing_loader = '''def signingPropertiesFile = rootProject.file("signing.properties")
           def signingProperties = new Properties()
           if (signingPropertiesFile.exists()) {
               signingProperties.load(new FileInputStream(signingPropertiesFile))
           }
 
-          android {""",
+          '''
+              text = text.replace(
+                  "android {",
+                  signing_loader + "android {",
                   1
               )
 
-              text = text.replace(
-                  "buildTypes {",
-                  """signingConfigs {
+          # Add the release signing configuration.
+          if "signingConfigs {" not in text:
+              signing_config = '''signingConfigs {
               release {
-                  if (signingPropertiesFile.exists()) {
-                      storeFile file(signingProperties["storeFile"])
-                      storePassword signingProperties["storePassword"]
-                      keyAlias signingProperties["keyAlias"]
-                      keyPassword signingProperties["keyPassword"]
-                  }
+                  storeFile file(signingProperties["storeFile"])
+                  storePassword signingProperties["storePassword"]
+                  keyAlias signingProperties["keyAlias"]
+                  keyPassword signingProperties["keyPassword"]
               }
           }
 
-          buildTypes {""",
-                  1
-              )
-
+          '''
               text = text.replace(
-                  "release {",
-                  """release {
-                      signingConfig signingConfigs.release""",
+                  "buildTypes {",
+                  signing_config + "buildTypes {",
                   1
               )
 
-              path.write_text(text)
+          # Attach the signing configuration specifically to buildTypes.release.
+          if "signingConfig signingConfigs.release" not in text:
+              text = re.sub(
+                  r'(buildTypes\s*\{\s*release\s*\{)',
+                  r'\1\n            signingConfig signingConfigs.release',
+                  text,
+                  count=1
+              )
+
+          path.write_text(text)
           PY
 
       - name: Build Android App Bundle
         working-directory: android
         run: gradle bundleRelease
 
-      - name: Upload AAB
+      - name: Upload signed AAB
         uses: actions/upload-artifact@v4
         with:
           name: proplead-release-aab
