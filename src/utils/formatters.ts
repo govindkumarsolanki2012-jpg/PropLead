@@ -74,6 +74,18 @@ export function formatDisplayPhone(phone: string): string {
 }
 
 /**
+ * Normalize phone number for duplicate matching (extracts last 10 significant digits)
+ */
+export function normalizePhoneForMatch(phone?: string): string {
+  if (!phone) return '';
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length >= 10) {
+    return digits.slice(-10);
+  }
+  return digits;
+}
+
+/**
  * Date relative string (e.g. "Today", "Tomorrow", "Yesterday", "24 Aug 2026")
  */
 export function formatRelativeDate(dateStr?: string, timeStr?: string): { text: string; isOverdue: boolean; isToday: boolean; isTomorrow: boolean } {

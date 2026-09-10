@@ -44,8 +44,18 @@ var import_genai = require("@google/genai");
 var TRIAL_DURATION_DAYS = 30;
 var DATA_DIR = import_path.default.join(process.cwd(), "data");
 var SUBSCRIPTIONS_FILE = import_path.default.join(DATA_DIR, "subscriptions.json");
-var FIRESTORE_PROJECT_ID = "engaged-xyston-bnm8c";
-var FIRESTORE_DATABASE_ID = "ai-studio-propertyagentlea-045c9e34-069a-4aea-b55c-a485b4374ea0";
+var FIRESTORE_PROJECT_ID = "proplead-e5c6a";
+var FIRESTORE_DATABASE_ID = "ai-studio-proplead-10ea62d1-3291-4f7b-9549-788cd49f881d";
+try {
+  const configPath = import_path.default.join(process.cwd(), "firebase-applet-config.json");
+  if (import_fs.default.existsSync(configPath)) {
+    const rawCfg = JSON.parse(import_fs.default.readFileSync(configPath, "utf8"));
+    if (rawCfg.projectId) FIRESTORE_PROJECT_ID = rawCfg.projectId;
+    if (rawCfg.firestoreDatabaseId) FIRESTORE_DATABASE_ID = rawCfg.firestoreDatabaseId;
+  }
+} catch (e) {
+  console.warn("Could not read firebase-applet-config.json in server.ts:", e);
+}
 var FIRESTORE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents`;
 function initLocalSubscriptionStore() {
   const store = /* @__PURE__ */ new Map();
@@ -192,38 +202,84 @@ async function verifyFirebaseIdToken(token) {
     return null;
   }
 }
-async function getFirestoreAuthToken(idToken) {
-  if (idToken) {
-    return idToken;
+function parseServiceAccountCredentials(raw) {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("AIza")) {
+    return null;
   }
-  const serviceAccountKey = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY;
-  if (serviceAccountKey) {
+  if (trimmed.startsWith("{")) {
     try {
-      let credentials;
-      if (serviceAccountKey.trim().startsWith("{")) {
-        credentials = JSON.parse(serviceAccountKey);
-      } else {
-        const decoded = Buffer.from(serviceAccountKey, "base64").toString("utf8");
-        credentials = JSON.parse(decoded);
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object" && (parsed.client_email || parsed.type === "service_account")) {
+        return parsed;
       }
-      const auth = new import_googleapis.google.auth.GoogleAuth({
-        credentials,
-        scopes: ["https://www.googleapis.com/auth/datastore"]
-      });
-      const client = await auth.getClient();
-      const accessTokenResponse = await client.getAccessToken();
-      if (accessTokenResponse?.token) {
-        return accessTokenResponse.token;
+    } catch {
+    }
+  }
+  if ((trimmed.endsWith(".json") || trimmed.startsWith("/") || trimmed.startsWith("./")) && import_fs.default.existsSync(trimmed)) {
+    try {
+      const content = import_fs.default.readFileSync(trimmed, "utf8").trim();
+      if (content.startsWith("{")) {
+        const parsed = JSON.parse(content);
+        if (parsed && typeof parsed === "object" && (parsed.client_email || parsed.type === "service_account")) {
+          return parsed;
+        }
       }
-    } catch (err) {
-      console.warn("[Firestore Persistence] Service account auth error:", err);
+    } catch {
+    }
+  }
+  if (trimmed.startsWith("ey")) {
+    try {
+      const decoded = Buffer.from(trimmed, "base64").toString("utf8").trim();
+      if (decoded.startsWith("{")) {
+        const parsed = JSON.parse(decoded);
+        if (parsed && typeof parsed === "object" && (parsed.client_email || parsed.type === "service_account")) {
+          return parsed;
+        }
+      }
+    } catch {
     }
   }
   return null;
 }
+var cachedDatastoreToken = null;
+async function getFirestoreServiceAccountToken() {
+  const credentials = parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY);
+  if (!credentials) return null;
+  const now = Date.now();
+  if (cachedDatastoreToken && now < cachedDatastoreToken.expiresAt) {
+    return cachedDatastoreToken.token;
+  }
+  try {
+    const auth = new import_googleapis.google.auth.GoogleAuth({
+      credentials,
+      scopes: ["https://www.googleapis.com/auth/datastore"]
+    });
+    const client = await auth.getClient();
+    const tokenResponse = await client.getAccessToken();
+    if (tokenResponse?.token) {
+      cachedDatastoreToken = {
+        token: tokenResponse.token,
+        expiresAt: now + 50 * 60 * 1e3
+      };
+      return tokenResponse.token;
+    }
+  } catch (err) {
+    console.warn("[Firestore Persistence] Service account auth error:", err);
+  }
+  return null;
+}
+async function getFirestoreReadToken(idToken) {
+  if (idToken) {
+    return idToken;
+  }
+  return getFirestoreServiceAccountToken();
+}
 async function syncSubscriptionToFirestore(record, idToken) {
   try {
-    const token = await getFirestoreAuthToken(idToken);
+    const token = await getFirestoreServiceAccountToken();
     if (!token) {
       return false;
     }
@@ -252,9 +308,9 @@ async function syncSubscriptionToFirestore(record, idToken) {
 }
 async function fetchSubscriptionFromFirestore(userId, idToken) {
   try {
-    const token = await getFirestoreAuthToken(idToken);
+    const token = await getFirestoreReadToken(idToken);
     if (!token) {
-      return { status: "ERROR", record: null };
+      return { status: "NOT_FOUND", record: null };
     }
     const docUrl = `${FIRESTORE_REST_BASE}/subscriptions/${encodeURIComponent(userId)}`;
     const res = await fetch(docUrl, {
@@ -274,15 +330,15 @@ async function fetchSubscriptionFromFirestore(userId, idToken) {
     if (parsed) {
       return { status: "FOUND", record: parsed };
     }
-    return { status: "ERROR", record: null };
+    return { status: "NOT_FOUND", record: null };
   } catch (err) {
     console.warn("[Firestore Persistence] Error reading subscription from Firestore:", err);
     return { status: "ERROR", record: null };
   }
 }
-async function fetchUserProfileCreatedAtFromFirestore(userId, idToken) {
+async function fetchUserProfileFromFirestore(userId, idToken) {
   try {
-    const token = await getFirestoreAuthToken(idToken);
+    const token = await getFirestoreReadToken(idToken);
     if (!token) return null;
     const docUrl = `${FIRESTORE_REST_BASE}/users/${encodeURIComponent(userId)}`;
     const res = await fetch(docUrl, {
@@ -290,8 +346,15 @@ async function fetchUserProfileCreatedAtFromFirestore(userId, idToken) {
     });
     if (!res.ok) return null;
     const docData = await res.json();
-    return docData.fields?.createdAt?.stringValue || null;
-  } catch {
+    const fields = docData.fields || {};
+    return {
+      trialEndDate: fields.trialEndDate?.stringValue,
+      trialStartDate: fields.trialStartDate?.stringValue,
+      createdAt: fields.createdAt?.stringValue || fields.updatedAt?.stringValue,
+      subscriptionStatus: fields.subscriptionStatus?.stringValue
+    };
+  } catch (err) {
+    console.warn(`[Firestore User] Could not fetch profile for user ${userId}:`, err);
     return null;
   }
 }
@@ -302,30 +365,45 @@ async function getSubscriptionRecord(userId, idToken) {
     persistSubscriptionStoreToDisk();
     return { record: remote.record, unavailable: false };
   }
-  if (remote.status === "ERROR") {
-    if (subscriptionStore.has(userId)) {
-      console.log(`[Subscription Persistence] Serving cached record for user ${userId} during Firestore outage.`);
-      return { record: subscriptionStore.get(userId), unavailable: false };
-    }
-    console.warn(`[Subscription Persistence] Firestore unavailable and no cached record for user ${userId}. Failing closed.`);
-    return { record: null, unavailable: true };
+  if (subscriptionStore.has(userId)) {
+    return { record: subscriptionStore.get(userId), unavailable: false };
   }
-  const userCreatedAt = await fetchUserProfileCreatedAtFromFirestore(userId, idToken);
+  const userProfile = await fetchUserProfileFromFirestore(userId, idToken);
   const serverNow = /* @__PURE__ */ new Date();
   let trialStart;
   let trialEnd;
   let isExpired = false;
-  if (userCreatedAt) {
-    const accountDate = new Date(userCreatedAt);
-    if (!isNaN(accountDate.getTime())) {
-      trialStart = accountDate;
-      trialEnd = new Date(accountDate.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1e3);
-      if (serverNow.getTime() > trialEnd.getTime()) {
+  if (userProfile?.trialEndDate) {
+    const parsedEnd = new Date(userProfile.trialEndDate);
+    if (!isNaN(parsedEnd.getTime())) {
+      trialEnd = parsedEnd;
+      if (userProfile.trialStartDate) {
+        const parsedStart = new Date(userProfile.trialStartDate);
+        trialStart = !isNaN(parsedStart.getTime()) ? parsedStart : new Date(parsedEnd.getTime() - TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1e3);
+      } else {
+        trialStart = new Date(parsedEnd.getTime() - TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1e3);
+      }
+      if (serverNow.getTime() >= trialEnd.getTime()) {
         isExpired = true;
       }
     } else {
+      console.warn(`[Subscription Record] Invalid trialEndDate in /users/${userId}:`, userProfile.trialEndDate);
+      isExpired = true;
       trialStart = serverNow;
-      trialEnd = new Date(serverNow.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1e3);
+      trialEnd = serverNow;
+    }
+  } else if (userProfile?.trialStartDate || userProfile?.createdAt) {
+    const accountDate = new Date(userProfile.trialStartDate || userProfile.createdAt);
+    if (!isNaN(accountDate.getTime())) {
+      trialStart = accountDate;
+      trialEnd = new Date(accountDate.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1e3);
+      if (serverNow.getTime() >= trialEnd.getTime()) {
+        isExpired = true;
+      }
+    } else {
+      isExpired = true;
+      trialStart = serverNow;
+      trialEnd = serverNow;
     }
   } else {
     trialStart = serverNow;
@@ -405,18 +483,11 @@ var PACKAGE_NAME = process.env.GOOGLE_PLAY_PACKAGE_NAME || "com.proplead.tracker
 var androidPublisherClient = null;
 function getAndroidPublisherClient() {
   if (androidPublisherClient) return androidPublisherClient;
-  const serviceAccountKey = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY;
-  if (!serviceAccountKey) {
+  const credentials = parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY);
+  if (!credentials) {
     return null;
   }
   try {
-    let credentials;
-    if (serviceAccountKey.trim().startsWith("{")) {
-      credentials = JSON.parse(serviceAccountKey);
-    } else {
-      const decoded = Buffer.from(serviceAccountKey, "base64").toString("utf8");
-      credentials = JSON.parse(decoded);
-    }
     const auth = new import_googleapis.google.auth.GoogleAuth({
       credentials,
       scopes: ["https://www.googleapis.com/auth/androidpublisher"]
@@ -588,7 +659,7 @@ async function startServer() {
     res.json({
       status: "ok",
       service: "proplead-billing-server",
-      googlePlayApiConfigured: Boolean(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY),
+      googlePlayApiConfigured: Boolean(parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY)),
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
   });

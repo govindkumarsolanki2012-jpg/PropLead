@@ -11,7 +11,7 @@ import { PropertiesList } from './components/properties/PropertiesList';
 import { CalendarView } from './components/calendar/CalendarView';
 import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { SettingsView } from './components/settings/SettingsView';
-import { Building2 } from 'lucide-react';
+import { SplashScreen } from './components/common/SplashScreen';
 
 // Modals
 import { QuickAddLeadModal } from './components/leads/QuickAddLeadModal';
@@ -43,7 +43,7 @@ import {
 } from './utils/storage';
 import { Lead, Property, UserProfile, WhatsAppTemplate, FollowUpType, TabType } from './types';
 import { INITIAL_USER_PROFILE } from './data/initialData';
-import { formatRelativeDate } from './utils/formatters';
+import { formatRelativeDate, normalizePhoneForMatch } from './utils/formatters';
 import { getEffectiveSubscriptionStatus, setAuthoritativeServerTime } from './utils/billing';
 import {
   subscribeToAuth,
@@ -65,8 +65,29 @@ import { syncLocalDataToFirestore } from './utils/migration';
 import { FirebaseUser } from './lib/firebase';
 
 export function App() {
-  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
+  // Launch Splash and Firebase Authentication coordination
+  // Display the PropLead logo and app name for ~1 second while checking Firebase auth state concurrently
+  const [isSplashTimerActive, setIsSplashTimerActive] = useState<boolean>(true);
+  const [isAuthResolved, setIsAuthResolved] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+
+  // 1-second splash timer
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsSplashTimerActive(false);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Safety fallback for offline / extreme latency
+  useEffect(() => {
+    const safetyTimer = setTimeout(() => {
+      setIsAuthResolved((prev) => (prev ? prev : true));
+    }, 4000);
+    return () => clearTimeout(safetyTimer);
+  }, []);
+
+  const isSplashVisible = isSplashTimerActive || !isAuthResolved;
   const [profile, setProfile] = useState<UserProfile>(getStoredProfile());
   const [leads, setLeads] = useState<Lead[]>(getStoredLeads());
   const [properties, setProperties] = useState<Property[]>(getStoredProperties());
@@ -77,6 +98,9 @@ export function App() {
   const [currentTab, setCurrentTab] = useState<TabType>('home');
   const [tabHistory, setTabHistory] = useState<TabType[]>(['home']);
   const [leadsFilter, setLeadsFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [propertySearchQuery, setPropertySearchQuery] = useState<string>('');
+  const [dashboardSearchQuery, setDashboardSearchQuery] = useState<string>('');
 
   const handleTabChange = useCallback((newTab: TabType) => {
     setCurrentTab(newTab);
@@ -90,6 +114,22 @@ export function App() {
       }
       return [...prev, newTab];
     });
+  }, []);
+
+  const handleSearchChange = useCallback((query: string) => {
+    if (currentTab === 'home') {
+      setDashboardSearchQuery(query);
+      return;
+    }
+    if (currentTab === 'properties') {
+      setPropertySearchQuery(query);
+      return;
+    }
+    setSearchQuery(query);
+  }, [currentTab]);
+
+  const handleSearchFocus = useCallback(() => {
+    // When the user taps the search bar on Dashboard or any tab, do NOT automatically navigate away
   }, []);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     try {
@@ -136,6 +176,7 @@ export function App() {
 
   // Fresh references ref for the single back button listener
   const appStateRef = useRef({
+    isSplashVisible,
     currentUser,
     currentTab,
     tabHistory,
@@ -155,6 +196,7 @@ export function App() {
 
   useEffect(() => {
     appStateRef.current = {
+      isSplashVisible,
       currentUser,
       currentTab,
       tabHistory,
@@ -177,8 +219,8 @@ export function App() {
   const handleBack = useCallback(() => {
     const s = appStateRef.current;
 
-    // If not authenticated, back exits the app
-    if (!s.currentUser) {
+    // If during launch splash or not authenticated, back exits the app
+    if (s.isSplashVisible || !s.currentUser) {
       if (Capacitor.isNativePlatform()) {
         CapApp.exitApp();
       } else {
@@ -332,7 +374,7 @@ export function App() {
 
     const unsubAuth = subscribeToAuth(async (user) => {
       setCurrentUser(user);
-      setIsAuthChecking(false);
+      setIsAuthResolved(true);
 
       if (user) {
         setIsCloudSynced(true);
@@ -515,13 +557,41 @@ export function App() {
   };
 
   const handleImportBulkLeads = (newLeads: Lead[]) => {
-    const updated = [...newLeads, ...leads];
+    const existingPhones = new Set(
+      leads.map((l) => normalizePhoneForMatch(l.phone)).filter(Boolean)
+    );
+    const existingNames = new Set(
+      leads.map((l) => l.name.trim().toLowerCase()).filter(Boolean)
+    );
+
+    const nonDuplicates = newLeads.filter((nl) => {
+      const normPhone = normalizePhoneForMatch(nl.phone);
+      if (normPhone && existingPhones.has(normPhone)) {
+        return false;
+      }
+      if (!normPhone && nl.name && existingNames.has(nl.name.trim().toLowerCase())) {
+        return false;
+      }
+      return true;
+    });
+
+    if (nonDuplicates.length === 0) {
+      showToast('All selected contacts are already in your leads list.');
+      return;
+    }
+
+    const updated = [...nonDuplicates, ...leads];
     setLeads(updated);
     saveStoredLeads(updated);
     if (currentUser?.uid) {
-      batchAddLeadsToFirestore(currentUser.uid, newLeads).catch((e) => console.warn('Firestore batch leads error:', e));
+      batchAddLeadsToFirestore(currentUser.uid, nonDuplicates).catch((e) => console.warn('Firestore batch leads error:', e));
     }
-    showToast(`Imported ${newLeads.length} leads successfully! 👏`);
+    const skipped = newLeads.length - nonDuplicates.length;
+    if (skipped > 0) {
+      showToast(`Imported ${nonDuplicates.length} leads (${skipped} duplicate${skipped === 1 ? '' : 's'} skipped).`);
+    } else {
+      showToast(`Imported ${nonDuplicates.length} leads successfully! 👏`);
+    }
   };
 
   // Property CRUD handlers
@@ -689,20 +759,8 @@ export function App() {
         </div>
       )}
 
-      {isAuthChecking ? (
-        <div
-          className="flex-1 flex flex-col items-center justify-center bg-white dark:bg-slate-900 text-slate-900 dark:text-white p-6"
-          style={{
-            paddingTop: 'max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px))',
-            paddingBottom: 'max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px))',
-          }}
-        >
-          <div className="w-16 h-16 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-lg shadow-emerald-600/20 mb-4 animate-pulse">
-            <Building2 className="w-8 h-8" />
-          </div>
-          <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">PropLead</h1>
-          <p className="text-xs text-slate-400 mt-1">Connecting securely...</p>
-        </div>
+      {isSplashVisible ? (
+        <SplashScreen />
       ) : !currentUser ? (
         <AuthFlow />
       ) : (
@@ -710,10 +768,22 @@ export function App() {
           {/* Header */}
           <Header
             profile={profile}
-            onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
-            onOpenSearch={() => {
-              setLeadsFilter('all');
-              handleTabChange('leads');
+            currentTab={currentTab}
+            searchQuery={
+              currentTab === 'home'
+                ? dashboardSearchQuery
+                : currentTab === 'properties'
+                ? propertySearchQuery
+                : searchQuery
+            }
+            onSearchChange={handleSearchChange}
+            onSearchFocus={handleSearchFocus}
+            onOpenQuickAdd={() => {
+              if (currentTab === 'properties') {
+                guardLockedFeature('Add Property', () => setIsAddPropertyOpen(true));
+              } else {
+                guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true));
+              }
             }}
             onOpenSubscription={() => setIsSubscriptionOpen(true)}
           />
@@ -722,14 +792,19 @@ export function App() {
           {currentTab === 'home' && (
             <Dashboard
               leads={leads}
+              properties={properties}
               profile={profile}
+              searchQuery={dashboardSearchQuery}
+              onClearSearch={() => setDashboardSearchQuery('')}
               onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
               onOpenLeadDetail={(l) => setDetailLead(l)}
+              onOpenPropertyDetail={(p) => setDetailProperty(p)}
               onOpenWhatsApp={(l) => setWhatsAppLead(l)}
               onOpenSchedule={(l) => guardLockedFeature('Schedule Follow-Up', () => setScheduleLead(l))}
               onOpenSubscription={() => setIsSubscriptionOpen(true)}
               onNavigateToLeadsWithFilter={(filter) => {
                 setLeadsFilter(filter);
+                setSearchQuery('');
                 handleTabChange('leads');
               }}
               onNavigateToTab={(tab) => handleTabChange(tab)}
@@ -742,6 +817,8 @@ export function App() {
               leads={leads}
               profile={profile}
               initialFilter={leadsFilter}
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
               onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
               onOpenLeadDetail={(l) => setDetailLead(l)}
               onOpenWhatsApp={(l) => setWhatsAppLead(l)}
@@ -754,6 +831,8 @@ export function App() {
               properties={properties}
               leads={leads}
               profile={profile}
+              searchQuery={propertySearchQuery}
+              onSearchChange={setPropertySearchQuery}
               onOpenAddProperty={() => guardLockedFeature('Add Property', () => setIsAddPropertyOpen(true))}
               onOpenPropertyDetail={(prop) => setDetailProperty(prop)}
               onOpenShareModal={(prop, preselectedLead) =>
@@ -967,6 +1046,7 @@ export function App() {
       <ImportContactsModal
         isOpen={isImportContactsOpen}
         onClose={() => setIsImportContactsOpen(false)}
+        existingLeads={leads}
         onImportLeads={handleImportBulkLeads}
       />
     </MobileFrame>

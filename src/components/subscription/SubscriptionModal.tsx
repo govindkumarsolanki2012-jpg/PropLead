@@ -11,7 +11,6 @@ import {
   CheckCircle,
   Clock,
   AlertTriangle,
-  Play,
   RotateCcw,
 } from 'lucide-react';
 import { UserProfile, GooglePlaySubscriptionProduct } from '../../types';
@@ -22,7 +21,6 @@ import {
   getEffectiveSubscriptionStatus,
   openGooglePlayManageSubscriptions,
   openGooglePlayFixPayment,
-  simulateBillingState,
 } from '../../utils/billing';
 import confetti from 'canvas-confetti';
 
@@ -46,10 +44,15 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [productDetails, setProductDetails] = useState<GooglePlaySubscriptionProduct | null>(null);
-  const [showTestingSuite, setShowTestingSuite] = useState<boolean>(false);
 
-  const { status, daysRemaining, expiryFormatted, isSubscribed, isLocked } =
-    getEffectiveSubscriptionStatus(profile);
+  const {
+    status,
+    daysRemaining,
+    expiryFormatted,
+    isSubscribed,
+    isLocked,
+    isTrialEndDateMissingOrInvalid,
+  } = getEffectiveSubscriptionStatus(profile);
 
   useEffect(() => {
     if (isOpen) {
@@ -124,16 +127,6 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     }
   };
 
-  const handleSimulate = async (targetState: any, customDays?: number) => {
-    setIsProcessing(true);
-    const result = await simulateBillingState(profile.id, targetState, customDays);
-    if (result.success && result.profileUpdates) {
-      onUpdateProfile(result.profileUpdates);
-      setSuccessMessage(`Simulated state updated: ${targetState}`);
-    }
-    setIsProcessing(false);
-  };
-
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
       <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
@@ -175,7 +168,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
             </div>
           )}
 
-          {/* Current State Indicator */}
+          {/* Current State Indicators */}
           {status === 'ACTIVE' && (
             <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center justify-between text-xs">
               <div className="flex items-center gap-2">
@@ -229,6 +222,67 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
             </div>
           )}
 
+          {/* Dynamic Real Trial Countdown Indicator */}
+          {status === 'TRIAL' && (
+            <div
+              className={`p-3.5 rounded-2xl border text-xs flex items-center justify-between transition-all ${
+                daysRemaining <= 3
+                  ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700'
+                  : daysRemaining <= 7
+                  ? 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800'
+                  : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700/60'
+              }`}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div
+                  className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 text-white shadow-2xs ${
+                    daysRemaining <= 3 ? 'bg-amber-500' : 'bg-emerald-600'
+                  }`}
+                >
+                  <Clock className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <div className="font-bold text-slate-900 dark:text-white text-xs truncate">
+                    Free Trial Active
+                  </div>
+                  <div
+                    className={`text-[12px] font-bold mt-0.5 ${
+                      daysRemaining <= 3
+                        ? 'text-amber-700 dark:text-amber-300'
+                        : 'text-emerald-700 dark:text-emerald-400'
+                    }`}
+                  >
+                    {daysRemaining} {daysRemaining === 1 ? 'day' : 'days'} remaining
+                  </div>
+                </div>
+              </div>
+              <div className="flex-shrink-0 pl-2">
+                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60 px-2.5 py-1 rounded-full whitespace-nowrap">
+                  ₹0 Today
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Trial Expired / Unverified State */}
+          {status === 'EXPIRED' && (
+            <div className="p-3.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-700 rounded-2xl text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center flex-shrink-0 mt-0.5 shadow-2xs">
+                <AlertCircle className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="font-bold text-rose-900 dark:text-rose-100 text-xs">
+                  {isTrialEndDateMissingOrInvalid ? 'Trial Status Unverified' : 'Free Trial Expired (0 Days Remaining)'}
+                </div>
+                <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 leading-relaxed">
+                  {isTrialEndDateMissingOrInvalid
+                    ? 'Authoritative trial end date could not be verified from Firestore. Subscribe now for ₹49/month to activate full access.'
+                    : 'Your free trial period has ended. Subscribe now for ₹49/month to continue adding leads, properties, and follow-ups.'}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Pricing Box */}
           <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-500/40 flex items-center justify-between shadow-2xs">
             <div>
@@ -236,7 +290,13 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                 ₹49<span className="text-sm font-semibold text-slate-500">/month</span>
               </div>
               <div className="text-xs font-bold text-emerald-700 dark:text-emerald-400 mt-0.5">
-                30-day free trial
+                {status === 'TRIAL'
+                  ? `${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} trial remaining`
+                  : status === 'ACTIVE'
+                  ? 'Active Pro Subscription'
+                  : status === 'CANCELED_BUT_ACTIVE'
+                  ? 'Access until period end'
+                  : 'Monthly Subscription'}
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                 Auto-renewing monthly subscription • Cancel anytime
@@ -273,79 +333,13 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           </div>
 
           {/* Google Play Billing Assurance */}
-          <div className="flex items-center gap-2.5 text-[11px] text-slate-500 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+          <div className="flex items-center gap-2.5 text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
             <ShieldCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
             <span>
-              Secure Google Play Billing. You will only be billed ₹49/month after the 30-day trial ends.
+              {status === 'TRIAL' && daysRemaining > 0
+                ? `Secure Google Play Billing. You will be billed ₹49/month after your trial ends (${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} remaining). Cancel anytime.`
+                : 'Secure Google Play Billing. Auto-renews at ₹49/month. Cancel anytime in Google Play Store.'}
             </span>
-          </div>
-
-          {/* Testing Simulator Toolbar for Verification */}
-          <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
-            <button
-              onClick={() => setShowTestingSuite(!showTestingSuite)}
-              className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline block mx-auto font-medium"
-            >
-              {showTestingSuite ? 'Hide Test Suite' : '🛠️ Google Play Billing & Trial Test Suite (17 Scenarios)'}
-            </button>
-
-            {showTestingSuite && (
-              <div className="mt-3 p-3 bg-slate-100 dark:bg-slate-800/90 rounded-2xl space-y-2.5 text-xs border border-slate-200 dark:border-slate-700">
-                <div className="font-bold text-slate-800 dark:text-slate-200 text-[11px]">
-                  Simulate Account & Google Play States:
-                </div>
-                <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-                  <button
-                    onClick={() => handleSimulate('TRIAL', 30)}
-                    className="p-1.5 bg-white dark:bg-slate-700 rounded-lg border font-medium text-left hover:border-emerald-500"
-                  >
-                    1. Trial: 30 Days Left
-                  </button>
-                  <button
-                    onClick={() => handleSimulate('TRIAL', 15)}
-                    className="p-1.5 bg-white dark:bg-slate-700 rounded-lg border font-medium text-left hover:border-emerald-500"
-                  >
-                    2. Trial: 15 Days Left
-                  </button>
-                  <button
-                    onClick={() => handleSimulate('TRIAL', 7)}
-                    className="p-1.5 bg-white dark:bg-slate-700 rounded-lg border font-medium text-left hover:border-amber-500"
-                  >
-                    3. Trial: 7 Days Left
-                  </button>
-                  <button
-                    onClick={() => handleSimulate('TRIAL', 1)}
-                    className="p-1.5 bg-white dark:bg-slate-700 rounded-lg border font-medium text-left hover:border-amber-500"
-                  >
-                    4. Trial: 1 Day Left
-                  </button>
-                  <button
-                    onClick={() => handleSimulate('EXPIRED')}
-                    className="p-1.5 bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 rounded-lg border border-rose-300 font-bold text-left"
-                  >
-                    5. Trial Expired (0 Days)
-                  </button>
-                  <button
-                    onClick={() => handleSimulate('ACTIVE')}
-                    className="p-1.5 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 rounded-lg border border-emerald-300 font-bold text-left"
-                  >
-                    6. Active Pro Subscriber
-                  </button>
-                  <button
-                    onClick={() => handleSimulate('CANCELED_BUT_ACTIVE')}
-                    className="p-1.5 bg-blue-50 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 rounded-lg border border-blue-300 font-medium text-left"
-                  >
-                    7. Canceled (Active till date)
-                  </button>
-                  <button
-                    onClick={() => handleSimulate('PAYMENT_ISSUE')}
-                    className="p-1.5 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 rounded-lg border border-amber-300 font-bold text-left"
-                  >
-                    8. Payment Issue (Grace)
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
@@ -375,7 +369,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                 {isProcessing
                   ? processingStatus || 'Processing...'
                   : status === 'TRIAL' && daysRemaining > 0
-                  ? 'Start Free Trial (₹49/mo after 30d)'
+                  ? `Subscribe for ₹49/month (${daysRemaining}d trial left)`
                   : 'Subscribe for ₹49/month'}
               </span>
             </button>

@@ -26,12 +26,15 @@ import {
   TRANSACTION_TYPE_LABELS,
 } from '../../utils/formatters';
 import { findMatchingLeads } from '../../utils/propertyMatching';
+import { matchPropertyWithCityAliases } from '../../utils/cityAliases';
 import { useTranslation } from '../../context/LanguageContext';
 
 interface PropertiesListProps {
   properties: Property[];
   leads: Lead[];
   profile: UserProfile;
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
   onOpenAddProperty: () => void;
   onOpenPropertyDetail: (property: Property) => void;
   onOpenShareModal: (property: Property, preselectedLead?: Lead | null) => void;
@@ -41,12 +44,17 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
   properties,
   leads,
   profile,
+  searchQuery: externalSearchQuery,
+  onSearchChange: externalOnSearchChange,
   onOpenAddProperty,
   onOpenPropertyDetail,
   onOpenShareModal,
 }) => {
   const { t } = useTranslation();
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [internalSearchQuery, setInternalSearchQuery] = useState<string>('');
+
+  const searchQuery = externalSearchQuery !== undefined ? externalSearchQuery : internalSearchQuery;
+  const setSearchQuery = externalOnSearchChange || setInternalSearchQuery;
   const [selectedTransaction, setSelectedTransaction] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
@@ -57,17 +65,9 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
   // Filter and Sort properties
   const filteredProperties = useMemo(() => {
     return properties.filter((p) => {
-      // 1. Search Query
+      // 1. Search Query (supports bidirectional Indian city alias matching)
       if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const matchTitle = (p.title || '').toLowerCase().includes(q);
-        const matchLocality = (p.locality || '').toLowerCase().includes(q);
-        const matchCity = (p.city || '').toLowerCase().includes(q);
-        const matchBhk = (p.bhk || '').toLowerCase().includes(q);
-        const matchOwner = (p.ownerName || '').toLowerCase().includes(q);
-        const matchType = (p.propertyType || '').toLowerCase().includes(q);
-
-        if (!matchTitle && !matchLocality && !matchCity && !matchBhk && !matchOwner && !matchType) {
+        if (!matchPropertyWithCityAliases(p, searchQuery)) {
           return false;
         }
       }

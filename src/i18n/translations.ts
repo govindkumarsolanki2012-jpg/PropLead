@@ -44,6 +44,13 @@ export interface TranslationDictionary {
   dash_whatsapp: string;
   dash_today_schedule: string;
   dash_pipeline_overview: string;
+  dash_search_placeholder: string;
+  dash_search_results_for: string;
+  dash_matching_leads: string;
+  dash_matching_properties: string;
+  dash_no_search_results: string;
+  dash_no_search_results_desc: string;
+  dash_clear_search: string;
 
   // Leads View
   leads_title: string;
@@ -291,6 +298,13 @@ export const translations: Record<Language, TranslationDictionary> = {
     dash_whatsapp: 'WhatsApp',
     dash_today_schedule: "Today's Schedule & Site Visits",
     dash_pipeline_overview: 'Pipeline Overview',
+    dash_search_placeholder: 'Search leads & properties...',
+    dash_search_results_for: 'Search results for',
+    dash_matching_leads: 'Matching Leads',
+    dash_matching_properties: 'Matching Properties',
+    dash_no_search_results: 'No leads or properties found',
+    dash_no_search_results_desc: 'Try searching with a different name, phone, locality, BHK, or property type.',
+    dash_clear_search: 'Clear Search',
 
     // Leads
     leads_title: 'Leads Management',
@@ -535,6 +549,13 @@ export const translations: Record<Language, TranslationDictionary> = {
     dash_whatsapp: 'व्हाट्सएप',
     dash_today_schedule: 'आज का शेड्यूल और साइट विज़िट्स',
     dash_pipeline_overview: 'पाइपलाइन अवलोकन',
+    dash_search_placeholder: 'लीड्स और प्रॉपर्टीज़ खोजें...',
+    dash_search_results_for: 'खोज परिणाम',
+    dash_matching_leads: 'मैचिंग लीड्स',
+    dash_matching_properties: 'मैचिंग प्रॉपर्टीज़',
+    dash_no_search_results: 'कोई लीड या प्रॉपर्टी नहीं मिली',
+    dash_no_search_results_desc: 'किसी अन्य नाम, फोन नंबर, इलाके, BHK या प्रॉपर्टी टाइप से खोजें।',
+    dash_clear_search: 'सर्च क्लियर करें',
 
     // Leads
     leads_title: 'लीड्स प्रबंधन',
@@ -779,6 +800,13 @@ export const translations: Record<Language, TranslationDictionary> = {
     dash_whatsapp: 'WhatsApp',
     dash_today_schedule: "Aaj ka Schedule aur Site Visits",
     dash_pipeline_overview: 'Pipeline Overview',
+    dash_search_placeholder: 'Leads aur properties search karein...',
+    dash_search_results_for: 'Search results',
+    dash_matching_leads: 'Matching Leads',
+    dash_matching_properties: 'Matching Properties',
+    dash_no_search_results: 'Koi lead ya property nahi mili',
+    dash_no_search_results_desc: 'Dusre naam, phone, locality, BHK ya property type se search karein.',
+    dash_clear_search: 'Search Clear Karein',
 
     // Leads
     leads_title: 'Leads Management',
