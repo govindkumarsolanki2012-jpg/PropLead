@@ -52,31 +52,37 @@ export const MobileFrame: React.FC<MobileFrameProps> = ({ children, darkMode }) 
       {/* Frame Container */}
       <div className={`mx-auto ${isPhoneFrame ? 'py-8 flex justify-center items-center min-h-[calc(100vh-45px)]' : ''}`}>
         {isPhoneFrame ? (
-          /* Realistic Android Phone Mockup Frame */
-          <div className="relative w-[412px] h-[860px] bg-slate-900 rounded-[44px] p-3 shadow-2xl ring-1 ring-slate-800 ring-offset-4 ring-offset-slate-950 flex flex-col overflow-hidden">
-            {/* Top Phone Speaker / Camera Notch */}
-            <div className="absolute top-4 left-1/2 -translate-x-1/2 w-28 h-5 bg-black rounded-full z-50 flex items-center justify-center">
-              <div className="w-3 h-3 rounded-full bg-slate-950 border border-slate-800 ring-1 ring-emerald-500/20"></div>
+          /* Realistic Android Phone Mockup Frame (Edge-to-Edge simulation) */
+          <div className="relative w-[412px] h-[860px] bg-slate-900 rounded-[44px] p-2.5 shadow-2xl ring-1 ring-slate-800 ring-offset-4 ring-offset-slate-950 flex flex-col overflow-hidden">
+            {/* Top Phone Speaker Notch */}
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 w-24 h-4 bg-black rounded-full z-50 flex items-center justify-center pointer-events-none">
+              <div className="w-2.5 h-2.5 rounded-full bg-slate-950 border border-slate-800 ring-1 ring-emerald-500/20"></div>
             </div>
 
-            {/* Android Status Bar */}
-            <div className="h-7 w-full flex items-center justify-between px-6 text-[11px] font-medium tracking-tight text-slate-400 select-none z-40 bg-white dark:bg-slate-900 pt-1">
-              <span>{currentTime}</span>
-              <div className="flex items-center gap-2">
-                <Wifi className="w-3 h-3 text-slate-400" />
-                <span className="text-[10px] font-semibold">5G</span>
-                <Battery className="w-3.5 h-3.5 text-slate-400" />
+            {/* App Screen inside phone with simulated Android edge-to-edge safe areas */}
+            <div
+              className="flex-1 w-full bg-slate-50 dark:bg-slate-900 rounded-[34px] overflow-hidden flex flex-col relative border border-slate-200 dark:border-slate-800"
+              style={{
+                '--safe-area-inset-top': '32px',
+                '--safe-area-inset-bottom': '18px',
+              } as React.CSSProperties}
+            >
+              {/* Android Status Bar Overlay */}
+              <div className="pointer-events-none absolute top-0 left-0 right-0 h-8 flex items-center justify-between px-6 text-[11px] font-semibold tracking-tight text-slate-700 dark:text-slate-300 select-none z-40 pt-1.5">
+                <span>{currentTime}</span>
+                <div className="flex items-center gap-2">
+                  <Wifi className="w-3 h-3 text-slate-700 dark:text-slate-300" />
+                  <span className="text-[10px] font-bold">5G</span>
+                  <Battery className="w-3.5 h-3.5 text-slate-700 dark:text-slate-300" />
+                </div>
               </div>
-            </div>
 
-            {/* App Screen inside phone */}
-            <div className="flex-1 w-full bg-slate-50 dark:bg-slate-900 rounded-[32px] overflow-hidden flex flex-col relative border border-slate-200 dark:border-slate-800">
               {children}
-            </div>
 
-            {/* Android Navigation Gesture Pill */}
-            <div className="h-4 w-full flex items-center justify-center bg-slate-900">
-              <div className="w-32 h-1 bg-slate-600 rounded-full"></div>
+              {/* Android Navigation Gesture Pill Overlay */}
+              <div className="pointer-events-none absolute bottom-1.5 left-0 right-0 h-3 flex items-center justify-center z-40">
+                <div className="w-32 h-1 bg-slate-400 dark:bg-slate-600 rounded-full"></div>
+              </div>
             </div>
           </div>
         ) : (

@@ -42,8 +42,13 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   ];
 
   return (
-    <nav className="sticky bottom-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 safe-bottom">
-      <div className="flex items-center justify-around px-1 py-1.5 max-w-xl mx-auto relative">
+    <nav
+      className="sticky bottom-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 transition-colors safe-bottom-nav"
+      style={{
+        paddingBottom: 'calc(0.375rem + max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px)))',
+      }}
+    >
+      <div className="flex items-center justify-around px-1 pt-1.5 pb-0.5 max-w-xl mx-auto relative">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = currentTab === tab.id;

@@ -221,7 +221,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[94vh] flex flex-col overflow-hidden animate-slide-up">
+      <div className="bg-white dark:bg-slate-900 w-full max-w-xl rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[94vh] flex flex-col overflow-hidden animate-slide-up safe-bottom">
         {/* Top App Bar with Close & Quick Actions */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/80">
           <div className="flex items-center gap-2">
@@ -323,8 +323,12 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
             </button>
 
             <button
-              onClick={() => onOpenSchedule(lead)}
-              className="py-2.5 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 border border-slate-200 dark:border-slate-700 transition-all"
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenSchedule(lead);
+              }}
+              className="py-2.5 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
             >
               <Calendar className="w-4 h-4 text-emerald-600" />
               <span>Follow-Up</span>
@@ -366,16 +370,24 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
             <div className="flex items-center gap-1.5 flex-shrink-0">
               {lead.nextFollowUpDate && (
                 <button
-                  onClick={handleMarkFollowUpComplete}
-                  className="px-2.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-emerald-50 text-emerald-700 dark:text-emerald-300 rounded-lg text-xs font-bold border border-emerald-300 dark:border-emerald-700 flex items-center gap-1 transition-colors"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleMarkFollowUpComplete();
+                  }}
+                  className="px-2.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-emerald-50 text-emerald-700 dark:text-emerald-300 rounded-lg text-xs font-bold border border-emerald-300 dark:border-emerald-700 flex items-center gap-1 transition-colors cursor-pointer"
                 >
                   <Check className="w-3.5 h-3.5" />
                   <span className="hidden xs:inline">Done</span>
                 </button>
               )}
               <button
-                onClick={() => onOpenSchedule(lead)}
-                className="px-2.5 py-1.5 bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg text-xs font-bold transition-colors"
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenSchedule(lead);
+                }}
+                className="px-2.5 py-1.5 bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95 rounded-lg text-xs font-bold transition-all cursor-pointer"
               >
                 {lead.nextFollowUpDate ? 'Reschedule' : 'Set Date'}
               </button>
@@ -955,6 +967,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 leadId={lead.id}
                 voiceNotes={lead.voiceNotes || []}
                 onAddVoiceNote={(newVn) => {
+                  if (!newVn || !newVn.audioUrl || newVn.audioUrl.trim().length < 20) {
+                    return;
+                  }
                   onUpdateLead({
                     ...lead,
                     voiceNotes: [newVn, ...(lead.voiceNotes || [])],

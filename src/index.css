@@ -2,6 +2,14 @@
 
 @custom-variant dark (&:is(.dark, .dark *));
 
+:root {
+  /* Dynamic safe area CSS variables respecting Capacitor, Android WebView, and standard env() */
+  --safe-area-inset-top: env(safe-area-inset-top, 0px);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-inset-left: env(safe-area-inset-left, 0px);
+  --safe-area-inset-right: env(safe-area-inset-right, 0px);
+}
+
 @layer utilities {
   /* Hide scrollbar for Chrome, Safari and Opera */
   .no-scrollbar::-webkit-scrollbar {
@@ -14,10 +22,16 @@
   }
   
   .safe-top {
-    padding-top: env(safe-area-inset-top, 0px);
+    padding-top: max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px));
   }
   .safe-bottom {
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px));
+  }
+  .safe-header {
+    padding-top: calc(0.75rem + max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)));
+  }
+  .safe-bottom-nav {
+    padding-bottom: calc(0.375rem + max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px)));
   }
 }
 

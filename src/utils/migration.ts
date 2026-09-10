@@ -26,7 +26,8 @@ const DEMO_PROP_IDS = new Set([
 export async function syncLocalDataToFirestore(
   userId: string,
   userEmail?: string | null,
-  userName?: string | null
+  userName?: string | null,
+  userPhone?: string | null
 ): Promise<MigrationResult> {
   if (!userId) {
     return { migrated: false, leadsUploaded: 0, propertiesUploaded: 0, error: 'No userId provided' };
@@ -74,12 +75,16 @@ export async function syncLocalDataToFirestore(
       }
     }
 
-    // A. Migrate Profile if not already in Firestore
+    // A. Migrate/Initialize Profile ONLY if not already in Firestore
     if (!userSnap.exists()) {
       const isDemoName = localProfile.name === 'Rajesh Sharma' || localProfile.name === 'Vikram Malhotra';
       const isDemoPhone = localProfile.phone === '9820123456';
-      const cleanName = userName || (!isDemoName ? localProfile.name : '') || 'Property Agent';
-      const cleanPhone = !isDemoPhone ? (localProfile.phone || '') : '';
+      const cleanName = userName || (!isDemoName ? localProfile.name : '') || (userEmail ? userEmail.split('@')[0] : 'Property Agent');
+      const cleanPhone = userPhone || (!isDemoPhone ? localProfile.phone : '') || '';
+
+      const now = new Date();
+      const trialStartDate = localProfile.trialStartDate || now.toISOString();
+      const trialEndDate = localProfile.trialEndDate || new Date(new Date(trialStartDate).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
       const mergedProfile: Partial<UserProfile> = {
         ...localProfile,
@@ -88,11 +93,11 @@ export async function syncLocalDataToFirestore(
         phone: cleanPhone,
         email: userEmail || localProfile.email || '',
         isOnboarded: true,
-        isTrialActive: localProfile.isTrialActive ?? true,
-        trialDaysRemaining: localProfile.trialDaysRemaining ?? 30,
-        trialStartDate: localProfile.trialStartDate || new Date().toISOString(),
-        subscriptionStatus: localProfile.subscriptionStatus || 'TRIAL',
-        isSubscribed: localProfile.isSubscribed || false,
+        isTrialActive: true,
+        trialStartDate,
+        trialEndDate,
+        subscriptionStatus: 'TRIAL',
+        isSubscribed: false,
       };
       batch.set(userDocRef, mergedProfile, { merge: true });
       batchOperations++;

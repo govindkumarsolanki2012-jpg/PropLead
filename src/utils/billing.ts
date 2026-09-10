@@ -84,8 +84,9 @@ export function getAuthoritativeServerNow(): number {
 
 /**
  * Calculates remaining trial days dynamically from authoritative trialEndDate and serverNow.
- * Safe fallback: returns 0 when trialEndDate is invalid or missing.
- * Does NOT assume a fresh 30-day trial.
+ * Strictly uses trialEndDate from Firestore.
+ * Safe fallback: returns 0 and logs debugging warning when trialEndDate is invalid or missing.
+ * Does NOT hardcode 30, 29, or assume a fresh trial.
  */
 export function calculateTrialDaysRemaining(
   startDateStr?: string,
@@ -104,28 +105,32 @@ export function calculateTrialDaysRemaining(
       now = getAuthoritativeServerNow();
     }
 
-    // 2. Resolve end timestamp from authoritative trialEndDate
-    let endTimestamp: number;
-    if (endDateStr) {
-      endTimestamp = new Date(endDateStr).getTime();
-    } else if (startDateStr) {
-      const start = new Date(startDateStr).getTime();
-      endTimestamp = start + 30 * 24 * 60 * 60 * 1000;
-    } else {
-      // Safe fallback: missing dates, return 0 (never grant 30 days)
+    // 2. Authoritative Firestore trialEndDate
+    if (!endDateStr) {
+      console.warn('[Trial Countdown] Authoritative trialEndDate is missing from Firestore profile.', {
+        startDateStr,
+        endDateStr,
+      });
       return 0;
     }
 
+    const endTimestamp = new Date(endDateStr).getTime();
     if (isNaN(endTimestamp)) {
-      // Safe fallback: invalid timestamp, return 0 (never grant 30 days)
+      console.warn('[Trial Countdown] Authoritative trialEndDate is an invalid date string:', endDateStr);
       return 0;
     }
 
     const diffMs = endTimestamp - now;
+    if (diffMs <= 0) {
+      return 0;
+    }
+
+    // Dynamic days remaining: decreases each day until 0
+    // E.g., trial started yesterday (24h ago with 30d duration) yields exactly 29 days today
     const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
     return Math.max(0, days);
   } catch (err) {
-    console.error('Error calculating trial days:', err);
+    console.error('[Trial Countdown] Error calculating trial days from authoritative trialEndDate:', err);
     // Safe fallback: never grant 30 days on error
     return 0;
   }
@@ -144,6 +149,7 @@ export function getEffectiveSubscriptionStatus(
   isLocked: boolean;
   expiryFormatted?: string;
   displayStatusText: string;
+  isTrialEndDateMissingOrInvalid: boolean;
 } {
   // Normalize legacy string flags if present
   let rawStatus = profile.subscriptionStatus;
@@ -153,16 +159,32 @@ export function getEffectiveSubscriptionStatus(
   // Server authoritative status takes precedence
   let status: SubscriptionStatus = (rawStatus as SubscriptionStatus) || (profile.isSubscribed ? 'ACTIVE' : 'TRIAL');
 
-  const serverNow = customServerNow ?? (profile.serverTimestamp ? new Date(profile.serverTimestamp).getTime() : undefined);
+  const serverNow = customServerNow ?? getAuthoritativeServerNow();
+
+  // Validate trialEndDate presence and integrity
+  const hasValidTrialEndDate = Boolean(
+    profile.trialEndDate && !isNaN(new Date(profile.trialEndDate).getTime())
+  );
+  const isTrialEndDateMissingOrInvalid = !hasValidTrialEndDate && (status === 'TRIAL' || status === 'EXPIRED');
+
+  if (isTrialEndDateMissingOrInvalid && !profile.isSubscribed) {
+    console.warn('[Trial Countdown Debug] User profile has missing or invalid authoritative trialEndDate:', {
+      userId: profile.id,
+      trialEndDate: profile.trialEndDate,
+      trialStartDate: profile.trialStartDate,
+      subscriptionStatus: profile.subscriptionStatus,
+    });
+  }
+
   let days = calculateTrialDaysRemaining(profile.trialStartDate, profile.trialEndDate, serverNow);
 
-  // If server has authoritatively set status to EXPIRED, days remaining is strictly 0
-  if (status === 'EXPIRED') {
+  // If server has authoritatively set status to EXPIRED or trialEndDate is missing/invalid, days remaining is strictly 0
+  if (status === 'EXPIRED' || (!hasValidTrialEndDate && status === 'TRIAL')) {
     days = 0;
   }
 
   // Check trial expiration: if trial days reached 0, transition to EXPIRED
-  if (status === 'TRIAL' && days <= 0) {
+  if (status === 'TRIAL' && (days <= 0 || !hasValidTrialEndDate)) {
     status = 'EXPIRED';
   }
 
@@ -205,7 +227,7 @@ export function getEffectiveSubscriptionStatus(
       displayStatusText = 'Payment Issue • Action Required';
       break;
     case 'EXPIRED':
-      displayStatusText = 'Trial Expired';
+      displayStatusText = isTrialEndDateMissingOrInvalid ? 'Trial Unverified' : 'Trial Expired';
       break;
   }
 
@@ -216,6 +238,7 @@ export function getEffectiveSubscriptionStatus(
     isLocked,
     expiryFormatted,
     displayStatusText,
+    isTrialEndDateMissingOrInvalid,
   };
 }
 

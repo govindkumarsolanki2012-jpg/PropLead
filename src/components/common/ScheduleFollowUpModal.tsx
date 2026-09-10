@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Calendar, Clock, Check, Phone, MessageSquare, Car, Users, FileText } from 'lucide-react';
 import { Lead, FollowUpType } from '../../types';
 
@@ -47,6 +47,15 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
     lead.nextFollowUpNote || `Follow-up regarding property requirements with ${lead.name}`
   );
 
+  // Sync state whenever modal opens or lead updates (handles rescheduling existing follow-up)
+  useEffect(() => {
+    if (isOpen && lead) {
+      setSelectedDate(lead.nextFollowUpDate || tmrwStr);
+      setSelectedTime(lead.nextFollowUpTime || '11:00');
+      setNote(lead.nextFollowUpNote || `Follow-up regarding property requirements with ${lead.name}`);
+    }
+  }, [isOpen, lead, tmrwStr]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -57,7 +66,7 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
     }
     const scheduleFn = onSaveFollowUp || onSchedule;
     if (scheduleFn) {
-      scheduleFn(lead.id, selectedDate, selectedTime, followUpType, note.trim());
+      scheduleFn(lead.id, selectedDate, selectedTime || '11:00', followUpType, note.trim());
     }
     onClose();
   };
@@ -71,8 +80,15 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[90vh] flex flex-col overflow-hidden animate-slide-up">
+    <div
+      className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[90vh] flex flex-col overflow-hidden animate-slide-up safe-bottom">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-2">
@@ -81,14 +97,16 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
             </div>
             <div>
               <h2 className="text-sm font-bold text-slate-900 dark:text-white leading-tight">
-                Schedule Follow-Up
+                {lead.nextFollowUpDate ? 'Reschedule Follow-Up' : 'Schedule Follow-Up'}
               </h2>
               <span className="text-[11px] text-slate-400 truncate">{lead.name}</span>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="w-7 h-7 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center justify-center"
+            className="w-7 h-7 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center justify-center cursor-pointer"
+            aria-label="Close"
           >
             <X className="w-4 h-4" />
           </button>
@@ -105,7 +123,7 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
               <button
                 type="button"
                 onClick={() => setSelectedDate(todayStr)}
-                className={`py-2 px-1 text-xs rounded-xl font-bold border transition-all ${
+                className={`py-2 px-1 text-xs rounded-xl font-bold border transition-all cursor-pointer ${
                   selectedDate === todayStr
                     ? 'bg-emerald-600 text-white border-emerald-600'
                     : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
@@ -116,7 +134,7 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
               <button
                 type="button"
                 onClick={() => setSelectedDate(tmrwStr)}
-                className={`py-2 px-1 text-xs rounded-xl font-bold border transition-all ${
+                className={`py-2 px-1 text-xs rounded-xl font-bold border transition-all cursor-pointer ${
                   selectedDate === tmrwStr
                     ? 'bg-emerald-600 text-white border-emerald-600'
                     : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
@@ -127,7 +145,7 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
               <button
                 type="button"
                 onClick={() => setSelectedDate(in3DaysStr)}
-                className={`py-2 px-1 text-xs rounded-xl font-bold border transition-all ${
+                className={`py-2 px-1 text-xs rounded-xl font-bold border transition-all cursor-pointer ${
                   selectedDate === in3DaysStr
                     ? 'bg-emerald-600 text-white border-emerald-600'
                     : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
@@ -140,7 +158,7 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
               type="date"
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-emerald-500 font-medium"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-emerald-500 font-medium cursor-pointer"
             />
           </div>
 
@@ -155,7 +173,7 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
                   key={time}
                   type="button"
                   onClick={() => setSelectedTime(time)}
-                  className={`py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                  className={`py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
                     selectedTime === time
                       ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-500 font-bold'
                       : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
@@ -169,7 +187,7 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
               type="time"
               value={selectedTime}
               onChange={(e) => setSelectedTime(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-emerald-500 font-medium"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-emerald-500 font-medium cursor-pointer"
             />
           </div>
 
@@ -186,7 +204,7 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
                     key={t.id}
                     type="button"
                     onClick={() => setFollowUpType(t.id)}
-                    className={`p-2 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1 transition-all ${
+                    className={`p-2 rounded-xl border text-xs font-semibold flex flex-col items-center gap-1 transition-all cursor-pointer ${
                       followUpType === t.id
                         ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-500 font-bold'
                         : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
@@ -214,11 +232,18 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
             />
           </div>
 
-          {/* Submit */}
-          <div className="pt-2">
+          {/* Action Buttons: Cancel and Save Reminder */}
+          <div className="pt-2 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-[0.99] text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs transition-all cursor-pointer"
+            >
+              Cancel
+            </button>
             <button
               type="submit"
-              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold rounded-xl shadow-md text-xs flex items-center justify-center gap-1.5 transition-all"
+              className="flex-2 py-3 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold rounded-xl shadow-md text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
             >
               <Check className="w-4 h-4" />
               <span>Save Reminder</span>

@@ -1,12 +1,12 @@
 {
-  "projectId": "engaged-xyston-bnm8c",
-  "appId": "1:821117555285:web:1ce1afa206f80ca0fd3adc",
-  "apiKey": "AIzaSyBWSz4ARwGbuS1jTaR_mrWx5_LbAnWBJMw",
-  "authDomain": "engaged-xyston-bnm8c.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-propertyagentlea-045c9e34-069a-4aea-b55c-a485b4374ea0",
-  "storageBucket": "engaged-xyston-bnm8c.firebasestorage.app",
-  "messagingSenderId": "821117555285",
+  "projectId": "proplead-e5c6a",
+  "appId": "1:36803800158:web:d3295fa751481825e718cf",
+  "apiKey": "AIzaSyDcP7TkJQ-L8OVlOfNjdfs-AsfHwcPF_9U",
+  "authDomain": "proplead-e5c6a.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-proplead-10ea62d1-3291-4f7b-9549-788cd49f881d",
+  "storageBucket": "proplead-e5c6a.firebasestorage.app",
+  "messagingSenderId": "36803800158",
   "measurementId": "",
-  "oAuthClientId": "821117555285-k90maut3fe3fb9lfttbt3165o1uns8m2.apps.googleusercontent.com",
+  "oAuthClientId": "36803800158-f1e83pmo78ge5gpiosi9buukrbi6if7m.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

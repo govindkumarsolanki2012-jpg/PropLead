@@ -81,6 +81,7 @@ export interface VoiceNote {
   durationSeconds: number;
   createdAt: string;
   note?: string;
+  mimeType?: string;
 }
 
 export interface Attachment {

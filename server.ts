@@ -43,8 +43,20 @@ export interface UserSubscriptionRecord {
 const DATA_DIR = path.join(process.cwd(), 'data');
 const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
 
-const FIRESTORE_PROJECT_ID = 'engaged-xyston-bnm8c';
-const FIRESTORE_DATABASE_ID = 'ai-studio-propertyagentlea-045c9e34-069a-4aea-b55c-a485b4374ea0';
+let FIRESTORE_PROJECT_ID = 'proplead-e5c6a';
+let FIRESTORE_DATABASE_ID = 'ai-studio-proplead-10ea62d1-3291-4f7b-9549-788cd49f881d';
+
+try {
+  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+  if (fs.existsSync(configPath)) {
+    const rawCfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    if (rawCfg.projectId) FIRESTORE_PROJECT_ID = rawCfg.projectId;
+    if (rawCfg.firestoreDatabaseId) FIRESTORE_DATABASE_ID = rawCfg.firestoreDatabaseId;
+  }
+} catch (e) {
+  console.warn('Could not read firebase-applet-config.json in server.ts:', e);
+}
+
 const FIRESTORE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${FIRESTORE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents`;
 
 // In-memory hot cache backed by local disk storage to survive restarts & container wakeups
@@ -395,7 +407,12 @@ async function fetchSubscriptionFromFirestore(userId: string, idToken?: string):
   }
 }
 
-async function fetchUserProfileCreatedAtFromFirestore(userId: string, idToken?: string): Promise<string | null> {
+async function fetchUserProfileFromFirestore(userId: string, idToken?: string): Promise<{
+  trialEndDate?: string;
+  trialStartDate?: string;
+  createdAt?: string;
+  subscriptionStatus?: string;
+} | null> {
   try {
     const token = await getFirestoreReadToken(idToken);
     if (!token) return null;
@@ -405,8 +422,15 @@ async function fetchUserProfileCreatedAtFromFirestore(userId: string, idToken?: 
     });
     if (!res.ok) return null;
     const docData = await res.json();
-    return docData.fields?.createdAt?.stringValue || null;
-  } catch {
+    const fields = docData.fields || {};
+    return {
+      trialEndDate: fields.trialEndDate?.stringValue,
+      trialStartDate: fields.trialStartDate?.stringValue,
+      createdAt: fields.createdAt?.stringValue || fields.updatedAt?.stringValue,
+      subscriptionStatus: fields.subscriptionStatus?.stringValue,
+    };
+  } catch (err) {
+    console.warn(`[Firestore User] Could not fetch profile for user ${userId}:`, err);
     return null;
   }
 }
@@ -436,27 +460,49 @@ export async function getSubscriptionRecord(
 
   // 3. remote.status === 'NOT_FOUND' or remote store unconfigured:
   // User does not yet have a record in /subscriptions/{userId}
-  // Check if user already had an existing account in /users/{userId} to prevent duplicate/repeated trials
-  const userCreatedAt = await fetchUserProfileCreatedAtFromFirestore(userId, idToken);
+  // Check if user already had an existing account in /users/{userId} to preserve authoritative trialEndDate
+  const userProfile = await fetchUserProfileFromFirestore(userId, idToken);
 
   const serverNow = new Date();
   let trialStart: Date;
   let trialEnd: Date;
   let isExpired = false;
 
-  if (userCreatedAt) {
-    const accountDate = new Date(userCreatedAt);
-    if (!isNaN(accountDate.getTime())) {
-      trialStart = accountDate;
-      trialEnd = new Date(accountDate.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
-      if (serverNow.getTime() > trialEnd.getTime()) {
+  if (userProfile?.trialEndDate) {
+    // Authoritative trialEndDate found in Firestore
+    const parsedEnd = new Date(userProfile.trialEndDate);
+    if (!isNaN(parsedEnd.getTime())) {
+      trialEnd = parsedEnd;
+      if (userProfile.trialStartDate) {
+        const parsedStart = new Date(userProfile.trialStartDate);
+        trialStart = !isNaN(parsedStart.getTime()) ? parsedStart : new Date(parsedEnd.getTime() - TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
+      } else {
+        trialStart = new Date(parsedEnd.getTime() - TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
+      }
+      if (serverNow.getTime() >= trialEnd.getTime()) {
         isExpired = true;
       }
     } else {
+      console.warn(`[Subscription Record] Invalid trialEndDate in /users/${userId}:`, userProfile.trialEndDate);
+      isExpired = true;
       trialStart = serverNow;
-      trialEnd = new Date(serverNow.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
+      trialEnd = serverNow;
+    }
+  } else if (userProfile?.trialStartDate || userProfile?.createdAt) {
+    const accountDate = new Date(userProfile.trialStartDate || userProfile.createdAt!);
+    if (!isNaN(accountDate.getTime())) {
+      trialStart = accountDate;
+      trialEnd = new Date(accountDate.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
+      if (serverNow.getTime() >= trialEnd.getTime()) {
+        isExpired = true;
+      }
+    } else {
+      isExpired = true;
+      trialStart = serverNow;
+      trialEnd = serverNow;
     }
   } else {
+    // New trial initialization only if user has never existed
     trialStart = serverNow;
     trialEnd = new Date(serverNow.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
   }

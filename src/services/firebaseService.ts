@@ -20,7 +20,14 @@ import {
   deleteObject,
 } from 'firebase/storage';
 import { db, storage, auth, googleProvider, FirebaseUser } from '../lib/firebase';
-import { signInWithPopup, signOut as fbSignOut, onAuthStateChanged } from 'firebase/auth';
+import {
+  signInWithPopup,
+  signOut as fbSignOut,
+  onAuthStateChanged,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
+  ConfirmationResult,
+} from 'firebase/auth';
 import { Lead, Property, UserProfile, WhatsAppTemplate } from '../types';
 
 // Known legacy demo IDs to filter out and purge from Firestore if ever present
@@ -32,6 +39,8 @@ const DEMO_PROP_IDS = new Set([
 ]);
 
 // --- AUTHENTICATION HELPERS ---
+
+export type { ConfirmationResult, RecaptchaVerifier };
 
 export function subscribeToAuth(callback: (user: FirebaseUser | null) => void): Unsubscribe {
   return onAuthStateChanged(auth, callback);
@@ -48,6 +57,121 @@ export async function signOutUser(): Promise<void> {
 
 export function getCurrentUser(): FirebaseUser | null {
   return auth.currentUser;
+}
+
+/**
+ * Safely clears any active RecaptchaVerifier instance and cleans up its DOM container.
+ */
+export function cleanupPhoneRecaptchaVerifier(containerId: string = 'recaptcha-container'): void {
+  if (typeof window === 'undefined') return;
+
+  const win = window as any;
+  if (win._propleadRecaptchaVerifier) {
+    try {
+      win._propleadRecaptchaVerifier.clear();
+    } catch (err) {
+      console.debug('Error clearing _propleadRecaptchaVerifier:', err);
+    }
+    win._propleadRecaptchaVerifier = null;
+  }
+
+  if (win.recaptchaVerifier) {
+    try {
+      win.recaptchaVerifier.clear();
+    } catch (err) {
+      console.debug('Error clearing recaptchaVerifier:', err);
+    }
+    win.recaptchaVerifier = null;
+  }
+
+  const container = document.getElementById(containerId);
+  if (container) {
+    container.innerHTML = '';
+  }
+}
+
+/**
+ * Returns an existing valid RecaptchaVerifier instance or creates a new one
+ * after cleanly resetting the container element.
+ */
+export function getOrCreatePhoneRecaptchaVerifier(
+  containerId: string = 'recaptcha-container',
+  onExpired?: () => void
+): RecaptchaVerifier {
+  if (typeof window !== 'undefined') {
+    const win = window as any;
+    const existing = win._propleadRecaptchaVerifier || win.recaptchaVerifier;
+    const container = document.getElementById(containerId);
+
+    // Reuse existing valid instance if present and container is in DOM
+    if (existing && container) {
+      return existing;
+    }
+
+    // Clean up any stale state before instantiating a new verifier
+    cleanupPhoneRecaptchaVerifier(containerId);
+  }
+
+  const verifier = new RecaptchaVerifier(auth, containerId, {
+    size: 'invisible',
+    callback: () => {
+      // reCAPTCHA solved
+    },
+    'expired-callback': () => {
+      cleanupPhoneRecaptchaVerifier(containerId);
+      if (onExpired) onExpired();
+    },
+  });
+
+  if (typeof window !== 'undefined') {
+    const win = window as any;
+    win._propleadRecaptchaVerifier = verifier;
+    win.recaptchaVerifier = verifier;
+  }
+
+  return verifier;
+}
+
+/**
+ * Creates or reuses an invisible RecaptchaVerifier for Firebase Phone Auth.
+ */
+export function createPhoneRecaptchaVerifier(
+  containerId: string = 'recaptcha-container',
+  onExpired?: () => void
+): RecaptchaVerifier {
+  return getOrCreatePhoneRecaptchaVerifier(containerId, onExpired);
+}
+
+/**
+ * Sends a 6-digit OTP to the specified E.164 phone number via Firebase Phone Authentication.
+ */
+export async function sendPhoneOtp(
+  e164PhoneNumber: string,
+  verifier: RecaptchaVerifier
+): Promise<ConfirmationResult> {
+  try {
+    return await signInWithPhoneNumber(auth, e164PhoneNumber, verifier);
+  } catch (err: any) {
+    console.error('Firebase signInWithPhoneNumber error:', err);
+    throw err;
+  }
+}
+
+/**
+ * Verifies the OTP entered by the user using Firebase ConfirmationResult.
+ * Resolves to the authenticated FirebaseUser only if verification succeeds.
+ */
+export async function verifyPhoneOtp(
+  confirmationResult: ConfirmationResult,
+  otpCode: string
+): Promise<FirebaseUser> {
+  try {
+    const userCredential = await confirmationResult.confirm(otpCode.trim());
+    return userCredential.user;
+  } catch (err: any) {
+    console.error('Firebase OTP confirmation error:', err);
+    throw err;
+  }
 }
 
 // --- USER PROFILE OPERATIONS ---
@@ -153,20 +277,30 @@ export function subscribeLeadsFromFirestore(
   );
 }
 
+function cleanFirestorePayload<T extends Record<string, any>>(obj: T): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 export async function addLeadToFirestore(userId: string, lead: Lead): Promise<void> {
   const leadRef = doc(db, 'users', userId, 'leads', lead.id);
-  await setDoc(leadRef, {
+  await setDoc(leadRef, cleanFirestorePayload({
     ...lead,
     updatedAt: new Date().toISOString(),
-  });
+  }));
 }
 
 export async function updateLeadInFirestore(userId: string, lead: Lead): Promise<void> {
   const leadRef = doc(db, 'users', userId, 'leads', lead.id);
-  await setDoc(leadRef, {
+  await setDoc(leadRef, cleanFirestorePayload({
     ...lead,
     updatedAt: new Date().toISOString(),
-  }, { merge: true });
+  }), { merge: true });
 }
 
 export async function deleteLeadFromFirestore(userId: string, leadId: string): Promise<void> {

@@ -1,14 +1,17 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { App as CapApp } from '@capacitor/app';
+import { Capacitor, PluginListenerHandle } from '@capacitor/core';
 import { MobileFrame } from './components/layout/MobileFrame';
 import { Header } from './components/layout/Header';
 import { BottomNav } from './components/layout/BottomNav';
-import { OnboardingFlow } from './components/onboarding/OnboardingFlow';
+import { AuthFlow } from './components/auth/AuthFlow';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { LeadsList } from './components/leads/LeadsList';
 import { PropertiesList } from './components/properties/PropertiesList';
 import { CalendarView } from './components/calendar/CalendarView';
 import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { SettingsView } from './components/settings/SettingsView';
+import { Building2 } from 'lucide-react';
 
 // Modals
 import { QuickAddLeadModal } from './components/leads/QuickAddLeadModal';
@@ -36,8 +39,10 @@ import {
   saveStoredProperties,
   getStoredTemplates,
   saveStoredTemplates,
+  clearAllData,
 } from './utils/storage';
 import { Lead, Property, UserProfile, WhatsAppTemplate, FollowUpType, TabType } from './types';
+import { INITIAL_USER_PROFILE } from './data/initialData';
 import { formatRelativeDate } from './utils/formatters';
 import { getEffectiveSubscriptionStatus, setAuthoritativeServerTime } from './utils/billing';
 import {
@@ -60,6 +65,7 @@ import { syncLocalDataToFirestore } from './utils/migration';
 import { FirebaseUser } from './lib/firebase';
 
 export function App() {
+  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile>(getStoredProfile());
   const [leads, setLeads] = useState<Lead[]>(getStoredLeads());
@@ -67,8 +73,24 @@ export function App() {
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>(getStoredTemplates());
   const [isCloudSynced, setIsCloudSynced] = useState<boolean>(false);
 
+  // Tab navigation state & history (Dashboard/home is root)
   const [currentTab, setCurrentTab] = useState<TabType>('home');
+  const [tabHistory, setTabHistory] = useState<TabType[]>(['home']);
   const [leadsFilter, setLeadsFilter] = useState<string>('all');
+
+  const handleTabChange = useCallback((newTab: TabType) => {
+    setCurrentTab(newTab);
+    setTabHistory((prev) => {
+      if (newTab === 'home') {
+        // Navigating to home resets the history stack so Dashboard is the root
+        return ['home'];
+      }
+      if (prev[prev.length - 1] === newTab) {
+        return prev;
+      }
+      return [...prev, newTab];
+    });
+  }, []);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     try {
       const savedTheme = localStorage.getItem('proplead_theme_v1');
@@ -107,10 +129,200 @@ export function App() {
   // Toast notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const showToast = (msg: string) => {
+  const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
-  };
+  }, []);
+
+  // Fresh references ref for the single back button listener
+  const appStateRef = useRef({
+    currentUser,
+    currentTab,
+    tabHistory,
+    isQuickAddOpen,
+    detailLead,
+    whatsAppLead,
+    scheduleLead,
+    editLead,
+    isSubscriptionOpen,
+    isImportContactsOpen,
+    isFeatureLockedOpen,
+    isAddPropertyOpen,
+    detailProperty,
+    editProperty,
+    sharePropertyData,
+  });
+
+  useEffect(() => {
+    appStateRef.current = {
+      currentUser,
+      currentTab,
+      tabHistory,
+      isQuickAddOpen,
+      detailLead,
+      whatsAppLead,
+      scheduleLead,
+      editLead,
+      isSubscriptionOpen,
+      isImportContactsOpen,
+      isFeatureLockedOpen,
+      isAddPropertyOpen,
+      detailProperty,
+      editProperty,
+      sharePropertyData,
+    };
+  });
+
+  // Central Android Back Button handler
+  const handleBack = useCallback(() => {
+    const s = appStateRef.current;
+
+    // If not authenticated, back exits the app
+    if (!s.currentUser) {
+      if (Capacitor.isNativePlatform()) {
+        CapApp.exitApp();
+      } else {
+        try {
+          CapApp.exitApp();
+        } catch (e) {
+          // safe fallback
+        }
+        showToast('Exiting PropLead...');
+      }
+      return;
+    }
+
+    // 1. Open modal -> Android Back -> close the modal first (topmost/nested child modals first)
+    if (s.editLead) {
+      setEditLead(null);
+      return;
+    }
+    if (s.editProperty) {
+      setEditProperty(null);
+      return;
+    }
+    if (s.sharePropertyData) {
+      setSharePropertyData(null);
+      return;
+    }
+    if (s.whatsAppLead) {
+      setWhatsAppLead(null);
+      return;
+    }
+    if (s.scheduleLead) {
+      setScheduleLead(null);
+      return;
+    }
+    if (s.isSubscriptionOpen && s.isFeatureLockedOpen) {
+      setIsSubscriptionOpen(false);
+      return;
+    }
+    if (s.isQuickAddOpen) {
+      setIsQuickAddOpen(false);
+      return;
+    }
+    if (s.isAddPropertyOpen) {
+      setIsAddPropertyOpen(false);
+      return;
+    }
+    if (s.isImportContactsOpen) {
+      setIsImportContactsOpen(false);
+      return;
+    }
+    if (s.isSubscriptionOpen) {
+      setIsSubscriptionOpen(false);
+      return;
+    }
+    if (s.isFeatureLockedOpen) {
+      setIsFeatureLockedOpen(false);
+      return;
+    }
+    if (s.detailLead) {
+      setDetailLead(null);
+      return;
+    }
+    if (s.detailProperty) {
+      setDetailProperty(null);
+      return;
+    }
+
+    // 2. Nested screen -> Android Back -> return to previous screen
+    if (s.tabHistory.length > 1) {
+      const newHistory = s.tabHistory.slice(0, -1);
+      const previousTab = newHistory[newHistory.length - 1] || 'home';
+      setTabHistory(newHistory);
+      setCurrentTab(previousTab);
+      return;
+    }
+
+    // 3. If currently on a non-home tab but stack is 1 or empty -> return to Dashboard
+    if (s.currentTab !== 'home') {
+      setTabHistory(['home']);
+      setCurrentTab('home');
+      return;
+    }
+
+    // 4. Press Back again on Dashboard/root -> exit the app
+    if (Capacitor.isNativePlatform()) {
+      CapApp.exitApp();
+    } else {
+      try {
+        CapApp.exitApp();
+      } catch (e) {
+        // safe fallback
+      }
+      showToast('Exiting PropLead...');
+    }
+  }, [showToast]);
+
+  const lastBackTimeRef = useRef<number>(0);
+
+  const triggerBack = useCallback(() => {
+    const now = Date.now();
+    // 250ms throttle prevents rapid duplicate firings from same physical press
+    if (now - lastBackTimeRef.current < 250) {
+      return;
+    }
+    lastBackTimeRef.current = now;
+    handleBack();
+  }, [handleBack]);
+
+  // Single Capacitor and hardware/keyboard back-button listener
+  useEffect(() => {
+    let listenerHandle: PluginListenerHandle | null = null;
+    let isCleanedUp = false;
+
+    // 1. Capacitor native Android backButton listener
+    CapApp.addListener('backButton', () => {
+      triggerBack();
+    })
+      .then((handle) => {
+        if (isCleanedUp) {
+          handle.remove();
+        } else {
+          listenerHandle = handle;
+        }
+      })
+      .catch((err) => {
+        console.warn('Capacitor backButton listener unavailable:', err);
+      });
+
+    // 2. Desktop keyboard Escape listener for testing and preview
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        triggerBack();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      isCleanedUp = true;
+      if (listenerHandle) {
+        listenerHandle.remove();
+      }
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [triggerBack]);
 
   // 1. Firebase Auth listener and Firestore real-time synchronization
   useEffect(() => {
@@ -120,17 +332,24 @@ export function App() {
 
     const unsubAuth = subscribeToAuth(async (user) => {
       setCurrentUser(user);
+      setIsAuthChecking(false);
 
       if (user) {
         setIsCloudSynced(true);
-        // Safely migrate any local data into Firestore for this user
-        await syncLocalDataToFirestore(user.uid, user.email, user.displayName);
+        // Safely migrate/initialize user data in Firestore with user phone
+        await syncLocalDataToFirestore(user.uid, user.email, user.displayName, user.phoneNumber);
 
         // Subscribe to real-time user profile in Firestore
         unsubProfile = subscribeUserProfile(user.uid, (firestoreProfile) => {
           if (firestoreProfile) {
             setProfile((prev) => {
-              const merged: UserProfile = { ...prev, ...firestoreProfile, isOnboarded: true };
+              const merged: UserProfile = {
+                ...prev,
+                ...firestoreProfile,
+                trialEndDate: firestoreProfile.trialEndDate || prev.trialEndDate,
+                trialStartDate: firestoreProfile.trialStartDate || prev.trialStartDate,
+                isOnboarded: true,
+              };
               saveStoredProfile(merged);
               return merged;
             });
@@ -154,6 +373,10 @@ export function App() {
         });
       } else {
         setIsCloudSynced(false);
+        // Reset in-memory sensitive data when not authenticated
+        setLeads([]);
+        setProperties([]);
+        setProfile(INITIAL_USER_PROFILE);
       }
     });
 
@@ -381,7 +604,10 @@ export function App() {
     type: FollowUpType,
     note: string
   ) => {
-    const target = leads.find((l) => l.id === leadId);
+    const target =
+      (detailLead && detailLead.id === leadId ? detailLead : null) ||
+      (scheduleLead && scheduleLead.id === leadId ? scheduleLead : null) ||
+      leads.find((l) => l.id === leadId);
     if (!target) return;
 
     const activity = {
@@ -405,25 +631,6 @@ export function App() {
 
     handleUpdateLead(updatedLead);
     showToast(`Reminder set for ${target.name} on ${date}! ⏰`);
-  };
-
-  const handleCompleteOnboarding = async (profileData: Partial<UserProfile>) => {
-    const now = new Date();
-    const updatedProfile: UserProfile = {
-      ...profile,
-      ...profileData,
-      isOnboarded: true,
-      subscriptionStatus: 'TRIAL',
-      isTrialActive: true,
-      trialStartDate: now.toISOString(),
-      trialDaysRemaining: 30,
-      isSubscribed: false,
-    };
-    setProfile(updatedProfile);
-    saveStoredProfile(updatedProfile);
-    if (currentUser?.uid) {
-      await saveUserProfile(currentUser.uid, updatedProfile).catch((e) => console.warn('Firestore save profile error:', e));
-    }
   };
 
   const handleUpdateProfile = (updates: Partial<UserProfile>) => {
@@ -452,12 +659,12 @@ export function App() {
       await signOutUser();
       setCurrentUser(null);
       setIsCloudSynced(false);
-      // Clear session state to return to login screen (cloud data remains intact in Firestore)
-      setProfile((prev) => {
-        const updated = { ...prev, isOnboarded: false };
-        saveStoredProfile(updated);
-        return updated;
-      });
+      setLeads([]);
+      setProperties([]);
+      setProfile(INITIAL_USER_PROFILE);
+      setCurrentTab('home');
+      setTabHistory(['home']);
+      clearAllData();
       showToast('Logged out successfully. Cloud data preserved! 🔒');
     } catch (err) {
       console.error('Sign-out error:', err);
@@ -472,13 +679,32 @@ export function App() {
     <MobileFrame>
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-slate-900 text-white dark:bg-emerald-600 rounded-full text-xs font-bold shadow-xl border border-slate-700 animate-bounce">
+        <div
+          className="fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-slate-900 text-white dark:bg-emerald-600 rounded-full text-xs font-bold shadow-xl border border-slate-700 animate-bounce"
+          style={{
+            top: 'calc(4.5rem + max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)))',
+          }}
+        >
           {toastMessage}
         </div>
       )}
 
-      {!profile.isOnboarded ? (
-        <OnboardingFlow onComplete={handleCompleteOnboarding} />
+      {isAuthChecking ? (
+        <div
+          className="flex-1 flex flex-col items-center justify-center bg-white dark:bg-slate-900 text-slate-900 dark:text-white p-6"
+          style={{
+            paddingTop: 'max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px))',
+            paddingBottom: 'max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px))',
+          }}
+        >
+          <div className="w-16 h-16 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-lg shadow-emerald-600/20 mb-4 animate-pulse">
+            <Building2 className="w-8 h-8" />
+          </div>
+          <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">PropLead</h1>
+          <p className="text-xs text-slate-400 mt-1">Connecting securely...</p>
+        </div>
+      ) : !currentUser ? (
+        <AuthFlow />
       ) : (
         <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-100/70 dark:bg-slate-950">
           {/* Header */}
@@ -487,7 +713,7 @@ export function App() {
             onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
             onOpenSearch={() => {
               setLeadsFilter('all');
-              setCurrentTab('leads');
+              handleTabChange('leads');
             }}
             onOpenSubscription={() => setIsSubscriptionOpen(true)}
           />
@@ -504,9 +730,9 @@ export function App() {
               onOpenSubscription={() => setIsSubscriptionOpen(true)}
               onNavigateToLeadsWithFilter={(filter) => {
                 setLeadsFilter(filter);
-                setCurrentTab('leads');
+                handleTabChange('leads');
               }}
-              onNavigateToTab={(tab) => setCurrentTab(tab)}
+              onNavigateToTab={(tab) => handleTabChange(tab)}
               onOpenImportContacts={() => guardLockedFeature('Import Contacts', () => setIsImportContactsOpen(true))}
             />
           )}
@@ -583,13 +809,13 @@ export function App() {
               if (tab === 'leads') {
                 setLeadsFilter('all');
               }
-              setCurrentTab(tab);
+              handleTabChange(tab);
             }}
             onChangeTab={(tab) => {
               if (tab === 'leads') {
                 setLeadsFilter('all');
               }
-              setCurrentTab(tab);
+              handleTabChange(tab);
             }}
             onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
             todayFollowUpCount={todayCount}
@@ -611,29 +837,7 @@ export function App() {
         />
       )}
 
-      {/* 2. WhatsApp Modal (1-tap templates) */}
-      {whatsAppLead && (
-        <WhatsAppModal
-          isOpen={Boolean(whatsAppLead)}
-          onClose={() => setWhatsAppLead(null)}
-          lead={whatsAppLead}
-          profile={profile}
-          templates={templates}
-        />
-      )}
-
-      {/* 3. Schedule Follow-Up Modal */}
-      {scheduleLead && (
-        <ScheduleFollowUpModal
-          isOpen={Boolean(scheduleLead)}
-          onClose={() => setScheduleLead(null)}
-          lead={scheduleLead}
-          onSchedule={handleScheduleFollowUp}
-          onSaveFollowUp={handleScheduleFollowUp}
-        />
-      )}
-
-      {/* 4. Lead Detail Modal */}
+      {/* 2. Lead Detail Modal */}
       {detailLead && (
         <LeadDetailModal
           isOpen={Boolean(detailLead)}
@@ -644,11 +848,33 @@ export function App() {
           onUpdateLead={handleUpdateLead}
           onDeleteLead={handleDeleteLead}
           onOpenWhatsApp={(l) => setWhatsAppLead(l)}
-          onOpenSchedule={(l) => guardLockedFeature('Schedule Follow-Up', () => setScheduleLead(l))}
+          onOpenSchedule={(l) => setScheduleLead(l)}
           onOpenEdit={(l) => guardLockedFeature('Edit Lead', () => setEditLead(l))}
           onSharePropertyWithLead={(prop, lead) =>
             setSharePropertyData({ property: prop, preselectedLead: lead })
           }
+        />
+      )}
+
+      {/* 3. Schedule Follow-Up Modal - Rendered after LeadDetailModal with z-[60] */}
+      {scheduleLead && (
+        <ScheduleFollowUpModal
+          isOpen={Boolean(scheduleLead)}
+          onClose={() => setScheduleLead(null)}
+          lead={scheduleLead}
+          onSchedule={handleScheduleFollowUp}
+          onSaveFollowUp={handleScheduleFollowUp}
+        />
+      )}
+
+      {/* 4. WhatsApp Modal (1-tap templates) */}
+      {whatsAppLead && (
+        <WhatsAppModal
+          isOpen={Boolean(whatsAppLead)}
+          onClose={() => setWhatsAppLead(null)}
+          lead={whatsAppLead}
+          profile={profile}
+          templates={templates}
         />
       )}
 
