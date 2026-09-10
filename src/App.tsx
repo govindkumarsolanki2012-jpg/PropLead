@@ -49,6 +49,7 @@ import {
   subscribeToAuth,
   signInWithGoogle,
   signOutUser,
+  initSocialLogin,
   subscribeUserProfile,
   subscribeLeadsFromFirestore,
   subscribePropertiesFromFirestore,
@@ -85,6 +86,13 @@ export function App() {
       setIsAuthResolved((prev) => (prev ? prev : true));
     }, 4000);
     return () => clearTimeout(safetyTimer);
+  }, []);
+
+  // Pre-warm native Android Google authentication on startup
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) {
+      initSocialLogin().catch((e) => console.debug('Native Google Auth init:', e));
+    }
   }, []);
 
   const isSplashVisible = isSplashTimerActive || !isAuthResolved;
@@ -745,6 +753,10 @@ export function App() {
   // Check today and overdue follow-up counts for bottom nav badge
   const todayCount = leads.filter((l) => formatRelativeDate(l.nextFollowUpDate).isToday).length;
 
+  if (isSplashVisible) {
+    return <SplashScreen />;
+  }
+
   return (
     <MobileFrame>
       {/* Toast Notification */}
@@ -759,9 +771,7 @@ export function App() {
         </div>
       )}
 
-      {isSplashVisible ? (
-        <SplashScreen />
-      ) : !currentUser ? (
+      {!currentUser ? (
         <AuthFlow />
       ) : (
         <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-100/70 dark:bg-slate-950">

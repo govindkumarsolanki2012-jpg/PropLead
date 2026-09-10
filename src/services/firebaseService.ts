@@ -22,12 +22,17 @@ import {
 import { db, storage, auth, googleProvider, FirebaseUser } from '../lib/firebase';
 import {
   signInWithPopup,
+  signInWithCredential,
+  GoogleAuthProvider,
   signOut as fbSignOut,
   onAuthStateChanged,
   RecaptchaVerifier,
   signInWithPhoneNumber,
   ConfirmationResult,
 } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
+import { SocialLogin } from '@capgo/capacitor-social-login';
+import firebaseConfig from '../../firebase-applet-config.json';
 import { Lead, Property, UserProfile, WhatsAppTemplate } from '../types';
 
 // Known legacy demo IDs to filter out and purge from Firestore if ever present
@@ -42,16 +47,81 @@ const DEMO_PROP_IDS = new Set([
 
 export type { ConfirmationResult, RecaptchaVerifier };
 
+let isSocialLoginInitialized = false;
+
+/**
+ * Initializes native Android Google Sign-In (Credential Manager) using the Web Client ID.
+ */
+export async function initSocialLogin(): Promise<void> {
+  if (isSocialLoginInitialized || !Capacitor.isNativePlatform()) {
+    return;
+  }
+  const webClientId =
+    (firebaseConfig as any).oAuthClientId ||
+    '36803800158-f1e83pmo78ge5gpiosi9buukrbi6if7m.apps.googleusercontent.com';
+
+  try {
+    await SocialLogin.initialize({
+      google: {
+        webClientId,
+        mode: 'online',
+      },
+    });
+    isSocialLoginInitialized = true;
+  } catch (err) {
+    console.error('Error initializing native SocialLogin:', err);
+  }
+}
+
 export function subscribeToAuth(callback: (user: FirebaseUser | null) => void): Unsubscribe {
   return onAuthStateChanged(auth, callback);
 }
 
+/**
+ * Signs in with Google:
+ * - On Native Android: Uses native Google Credential Manager (bottom sheet account selector)
+ *   without launching Chrome or web redirect flows, obtains the ID token, and authenticates
+ *   directly with Firebase via signInWithCredential.
+ * - On Web / Preview: Uses standard signInWithPopup.
+ */
 export async function signInWithGoogle(): Promise<FirebaseUser> {
-  const result = await signInWithPopup(auth, googleProvider);
-  return result.user;
+  if (Capacitor.isNativePlatform()) {
+    await initSocialLogin();
+
+    // Trigger native Android Google Sign-In bottom sheet
+    const loginResult = await SocialLogin.login({
+      provider: 'google',
+      options: {
+        scopes: ['email', 'profile'],
+      },
+    });
+
+    if (loginResult?.result?.responseType === 'online') {
+      const idToken = loginResult.result.idToken;
+      if (!idToken) {
+        throw new Error('Google Sign-In succeeded natively, but no ID token was returned.');
+      }
+      const accessToken = loginResult.result.accessToken?.token;
+      const credential = GoogleAuthProvider.credential(idToken, accessToken);
+      const userCredential = await signInWithCredential(auth, credential);
+      return userCredential.user;
+    } else {
+      throw new Error('Unexpected Google Sign-In response from native provider.');
+    }
+  } else {
+    const result = await signInWithPopup(auth, googleProvider);
+    return result.user;
+  }
 }
 
 export async function signOutUser(): Promise<void> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      await SocialLogin.logout({ provider: 'google' });
+    } catch (e) {
+      console.warn('SocialLogin native logout non-critical error:', e);
+    }
+  }
   await fbSignOut(auth);
 }
 

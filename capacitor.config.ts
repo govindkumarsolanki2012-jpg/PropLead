@@ -4,14 +4,26 @@ const config: CapacitorConfig = {
   appId: 'com.proplead.tracker',
   appName: 'PropLead',
   webDir: 'dist',
+  backgroundColor: '#ffffff',
   server: {
     androidScheme: 'https',
     cleartext: false,
   },
   android: {
+    backgroundColor: '#ffffff',
     allowMixedContent: true,
     captureInput: true,
     webContentsDebuggingEnabled: false,
+  },
+  plugins: {
+    SocialLogin: {
+      providers: {
+        google: true,
+        facebook: false,
+        apple: false,
+        twitter: false,
+      },
+    },
   },
 };
 

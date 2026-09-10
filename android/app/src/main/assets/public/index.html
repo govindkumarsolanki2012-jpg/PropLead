@@ -8,11 +8,77 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-tFcNpNBG.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Byd4OUIZ.css">
+    <script>
+      try {
+        var theme = localStorage.getItem('proplead_theme_v1');
+        if (theme === 'dark' || (!theme && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (e) {}
+    </script>
+    <style>
+      html, body {
+        background-color: #ffffff;
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+      .dark, .dark body {
+        background-color: #0f172a;
+      }
+      #static-launch-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        background-color: #ffffff;
+        color: #0f172a;
+        padding-top: max(env(safe-area-inset-top, 0px), 0px);
+        padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
+        user-select: none;
+        z-index: 99999;
+      }
+      .dark #static-launch-splash {
+        background-color: #0f172a;
+        color: #ffffff;
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-B2-GbAC3.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-bCvDJFo6.css">
   </head>
-  <body class="bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100 antialiased selection:bg-emerald-500 selection:text-white font-['Plus_Jakarta_Sans',sans-serif]">
-    <div id="root"></div>
+  <body class="bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100 antialiased selection:bg-emerald-500 selection:text-white font-['Plus_Jakarta_Sans',sans-serif]">
+    <div id="root">
+      <div id="static-launch-splash">
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; margin-top: -2rem;">
+          <div style="width: 5rem; height: 5rem; border-radius: 1.5rem; background: linear-gradient(to top right, #059669, #14b8a6); color: #ffffff; display: flex; align-items: center; justify-content: center; box-shadow: 0 20px 25px -5px rgba(5, 150, 105, 0.25);">
+            <svg style="width: 2.5rem; height: 2.5rem;" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/>
+              <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/>
+              <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/>
+              <path d="M10 6h4"/>
+              <path d="M10 10h4"/>
+              <path d="M10 14h4"/>
+              <path d="M10 18h4"/>
+            </svg>
+          </div>
+          <h1 style="font-size: 1.875rem; font-weight: 900; letter-spacing: -0.025em; margin-top: 1rem; margin-bottom: 0; height: 2rem; line-height: 2rem;">
+            Prop<span style="color: #059669;">Lead</span>
+          </h1>
+          <p style="font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.1em; margin-top: 0.5rem; margin-bottom: 0; height: 1rem; line-height: 1rem;">
+            Property Agent Lead Tracker
+          </p>
+        </div>
+        <div style="position: absolute; bottom: calc(1.5rem + max(env(safe-area-inset-bottom, 0px), 0px)); left: 0; right: 0; text-align: center;">
+          <p style="font-size: 0.6875rem; font-weight: 600; color: #94a3b8; letter-spacing: 0.05em; text-transform: uppercase; margin: 0;">
+            Real Estate CRM • Indian Property Agents
+          </p>
+        </div>
+      </div>
+    </div>
   </body>
 </html>
 

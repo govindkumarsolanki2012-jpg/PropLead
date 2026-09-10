@@ -30,8 +30,17 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
       // syncs/initializes the Firestore profile and 30-day trial, and opens the Dashboard.
     } catch (err: any) {
       console.warn('Google sign-in error or cancelled:', err);
-      if (err?.code === 'auth/popup-closed-by-user') {
-        setErrorMessage('Sign-in cancelled. Please click the button to try again.');
+      const isCancelled =
+        err?.code === 'auth/popup-closed-by-user' ||
+        err?.code === 'USER_CANCELLED' ||
+        err?.message?.toLowerCase().includes('cancel') ||
+        err?.message?.toLowerCase().includes('canceled') ||
+        err?.message?.toLowerCase().includes('cancelled') ||
+        err?.message?.includes('16') ||
+        err?.message?.includes('12501');
+
+      if (isCancelled) {
+        setErrorMessage(null); // User simply closed the bottom sheet / dialog
       } else if (err?.code === 'auth/network-request-failed') {
         setErrorMessage('Network connection error. Please check your internet connection.');
       } else if (err?.message) {
