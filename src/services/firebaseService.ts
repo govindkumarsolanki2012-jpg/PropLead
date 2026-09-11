@@ -91,65 +91,97 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
   if (Capacitor.isNativePlatform()) {
     await initSocialLogin();
 
-    console.log('[GoogleAuth] Launching native Google Sign-In...');
-    let loginResult: any;
+    const packageName = 'com.proplead.tracker';
+    const signingSha1 = '71:21:34:6A:91:F9:31:7D:FB:E7:99:7B:53:96:31:CF:FC:ED:A5:06';
+    const webClientId =
+      (firebaseConfig as any).oAuthClientId ||
+      '36803800158-f1e83pmo78ge5gpiosi9buukrbi6if7m.apps.googleusercontent.com';
+
+    console.log('[GoogleAuth Diagnostics] Pre-login configuration:', {
+      'package name': packageName,
+      'signing SHA-1': signingSha1,
+      'webClientId': webClientId,
+      'filterByAuthorizedAccounts': false,
+    });
+
+    let loginResponse: any;
     try {
-      loginResult = await SocialLogin.login({
+      loginResponse = await SocialLogin.login({
         provider: 'google',
         options: {
-          scopes: ['email', 'profile'],
+          style: 'bottom',
           filterByAuthorizedAccounts: false,
+          scopes: ['email', 'profile'],
         },
       });
     } catch (err: any) {
-      console.error('[GoogleAuth] Native SocialLogin.login threw error:', err);
-      const msg = err?.message || String(err);
-      if (msg.includes('16') || msg.toLowerCase().includes('account reauth failed')) {
+      const errMessage = err?.message || String(err || '');
+      const errorCodeMatch = errMessage.match(/\[(\d+)\]/);
+      const errorCode = err?.code || (errorCodeMatch ? `[${errorCodeMatch[1]}]` : 'ERROR_LOGIN_FAILED');
+
+      console.error('[GoogleAuth Diagnostics] Native Google Sign-In error:', {
+        'Google login result/error code': errorCode,
+        'package name': packageName,
+        'signing SHA-1': signingSha1,
+        'webClientId': webClientId,
+        'whether an idToken was returned': false,
+        'errorMessage': errMessage,
+      });
+
+      if (errMessage.includes('16') || errMessage.toLowerCase().includes('account reauth failed')) {
         console.error(
-          '[GoogleAuth] Error 16 (Account reauth failed) detected.\n' +
-          'Checklist:\n' +
-          '1. Package name must be com.proplead.tracker.\n' +
-          '2. Google Play App Signing SHA-1 must be registered in Firebase / Google Cloud Console.\n' +
-          '3. Google Cloud OAuth Consent screen must be set to "External".\n' +
-          '4. If OAuth Consent screen is in "Testing", your Google email must be listed in "Test users".'
-        );
-      } else if (msg.includes('28444') || msg.toLowerCase().includes('developer console')) {
-        console.error(
-          '[GoogleAuth] Error 28444 (Developer console misconfiguration) detected.\n' +
-          'Checklist:\n' +
-          '1. Web Client ID must be used as webClientId, NOT the Android Client ID.\n' +
-          '2. The signing certificate SHA-1 (Play App Signing SHA-1 for Play Store builds) must be registered in Firebase Console.'
+          '[GoogleAuth Diagnostics] [16] Account reauth failed:\n' +
+          '- Package: ' + packageName + '\n' +
+          '- Signing SHA-1: ' + signingSha1 + '\n' +
+          '- Web Client ID: ' + webClientId
         );
       }
       throw err;
     }
 
-    console.log('[GoogleAuth] Native SocialLogin response received:', {
-      provider: loginResult?.provider,
-      responseType: loginResult?.result?.responseType,
-      hasIdToken: !!(loginResult?.result?.idToken || loginResult?.idToken),
-      hasAccessToken: !!(loginResult?.result?.accessToken?.token || loginResult?.accessToken?.token),
+    const result = loginResponse?.result || loginResponse;
+    const idToken = result?.idToken;
+    const hasIdToken = Boolean(idToken);
+
+    console.log('[GoogleAuth Diagnostics] Native Google Sign-In result received:', {
+      'Google login result/error code': 'SUCCESS [0]',
+      'package name': packageName,
+      'signing SHA-1': signingSha1,
+      'webClientId': webClientId,
+      'whether an idToken was returned': hasIdToken,
+      'responseType': result?.responseType || 'online',
     });
 
-    const result = loginResult?.result || loginResult;
-    const idToken = result?.idToken;
-
     if (!idToken) {
-      console.error('[GoogleAuth] No idToken in login result:', loginResult);
+      console.error('[GoogleAuth Diagnostics] No idToken in login result:', result);
       throw new Error('Google Sign-In completed natively, but no ID token was returned.');
     }
 
-    const accessToken = result?.accessToken?.token || null;
-    console.log('[GoogleAuth] Creating Firebase credential with idToken (accessToken present:', !!accessToken, ')');
-    const credential = GoogleAuthProvider.credential(idToken, accessToken);
+    console.log('[GoogleAuth] Passing idToken to Firebase GoogleAuthProvider.credential()...');
+    const credential = GoogleAuthProvider.credential(idToken);
 
     console.log('[GoogleAuth] Authenticating with Firebase signInWithCredential...');
     try {
       const userCredential = await signInWithCredential(auth, credential);
-      console.log('[GoogleAuth] Firebase login successful! UID:', userCredential.user.uid, 'Email:', userCredential.user.email);
+      console.log('[GoogleAuth Diagnostics] Firebase authentication successful:', {
+        'Google login result/error code': 'AUTH_SUCCESS',
+        'package name': packageName,
+        'signing SHA-1': signingSha1,
+        'webClientId': webClientId,
+        'whether an idToken was returned': true,
+        'uid': userCredential.user.uid,
+        'email': userCredential.user.email,
+      });
       return userCredential.user;
     } catch (fbErr: any) {
-      console.error('[GoogleAuth] Firebase signInWithCredential failed:', fbErr);
+      console.error('[GoogleAuth Diagnostics] Firebase signInWithCredential failed:', {
+        'Google login result/error code': fbErr?.code || 'FIREBASE_AUTH_ERROR',
+        'package name': packageName,
+        'signing SHA-1': signingSha1,
+        'webClientId': webClientId,
+        'whether an idToken was returned': true,
+        'errorMessage': fbErr?.message || String(fbErr),
+      });
       throw fbErr;
     }
   } else {
