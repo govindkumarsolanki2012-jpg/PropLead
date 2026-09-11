@@ -9,9 +9,8 @@ import {
   Users,
   Home,
   Cloud,
-  FlaskConical,
 } from 'lucide-react';
-import { signInWithGoogle, signInWithTestAccount } from '../../services/firebaseService';
+import { signInWithGoogle } from '../../services/firebaseService';
 
 interface AuthFlowProps {
   onSuccess?: () => void;
@@ -19,21 +18,7 @@ interface AuthFlowProps {
 
 export const AuthFlow: React.FC<AuthFlowProps> = () => {
   const [loading, setLoading] = useState<boolean>(false);
-  const [testLoading, setTestLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const handleTestSignIn = async () => {
-    setErrorMessage(null);
-    try {
-      setTestLoading(true);
-      await signInWithTestAccount();
-    } catch (err: any) {
-      console.error('[AuthFlow] Test login error:', err);
-      setErrorMessage(err?.message || 'Failed to authenticate with test user account.');
-    } finally {
-      setTestLoading(false);
-    }
-  };
 
   const handleGoogleSignIn = async () => {
     setErrorMessage(null);
@@ -197,41 +182,6 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
           <p className="text-center text-[11px] text-slate-400 dark:text-slate-500">
             One tap to sign in to your existing account or create a new account.
           </p>
-
-          {/* TEMPORARY TEST LOGIN (TEST ONLY - REMOVE WHEN GOOGLE OAUTH SHA-1 IS READY) */}
-          <div className="pt-3 border-t border-dashed border-amber-300 dark:border-amber-700/60">
-            <div className="flex items-center justify-between mb-1.5 px-0.5">
-              <span className="text-[10px] font-extrabold tracking-wider uppercase text-amber-700 dark:text-amber-400 bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 rounded-md flex items-center gap-1">
-                <FlaskConical className="w-3 h-3" />
-                DEV / INTERNAL TESTING ONLY
-              </span>
-              <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
-                Fixed UID • 30D Trial
-              </span>
-            </div>
-            <button
-              id="btn-test-auth"
-              type="button"
-              disabled={loading || testLoading}
-              onClick={handleTestSignIn}
-              className="w-full py-3.5 px-4 bg-amber-50 hover:bg-amber-100/80 dark:bg-amber-950/40 dark:hover:bg-amber-900/50 text-amber-900 dark:text-amber-200 font-bold rounded-2xl border-2 border-dashed border-amber-400 dark:border-amber-600 flex items-center justify-center gap-2.5 text-xs transition-all active:scale-[0.99] disabled:opacity-60 cursor-pointer shadow-sm"
-            >
-              {testLoading ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin text-amber-700 dark:text-amber-400" />
-                  <span>Signing in with Test User...</span>
-                </>
-              ) : (
-                <>
-                  <FlaskConical className="w-4 h-4 text-amber-700 dark:text-amber-400" />
-                  <span>Test Login (Bypass Native Google Block)</span>
-                </>
-              )}
-            </button>
-            <p className="mt-1.5 text-center text-[10px] text-amber-800/80 dark:text-amber-400/80">
-              Signs into Firebase with real auth & fixed UID <span className="font-mono font-semibold">hy2zTx8b...</span>. Full Firestore persistence enabled.
-            </p>
-          </div>
         </div>
       </div>
 
