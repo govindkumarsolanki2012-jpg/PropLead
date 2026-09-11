@@ -60,6 +60,8 @@ export async function initSocialLogin(): Promise<void> {
     (firebaseConfig as any).oAuthClientId ||
     '36803800158-f1e83pmo78ge5gpiosi9buukrbi6if7m.apps.googleusercontent.com';
 
+  console.log('[Auth] Initializing native SocialLogin with Web Client ID:', webClientId);
+
   try {
     await SocialLogin.initialize({
       google: {
@@ -68,8 +70,9 @@ export async function initSocialLogin(): Promise<void> {
       },
     });
     isSocialLoginInitialized = true;
+    console.log('[Auth] SocialLogin initialized successfully.');
   } catch (err) {
-    console.error('Error initializing native SocialLogin:', err);
+    console.error('[Auth] Error initializing native SocialLogin:', err);
   }
 }
 
@@ -88,27 +91,69 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
   if (Capacitor.isNativePlatform()) {
     await initSocialLogin();
 
-    // Trigger native Android Google Sign-In bottom sheet
-    const loginResult = await SocialLogin.login({
-      provider: 'google',
-      options: {
-        scopes: ['email', 'profile'],
-      },
+    console.log('[GoogleAuth] Launching native Google Sign-In...');
+    let loginResult: any;
+    try {
+      loginResult = await SocialLogin.login({
+        provider: 'google',
+        options: {
+          scopes: ['email', 'profile'],
+          filterByAuthorizedAccounts: false,
+        },
+      });
+    } catch (err: any) {
+      console.error('[GoogleAuth] Native SocialLogin.login threw error:', err);
+      const msg = err?.message || String(err);
+      if (msg.includes('16') || msg.toLowerCase().includes('account reauth failed')) {
+        console.error(
+          '[GoogleAuth] Error 16 (Account reauth failed) detected.\n' +
+          'Checklist:\n' +
+          '1. Package name must be com.proplead.tracker.\n' +
+          '2. Google Play App Signing SHA-1 must be registered in Firebase / Google Cloud Console.\n' +
+          '3. Google Cloud OAuth Consent screen must be set to "External".\n' +
+          '4. If OAuth Consent screen is in "Testing", your Google email must be listed in "Test users".'
+        );
+      } else if (msg.includes('28444') || msg.toLowerCase().includes('developer console')) {
+        console.error(
+          '[GoogleAuth] Error 28444 (Developer console misconfiguration) detected.\n' +
+          'Checklist:\n' +
+          '1. Web Client ID must be used as webClientId, NOT the Android Client ID.\n' +
+          '2. The signing certificate SHA-1 (Play App Signing SHA-1 for Play Store builds) must be registered in Firebase Console.'
+        );
+      }
+      throw err;
+    }
+
+    console.log('[GoogleAuth] Native SocialLogin response received:', {
+      provider: loginResult?.provider,
+      responseType: loginResult?.result?.responseType,
+      hasIdToken: !!(loginResult?.result?.idToken || loginResult?.idToken),
+      hasAccessToken: !!(loginResult?.result?.accessToken?.token || loginResult?.accessToken?.token),
     });
 
-    if (loginResult?.result?.responseType === 'online') {
-      const idToken = loginResult.result.idToken;
-      if (!idToken) {
-        throw new Error('Google Sign-In succeeded natively, but no ID token was returned.');
-      }
-      const accessToken = loginResult.result.accessToken?.token;
-      const credential = GoogleAuthProvider.credential(idToken, accessToken);
+    const result = loginResult?.result || loginResult;
+    const idToken = result?.idToken;
+
+    if (!idToken) {
+      console.error('[GoogleAuth] No idToken in login result:', loginResult);
+      throw new Error('Google Sign-In completed natively, but no ID token was returned.');
+    }
+
+    const accessToken = result?.accessToken?.token || null;
+    console.log('[GoogleAuth] Creating Firebase credential with idToken (accessToken present:', !!accessToken, ')');
+    const credential = GoogleAuthProvider.credential(idToken, accessToken);
+
+    console.log('[GoogleAuth] Authenticating with Firebase signInWithCredential...');
+    try {
       const userCredential = await signInWithCredential(auth, credential);
+      console.log('[GoogleAuth] Firebase login successful! UID:', userCredential.user.uid, 'Email:', userCredential.user.email);
       return userCredential.user;
-    } else {
-      throw new Error('Unexpected Google Sign-In response from native provider.');
+    } catch (fbErr: any) {
+      console.error('[GoogleAuth] Firebase signInWithCredential failed:', fbErr);
+      throw fbErr;
     }
   } else {
+    console.log('[GoogleAuth] Web platform: launching Firebase signInWithPopup...');
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
   }

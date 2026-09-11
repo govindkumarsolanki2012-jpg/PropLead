@@ -29,18 +29,27 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
       // On success, onAuthStateChanged in App.tsx detects the user session,
       // syncs/initializes the Firestore profile and 30-day trial, and opens the Dashboard.
     } catch (err: any) {
-      console.warn('Google sign-in error or cancelled:', err);
+      console.error('[AuthFlow] Google sign-in error:', err);
+      const msg = err?.message || String(err || '');
+      const isTechnicalError =
+        msg.includes('16') ||
+        msg.includes('28444') ||
+        msg.includes('10:') ||
+        msg.toLowerCase().includes('reauth') ||
+        msg.toLowerCase().includes('developer') ||
+        msg.toLowerCase().includes('failed') ||
+        msg.toLowerCase().includes('exception');
+
       const isCancelled =
-        err?.code === 'auth/popup-closed-by-user' ||
-        err?.code === 'USER_CANCELLED' ||
-        err?.message?.toLowerCase().includes('cancel') ||
-        err?.message?.toLowerCase().includes('canceled') ||
-        err?.message?.toLowerCase().includes('cancelled') ||
-        err?.message?.includes('16') ||
-        err?.message?.includes('12501');
+        !isTechnicalError &&
+        (err?.code === 'auth/popup-closed-by-user' ||
+          err?.code === 'USER_CANCELLED' ||
+          msg.toLowerCase().includes('user cancelled') ||
+          msg.toLowerCase().includes('user canceled') ||
+          msg === 'Google Sign-In cancelled by user');
 
       if (isCancelled) {
-        setErrorMessage(null); // User simply closed the bottom sheet / dialog
+        setErrorMessage(null); // User intentionally dismissed the bottom sheet / dialog
       } else if (err?.code === 'auth/network-request-failed') {
         setErrorMessage('Network connection error. Please check your internet connection.');
       } else if (err?.message) {

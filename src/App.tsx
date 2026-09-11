@@ -727,8 +727,17 @@ export function App() {
         showToast(`Connected as ${user.displayName || user.email}! ☁️`);
       }
     } catch (err: any) {
-      console.warn('Google sign-in error:', err);
-      showToast('Sign-in cancelled or unavailable.');
+      console.error('[App] Google sign-in failed:', err);
+      const msg = err?.message || String(err || '');
+      const isCancelled =
+        err?.code === 'auth/popup-closed-by-user' ||
+        err?.code === 'USER_CANCELLED' ||
+        msg.toLowerCase().includes('user cancelled') ||
+        msg.toLowerCase().includes('user canceled');
+
+      if (!isCancelled) {
+        showToast(err?.message || 'Sign-in failed. Please try again.');
+      }
     }
   };
 
