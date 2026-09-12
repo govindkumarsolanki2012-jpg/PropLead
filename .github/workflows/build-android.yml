@@ -119,11 +119,17 @@ jobs:
           test -f android/signing.properties
           echo "Signing files are ready."
 
-      - name: Build Android App Bundle
+      - name: Build Android App Bundle and APK
         working-directory: android
-        run: gradle bundleRelease
+        run: gradle bundleRelease assembleRelease
 
-      - name: Upload signed AAB
+      - name: Upload signed APK (Direct Install on Mobile)
+        uses: actions/upload-artifact@v4
+        with:
+          name: proplead-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
+
+      - name: Upload signed AAB (Google Play Store)
         uses: actions/upload-artifact@v4
         with:
           name: proplead-release-aab
