@@ -23,6 +23,9 @@ import { db, storage, auth, googleProvider, FirebaseUser } from '../lib/firebase
 import {
   signInWithPopup,
   signInWithCredential,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile,
   GoogleAuthProvider,
   signOut as fbSignOut,
   onAuthStateChanged,
@@ -190,6 +193,65 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
     return result.user;
   }
 }
+
+// =========================================================================
+// DEVELOPER / TESTING LOGIN (FOR INTERNAL TESTING & TESTING BUILDS)
+// =========================================================================
+export const DEVELOPER_TEST_CREDENTIALS = {
+  email: 'testagent@proplead.test',
+  password: 'TestPassword123!',
+  displayName: 'Developer Test Agent',
+  uid: 'hy2zTx8bpzb09dinXZgUWzhCJBh2',
+};
+
+/**
+ * Signs in with the dedicated developer test account via Firebase Authentication.
+ * Uses real Firebase Authentication and guarantees a fixed UID ('hy2zTx8bpzb09dinXZgUWzhCJBh2')
+ * so all Firestore data, leads, properties, and 30-day trial status persist
+ * across sessions, reboots, and devices without bypassing security rules.
+ */
+export async function signInWithDeveloperAccount(): Promise<FirebaseUser> {
+  console.log('[DevLogin] Authenticating with developer account in Firebase Auth...');
+  try {
+    const userCredential = await signInWithEmailAndPassword(
+      auth,
+      DEVELOPER_TEST_CREDENTIALS.email,
+      DEVELOPER_TEST_CREDENTIALS.password
+    );
+    if (!userCredential.user.displayName) {
+      try {
+        await updateProfile(userCredential.user, {
+          displayName: DEVELOPER_TEST_CREDENTIALS.displayName,
+        });
+      } catch (e) {
+        // Non-blocking
+      }
+    }
+    console.log('[DevLogin] Developer user authenticated successfully. UID:', userCredential.user.uid);
+    return userCredential.user;
+  } catch (err: any) {
+    if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+      console.log('[DevLogin] Creating developer account in Firebase Auth...');
+      const newCred = await createUserWithEmailAndPassword(
+        auth,
+        DEVELOPER_TEST_CREDENTIALS.email,
+        DEVELOPER_TEST_CREDENTIALS.password
+      );
+      try {
+        await updateProfile(newCred.user, {
+          displayName: DEVELOPER_TEST_CREDENTIALS.displayName,
+        });
+      } catch (e) {
+        // Non-blocking
+      }
+      return newCred.user;
+    }
+    console.error('[DevLogin] Error authenticating developer account:', err);
+    throw err;
+  }
+}
+
+export const signInWithTestAccount = signInWithDeveloperAccount;
 
 export async function signOutUser(): Promise<void> {
   if (Capacitor.isNativePlatform()) {
