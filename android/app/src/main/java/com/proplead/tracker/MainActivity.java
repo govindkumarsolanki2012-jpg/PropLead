@@ -25,6 +25,7 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        registerPlugin(DocumentOpenerPlugin.class);
         super.onCreate(savedInstanceState);
         logAuthDiagnostics();
     }

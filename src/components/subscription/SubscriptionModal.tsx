@@ -226,9 +226,9 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           {status === 'TRIAL' && (
             <div
               className={`p-3.5 rounded-2xl border text-xs flex items-center justify-between transition-all ${
-                daysRemaining <= 3
+                daysRemaining <= 2
                   ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700'
-                  : daysRemaining <= 7
+                  : daysRemaining <= 4
                   ? 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800'
                   : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700/60'
               }`}
@@ -236,7 +236,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
               <div className="flex items-center gap-2.5 min-w-0">
                 <div
                   className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 text-white shadow-2xs ${
-                    daysRemaining <= 3 ? 'bg-amber-500' : 'bg-emerald-600'
+                    daysRemaining <= 2 ? 'bg-amber-500' : 'bg-emerald-600'
                   }`}
                 >
                   <Clock className="w-4 h-4" />
@@ -247,7 +247,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                   </div>
                   <div
                     className={`text-[12px] font-bold mt-0.5 ${
-                      daysRemaining <= 3
+                      daysRemaining <= 2
                         ? 'text-amber-700 dark:text-amber-300'
                         : 'text-emerald-700 dark:text-emerald-400'
                     }`}

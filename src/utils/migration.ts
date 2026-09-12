@@ -83,8 +83,8 @@ export async function syncLocalDataToFirestore(
       const cleanPhone = userPhone || (!isDemoPhone ? localProfile.phone : '') || '';
 
       const now = new Date();
-      const trialStartDate = localProfile.trialStartDate || now.toISOString();
-      const trialEndDate = localProfile.trialEndDate || new Date(new Date(trialStartDate).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const trialStartDate = now.toISOString();
+      const trialEndDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
       const mergedProfile: Partial<UserProfile> = {
         ...localProfile,

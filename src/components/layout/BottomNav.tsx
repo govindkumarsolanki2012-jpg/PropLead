@@ -49,7 +49,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         paddingBottom: 'calc(0.375rem + max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px)))',
       }}
     >
-      <div className="flex items-center justify-around px-1 pt-1.5 pb-0.5 max-w-2xl mx-auto relative">
+      <div className="flex items-center justify-around px-1 pt-1 pb-0.5 max-w-2xl mx-auto relative">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = currentTab === tab.id;
@@ -58,7 +58,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             <button
               key={tab.id}
               onClick={() => handleTabSelect(tab.id)}
-              className={`flex flex-col items-center justify-center flex-1 py-1 px-0.5 rounded-xl transition-all relative ${
+              className={`flex flex-col items-center justify-center flex-1 py-1 px-0.5 min-w-0 rounded-xl transition-all relative ${
                 isActive
                   ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
@@ -66,17 +66,17 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             >
               <div className="relative">
                 <div
-                  className={`w-9 h-7 rounded-full flex items-center justify-center transition-all ${
+                  className={`w-10 h-7 rounded-full flex items-center justify-center transition-all ${
                     isActive
                       ? 'bg-emerald-100 dark:bg-emerald-950/60'
                       : 'bg-transparent'
                   }`}
                 >
-                  <Icon className={`w-4.5 h-4.5 ${isActive ? 'stroke-[2.5px]' : 'stroke-2'}`} />
+                  <Icon className={`w-5 h-5 ${isActive ? 'stroke-[2.25px]' : 'stroke-2'}`} />
                 </div>
 
                 {tab.badge !== undefined && (
-                  <span className="absolute -top-1 -right-1 px-1.5 py-0.2 bg-emerald-600 text-white text-[8.5px] font-bold rounded-full min-w-3.5 text-center">
+                  <span className="absolute -top-1 -right-1.5 px-1 py-0.2 bg-emerald-600 text-white text-[8.5px] font-bold rounded-full min-w-3.5 h-3.5 flex items-center justify-center text-center leading-none shadow-xs">
                     {tab.badge > 99 ? '99+' : tab.badge}
                   </span>
                 )}
@@ -86,7 +86,9 @@ export const BottomNav: React.FC<BottomNavProps> = ({
                 )}
               </div>
 
-              <span className="text-[10px] mt-0.5 tracking-tight truncate">{tab.label}</span>
+              <span className="text-[10px] font-medium mt-0.5 tracking-tight truncate max-w-full text-center leading-tight">
+                {tab.label}
+              </span>
             </button>
           );
         })}

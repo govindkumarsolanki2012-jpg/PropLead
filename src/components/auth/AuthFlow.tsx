@@ -42,7 +42,7 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
       // Authoritative Firebase Google Authentication
       await signInWithGoogle();
       // On success, onAuthStateChanged in App.tsx detects the user session,
-      // syncs/initializes the Firestore profile and 30-day trial, and opens the Dashboard.
+      // syncs/initializes the Firestore profile and 7-day trial, and opens the Dashboard.
     } catch (err: any) {
       console.error('[AuthFlow] Google sign-in error:', err);
       const msg = err?.message || String(err || '');
@@ -138,7 +138,7 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
             </div>
             <div>
               <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                30-Day Pro Trial Included
+                7-Day Free Trial Included
               </p>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 Full access automatically activated for new accounts
@@ -206,7 +206,7 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
                 DEVELOPER / TEST MODE
               </span>
               <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
-                Fixed UID • 30D Trial
+                Fixed UID • 7D Trial
               </span>
             </div>
             <button
@@ -229,7 +229,7 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
               )}
             </button>
             <p className="mt-1.5 text-center text-[10px] text-amber-800/80 dark:text-amber-400/80">
-              Signs into Firebase Auth directly. Full Firestore persistence, leads, properties, and 30-day trial enabled.
+              Signs into Firebase Auth directly. Full Firestore persistence, leads, properties, and 7-day trial enabled.
             </p>
           </div>
         </div>

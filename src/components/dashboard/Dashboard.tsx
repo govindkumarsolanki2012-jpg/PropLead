@@ -143,7 +143,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const totalResults = matchingLeads.length + matchingProperties.length;
 
     return (
-      <div id="dashboard-search-view" className="flex-1 pb-32 safe-content">
+      <div id="dashboard-search-view" className="flex-1 pb-32 safe-content w-full max-w-full overflow-x-hidden">
         <div className="p-4 space-y-4 max-w-3xl mx-auto">
           {/* Search Result Summary Header */}
           <div
@@ -375,24 +375,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }
 
   return (
-    <div className="flex-1 pb-32 space-y-4">
+    <div id="dashboard-main-view" className="flex-1 pb-32 space-y-4 w-full max-w-full overflow-x-hidden">
       {/* Trial Reminders Banner */}
       <TrialBanner profile={profile} onOpenSubscription={onOpenSubscription} />
 
       {/* Hero Welcome & Quick Stats */}
       <div className="px-4 pt-1">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-black text-slate-900 dark:text-white tracking-tight">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight truncate">
               {t('dash_namaste')}, {profile?.name ? profile.name.split(' ')[0] : 'Agent'} 🙏
             </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
+            <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
               {t('dash_daily_focus')}
             </p>
           </div>
           <button
             onClick={onOpenQuickAdd}
-            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all"
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all flex-shrink-0 whitespace-nowrap"
           >
             <Plus className="w-4 h-4" />
             <span>{t('dash_add_lead')}</span>
@@ -625,7 +625,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* PIPELINE FUNNEL OVERVIEW */}
       <div className="px-4">
-        <div className="p-4 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3 shadow-2xs">
+        <div className="p-4 bg-white dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3 shadow-2xs overflow-hidden">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <TrendingUp className="w-4 h-4 text-emerald-600 flex-shrink-0" />

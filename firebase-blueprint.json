@@ -13,7 +13,7 @@
         "city": { "type": "string", "description": "Primary operating city" },
         "reraNumber": { "type": "string", "description": "Agent RERA license registration", "optional": true },
         "subscriptionStatus": { "type": "string", "description": "Google Play subscription status" },
-        "isTrialActive": { "type": "boolean", "description": "Whether 30-day free trial is active" },
+        "isTrialActive": { "type": "boolean", "description": "Whether 7-day free trial is active" },
         "trialStartDate": { "type": "string", "description": "ISO timestamp of trial start" },
         "trialEndDate": { "type": "string", "description": "ISO timestamp of trial end", "optional": true },
         "trialDaysRemaining": { "type": "number", "description": "Calculated days remaining in trial" },

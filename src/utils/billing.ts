@@ -17,17 +17,17 @@ export const DEFAULT_PRODUCT_DETAILS: GooglePlaySubscriptionProduct = {
   priceMicros: 49000000,
   currencyCode: 'INR',
   billingPeriod: 'P1M',
-  freeTrialPeriod: 'P30D',
-  freeTrialDays: 30,
+  freeTrialPeriod: 'P7D',
+  freeTrialDays: 7,
   offers: [
     {
-      offerId: '30-day-free-trial',
-      offerToken: 'offer_token_30d_trial_monthly',
+      offerId: '7-day-free-trial',
+      offerToken: 'offer_token_7d_trial_monthly',
       pricingPhases: [
         {
-          priceFormatted: '₹0 for 30 days',
+          priceFormatted: '₹0 for 7 days',
           priceMicros: 0,
-          billingPeriod: 'P30D',
+          billingPeriod: 'P7D',
           recurrenceMode: 2,
           billingCycleCount: 1,
         },
@@ -114,10 +114,21 @@ export function calculateTrialDaysRemaining(
       return 0;
     }
 
-    const endTimestamp = new Date(endDateStr).getTime();
+    let endTimestamp = new Date(endDateStr).getTime();
     if (isNaN(endTimestamp)) {
       console.warn('[Trial Countdown] Authoritative trialEndDate is an invalid date string:', endDateStr);
       return 0;
+    }
+
+    // Cap any legacy 30-day trial to 7 days from trial start date
+    if (startDateStr) {
+      const startTimestamp = new Date(startDateStr).getTime();
+      if (!isNaN(startTimestamp)) {
+        const maxTrialEnd = startTimestamp + 7 * 24 * 60 * 60 * 1000;
+        if (endTimestamp > maxTrialEnd) {
+          endTimestamp = maxTrialEnd;
+        }
+      }
     }
 
     const diffMs = endTimestamp - now;
@@ -125,13 +136,12 @@ export function calculateTrialDaysRemaining(
       return 0;
     }
 
-    // Dynamic days remaining: decreases each day until 0
-    // E.g., trial started yesterday (24h ago with 30d duration) yields exactly 29 days today
-    const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    // Dynamic days remaining: decreases each day until 0 (capped at 7 days)
+    const days = Math.min(7, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
     return Math.max(0, days);
   } catch (err) {
     console.error('[Trial Countdown] Error calculating trial days from authoritative trialEndDate:', err);
-    // Safe fallback: never grant 30 days on error
+    // Safe fallback: never grant 7 days on error
     return 0;
   }
 }

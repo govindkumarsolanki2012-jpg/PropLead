@@ -12,6 +12,7 @@ export interface TranslationDictionary {
   // Header
   header_pro: string;
   header_free_trial: string;
+  header_trial_badge: string;
   header_add_lead: string;
   header_search: string;
 
@@ -266,6 +267,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     // Header
     header_pro: 'PRO',
     header_free_trial: 'd Free Trial',
+    header_trial_badge: 'd Trial',
     header_add_lead: 'Add Lead',
     header_search: 'Search',
 
@@ -517,6 +519,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     // Header
     header_pro: 'प्रो',
     header_free_trial: 'दिन का फ्री ट्रायल',
+    header_trial_badge: ' दिन ट्रायल',
     header_add_lead: 'लीड जोड़ें',
     header_search: 'सर्च',
 
@@ -768,6 +771,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     // Header
     header_pro: 'PRO',
     header_free_trial: 'Din ka Free Trial',
+    header_trial_badge: 'd Trial',
     header_add_lead: '+ Nayi Lead',
     header_search: 'Search',
 

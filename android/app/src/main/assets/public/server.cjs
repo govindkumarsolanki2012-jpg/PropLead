@@ -41,7 +41,7 @@ var import_fs = __toESM(require("fs"), 1);
 var import_crypto = __toESM(require("crypto"), 1);
 var import_googleapis = require("googleapis");
 var import_genai = require("@google/genai");
-var TRIAL_DURATION_DAYS = 30;
+var TRIAL_DURATION_DAYS = 7;
 var DATA_DIR = import_path.default.join(process.cwd(), "data");
 var SUBSCRIPTIONS_FILE = import_path.default.join(DATA_DIR, "subscriptions.json");
 var FIRESTORE_PROJECT_ID = "proplead-e5c6a";
@@ -383,6 +383,10 @@ async function getSubscriptionRecord(userId, idToken) {
       } else {
         trialStart = new Date(parsedEnd.getTime() - TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1e3);
       }
+      const maxAllowedEnd = new Date(trialStart.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1e3);
+      if (trialEnd.getTime() > maxAllowedEnd.getTime()) {
+        trialEnd = maxAllowedEnd;
+      }
       if (serverNow.getTime() >= trialEnd.getTime()) {
         isExpired = true;
       }
@@ -442,17 +446,17 @@ var GOOGLE_PLAY_PRODUCT = {
   priceMicros: 49e6,
   currencyCode: "INR",
   billingPeriod: "P1M",
-  freeTrialPeriod: "P30D",
-  freeTrialDays: 30,
+  freeTrialPeriod: "P7D",
+  freeTrialDays: 7,
   offers: [
     {
-      offerId: "30-day-free-trial",
-      offerToken: "offer_token_30d_trial_monthly",
+      offerId: "7-day-free-trial",
+      offerToken: "offer_token_7d_trial_monthly",
       pricingPhases: [
         {
-          priceFormatted: "\u20B90 for 30 days",
+          priceFormatted: "\u20B90 for 7 days",
           priceMicros: 0,
-          billingPeriod: "P30D",
+          billingPeriod: "P7D",
           recurrenceMode: 2,
           // FINITE_RECURRING (trial)
           billingCycleCount: 1
@@ -929,7 +933,7 @@ async function startServer() {
       userId,
       subscriptionStatus: "TRIAL",
       trialStartDate: (/* @__PURE__ */ new Date()).toISOString(),
-      trialEndDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1e3).toISOString(),
+      trialEndDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1e3).toISOString(),
       subscriptionExpiryDate: null,
       subscriptionProductId: "property_agent_pro",
       subscriptionBasePlan: "monthly",
@@ -940,7 +944,7 @@ async function startServer() {
     };
     const now = /* @__PURE__ */ new Date();
     if (targetState === "TRIAL") {
-      const days = typeof customDaysRemaining === "number" ? customDaysRemaining : 30;
+      const days = typeof customDaysRemaining === "number" ? customDaysRemaining : 7;
       const trialEnd = new Date(now);
       trialEnd.setDate(trialEnd.getDate() + days);
       record.subscriptionStatus = "TRIAL";

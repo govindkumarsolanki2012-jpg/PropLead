@@ -207,7 +207,7 @@ export const DEVELOPER_TEST_CREDENTIALS = {
 /**
  * Signs in with the dedicated developer test account via Firebase Authentication.
  * Uses real Firebase Authentication and guarantees a fixed UID ('hy2zTx8bpzb09dinXZgUWzhCJBh2')
- * so all Firestore data, leads, properties, and 30-day trial status persist
+ * so all Firestore data, leads, properties, and 7-day trial status persist
  * across sessions, reboots, and devices without bypassing security rules.
  */
 export async function signInWithDeveloperAccount(): Promise<FirebaseUser> {

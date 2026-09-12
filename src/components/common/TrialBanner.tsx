@@ -111,9 +111,9 @@ export const TrialBanner: React.FC<TrialBannerProps> = ({ profile, onOpenSubscri
     );
   }
 
-  // 5. ACTIVE FREE TRIAL (Dynamic days remaining: 30, 29, 15, 7, 1 day)
-  const isUrgent = daysRemaining <= 3;
-  const isWarning = daysRemaining <= 7 && !isUrgent;
+  // 5. ACTIVE FREE TRIAL (Dynamic days remaining)
+  const isUrgent = daysRemaining <= 2;
+  const isWarning = daysRemaining <= 4 && !isUrgent;
 
   return (
     <div

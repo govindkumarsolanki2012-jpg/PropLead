@@ -81,7 +81,8 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
       city: city.trim() || '',
       isTrialActive: true,
       trialStartDate: new Date().toISOString(),
-      trialDaysRemaining: 30,
+      trialEndDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      trialDaysRemaining: 7,
       isSubscribed: false,
       hasCompletedOnboarding: true,
       isOnboarded: true,
@@ -140,7 +141,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
               <ArrowRight className="w-5 h-5" />
             </button>
             <p className="text-center text-xs text-slate-400 dark:text-slate-500">
-              Free 30-Day trial automatically activated • No credit card needed
+              Free 7-Day trial automatically activated • No credit card needed
             </p>
           </div>
         </div>
@@ -347,7 +348,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
         </div>
       )}
 
-      {/* STEP 5: AUTOMATIC 30-DAY FREE TRIAL ACTIVATION */}
+      {/* STEP 5: AUTOMATIC 7-DAY FREE TRIAL ACTIVATION */}
       {step === 5 && (
         <div className="flex-1 flex flex-col justify-between py-6 text-center">
           <div className="my-auto px-2">
@@ -356,7 +357,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
             </div>
 
             <span className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 mb-3">
-              🎉 30-Day Free Trial Activated!
+              🎉 7-Day Free Trial Activated!
             </span>
 
             <h3 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
@@ -364,7 +365,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
             </h3>
 
             <p className="text-xs text-slate-600 dark:text-slate-400 mt-2 max-w-xs mx-auto">
-              Your 30-day full access has started. All features are unlocked with zero payment commitment.
+              Your 7-day full access has started. All features are unlocked with zero payment commitment.
             </p>
 
             <div className="mt-6 bg-slate-50 dark:bg-slate-800/80 rounded-2xl p-4 border border-slate-200 dark:border-slate-700 text-left space-y-2.5 max-w-xs mx-auto">

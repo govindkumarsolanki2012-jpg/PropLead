@@ -12,6 +12,7 @@ import {
   Check,
   Loader2,
   RotateCcw,
+  UploadCloud,
 } from 'lucide-react';
 import { VoiceNote } from '../../types';
 import {
@@ -43,6 +44,8 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [voiceTextNote, setVoiceTextNote] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showSaveButton, setShowSaveButton] = useState<boolean>(false);
+  const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
   const [playbackProgress, setPlaybackProgress] = useState<{
     currentTime: number;
     duration: number;
@@ -99,6 +102,8 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   const startRecording = async () => {
     setErrorMessage(null);
     canceledRef.current = false;
+    setShowSaveButton(false);
+    setSavedSuccess(false);
 
     // Pause any currently playing voice note
     if (audioElementRef.current) {
@@ -115,14 +120,36 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
     }
 
     try {
-      // Request microphone stream with audio enhancements
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      // 1. Check if enumerateDevices reports no audio input devices
+      if (navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === 'function') {
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const hasAudioInput = devices.some((d) => d.kind === 'audioinput');
+          if (devices.length > 0 && !hasAudioInput) {
+            setErrorMessage(
+              'No microphone detected on this device. You can upload an audio file or memo directly using the upload button.'
+            );
+            return;
+          }
+        } catch {
+          // If enumerateDevices is restricted or fails, proceed to getUserMedia
+        }
+      }
+
+      // 2. Request microphone stream with progressive fallback for device constraints
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+      } catch (constraintErr: any) {
+        // Fallback to basic audio constraint if audio enhancement parameters caused OverconstrainedError or NotFoundError
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
 
       mediaStreamRef.current = stream;
       audioChunksRef.current = [];
@@ -195,6 +222,8 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
 
           onAddVoiceNote(newNote);
           setVoiceTextNote('');
+          setShowSaveButton(true);
+          setSavedSuccess(false);
         } catch (saveErr) {
           console.error('Failed to encode/save voice note:', saveErr);
           setErrorMessage('Failed to save audio recording. Please try again.');
@@ -216,23 +245,42 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
         setRecordingSeconds(currentElapsed);
       }, 1000);
     } catch (err: any) {
-      console.error('Error starting audio recording:', err);
       stopActiveStream();
       clearTimer();
       setIsRecording(false);
       setIsSaving(false);
 
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      const errName = err?.name || '';
+      const errMsg = typeof err?.message === 'string' ? err.message : '';
+      const isNotFound =
+        errName === 'NotFoundError' ||
+        errName === 'DevicesNotFoundError' ||
+        errName === 'OverconstrainedError' ||
+        errMsg.toLowerCase().includes('requested device not found') ||
+        errMsg.toLowerCase().includes('device not found');
+
+      const isPermissionDenied =
+        errName === 'NotAllowedError' ||
+        errName === 'PermissionDeniedError' ||
+        errMsg.toLowerCase().includes('permission');
+
+      if (isPermissionDenied) {
+        console.warn('Microphone permission was denied:', errMsg || err);
         setErrorMessage(
           'Microphone permission was denied. Please allow microphone access in your browser or device settings to record audio notes.'
         );
-      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        setErrorMessage('No microphone detected on this device. Please connect a microphone or use mobile.');
-      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+      } else if (isNotFound) {
+        console.warn('No microphone device detected:', errMsg || err);
+        setErrorMessage(
+          'No microphone detected on this device. You can upload an audio file or voice memo directly using the upload button next to Record.'
+        );
+      } else if (errName === 'NotReadableError' || errName === 'TrackStartError') {
+        console.warn('Microphone hardware in use:', errMsg || err);
         setErrorMessage('Microphone is in use by another application. Please free the audio device and try again.');
       } else {
+        console.warn('Audio recording access error:', errMsg || err);
         setErrorMessage(
-          `Unable to access microphone: ${err.message || 'Check audio permissions and try again.'}`
+          `Unable to access microphone: ${errMsg || 'Check audio permissions and try again.'}`
         );
       }
     }
@@ -275,6 +323,46 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
     setIsRecording(false);
     setIsSaving(false);
     setRecordingSeconds(0);
+  };
+
+  const handleConfirmSave = () => {
+    setShowSaveButton(false);
+    setSavedSuccess(true);
+    setTimeout(() => {
+      setSavedSuccess(false);
+    }, 4000);
+  };
+
+  const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const dataUrl = await blobToDataUrl(file);
+      const noteId = `vn_${Date.now()}`;
+      const finalMime = file.type || 'audio/webm';
+      await saveAudioToIndexedDB(noteId, dataUrl, finalMime);
+
+      const newNote: VoiceNote = {
+        id: noteId,
+        leadId,
+        audioUrl: dataUrl,
+        durationSeconds: 0,
+        createdAt: new Date().toISOString(),
+        note: voiceTextNote.trim() || file.name.replace(/\.[^/.]+$/, ''),
+        mimeType: finalMime,
+      };
+
+      onAddVoiceNote(newNote);
+      setVoiceTextNote('');
+      setShowSaveButton(true);
+      setSavedSuccess(false);
+    } catch (err) {
+      console.error('Failed to upload audio file:', err);
+      setErrorMessage('Failed to process audio file.');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const togglePlay = useCallback(
@@ -465,10 +553,22 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
                 placeholder="Optional label (e.g. Budget discussed, wife liked floor plan)..."
                 className="flex-1 px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
               />
+              <label
+                className="p-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl cursor-pointer flex items-center justify-center transition-colors flex-shrink-0"
+                title="Upload audio file from phone"
+              >
+                <UploadCloud className="w-4 h-4" />
+                <input
+                  type="file"
+                  accept="audio/*"
+                  onChange={handleAudioUpload}
+                  className="hidden"
+                />
+              </label>
               <button
                 type="button"
                 onClick={startRecording}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all flex-shrink-0 cursor-pointer"
+                className="px-3.5 sm:px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all flex-shrink-0 cursor-pointer"
               >
                 <Mic className="w-3.5 h-3.5" />
                 <span>Record Voice Note</span>
@@ -477,6 +577,30 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
             <p className="text-[11px] text-slate-400 dark:text-slate-500 px-1">
               Audio is saved locally and synced with this lead profile for playback anytime.
             </p>
+
+            {/* Simple Save button shown when upload/recording finishes successfully */}
+            {showSaveButton && (
+              <div className="pt-2 animate-in fade-in">
+                <button
+                  type="button"
+                  onClick={handleConfirmSave}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-sm inline-flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Save</span>
+                </button>
+              </div>
+            )}
+
+            {/* Simple Saved successfully message */}
+            {savedSuccess && (
+              <div className="pt-2 animate-in fade-in">
+                <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-semibold">
+                  <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>Saved successfully</span>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

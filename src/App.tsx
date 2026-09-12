@@ -12,6 +12,7 @@ import { CalendarView } from './components/calendar/CalendarView';
 import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { SettingsView } from './components/settings/SettingsView';
 import { SplashScreen } from './components/common/SplashScreen';
+import { AnimatePresence } from 'motion/react';
 
 // Modals
 import { QuickAddLeadModal } from './components/leads/QuickAddLeadModal';
@@ -393,11 +394,21 @@ export function App() {
         unsubProfile = subscribeUserProfile(user.uid, (firestoreProfile) => {
           if (firestoreProfile) {
             setProfile((prev) => {
+              let effectiveTrialEndDate = firestoreProfile.trialEndDate || prev.trialEndDate;
+              const effectiveTrialStartDate = firestoreProfile.trialStartDate || prev.trialStartDate;
+              if (effectiveTrialStartDate && effectiveTrialEndDate) {
+                const sTime = new Date(effectiveTrialStartDate).getTime();
+                const eTime = new Date(effectiveTrialEndDate).getTime();
+                if (!isNaN(sTime) && !isNaN(eTime) && eTime > sTime + 7 * 86400000) {
+                  effectiveTrialEndDate = new Date(sTime + 7 * 86400000).toISOString();
+                }
+              }
+
               const merged: UserProfile = {
                 ...prev,
                 ...firestoreProfile,
-                trialEndDate: firestoreProfile.trialEndDate || prev.trialEndDate,
-                trialStartDate: firestoreProfile.trialStartDate || prev.trialStartDate,
+                trialEndDate: effectiveTrialEndDate,
+                trialStartDate: effectiveTrialStartDate,
                 isOnboarded: true,
               };
               saveStoredProfile(merged);
@@ -762,12 +773,12 @@ export function App() {
   // Check today and overdue follow-up counts for bottom nav badge
   const todayCount = leads.filter((l) => formatRelativeDate(l.nextFollowUpDate).isToday).length;
 
-  if (isSplashVisible) {
-    return <SplashScreen />;
-  }
-
   return (
-    <MobileFrame>
+    <MobileFrame darkMode={darkMode}>
+      {/* Launch Splash Screen with subtle fade-out transition */}
+      <AnimatePresence>
+        {isSplashVisible && <SplashScreen key="app-launch-splash" />}
+      </AnimatePresence>
       {/* Toast Notification */}
       {toastMessage && (
         <div
@@ -783,7 +794,7 @@ export function App() {
       {!currentUser ? (
         <AuthFlow />
       ) : (
-        <div className="flex-1 flex flex-col min-h-screen bg-slate-100/70 dark:bg-slate-950">
+        <div className="flex-1 flex flex-col min-h-screen bg-slate-100/70 dark:bg-slate-950 w-full max-w-full overflow-x-hidden">
           {/* Header */}
           <Header
             profile={profile}
