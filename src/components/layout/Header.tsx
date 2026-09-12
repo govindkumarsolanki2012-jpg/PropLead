@@ -43,9 +43,10 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header
       id="app-header"
-      className="sticky top-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-3.5 sm:px-4 pb-2.5 sm:pb-3 transition-colors safe-header w-full overflow-hidden"
+      className="sticky top-0 z-40 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-3.5 sm:px-4 pb-2.5 sm:pb-3 transition-colors safe-header w-full overflow-hidden opacity-100"
       style={{
         paddingTop: 'calc(0.75rem + max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)))',
+        isolation: 'isolate',
       }}
     >
       {/* Top Row: Brand Identity (Left) + Quick Add (Right) */}

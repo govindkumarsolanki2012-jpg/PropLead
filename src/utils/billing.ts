@@ -252,81 +252,133 @@ export function getEffectiveSubscriptionStatus(
   };
 }
 
+export interface GooglePlayProductResult {
+  product: GooglePlaySubscriptionProduct | null;
+  isAvailable: boolean;
+  error?: string;
+}
+
 /**
- * Fetch product details from Google Play Catalog API or Native Google Play Client
+ * Fetch product details from Google Play Store via NativePurchases.
+ * Does NOT silently fall back to hardcoded product if Google Play returns 0 products or fails.
  */
-export async function fetchGooglePlayProduct(): Promise<GooglePlaySubscriptionProduct> {
+export async function fetchGooglePlayProduct(): Promise<GooglePlayProductResult> {
   // If running in native Android shell, query Google Play directly via NativePurchases
   if (Capacitor.isNativePlatform()) {
     try {
       const supported = await NativePurchases.isBillingSupported();
-      if (supported.isBillingSupported) {
-        const res = await NativePurchases.getProducts({
-          productIdentifiers: [GOOGLE_PLAY_PRODUCT_ID],
-          productType: PURCHASE_TYPE.SUBS,
+      if (!supported.isBillingSupported) {
+        const errorMsg = 'Google Play Billing is not supported or not available on this device.';
+        console.error('[Google Play Billing Error] isBillingSupported returned false:', errorMsg);
+        return {
+          product: null,
+          isAvailable: false,
+          error: errorMsg,
+        };
+      }
+
+      const res = await NativePurchases.getProducts({
+        productIdentifiers: [GOOGLE_PLAY_PRODUCT_ID],
+        productType: PURCHASE_TYPE.SUBS,
+      });
+
+      if (!res.products || res.products.length === 0) {
+        const errorMsg = `Google Play returned 0 products for "${GOOGLE_PLAY_PRODUCT_ID}". Verify subscription is Active in Google Play Console and tester account has accepted the invite.`;
+        console.error('[Google Play Billing Error] Product loading failed - 0 products returned:', {
+          error: errorMsg,
+          productId: GOOGLE_PLAY_PRODUCT_ID,
+          basePlanId: GOOGLE_PLAY_BASE_PLAN_ID,
+          packageName: GOOGLE_PLAY_PACKAGE_NAME,
         });
-
-        if (res.products && res.products.length > 0) {
-          const nativeProd =
-            res.products.find(
-              (p) => p.identifier === GOOGLE_PLAY_PRODUCT_ID || (p as any).planIdentifier === GOOGLE_PLAY_PRODUCT_ID
-            ) || res.products[0];
-
-          if (nativeProd) {
-            const priceString = nativeProd.priceString || DEFAULT_PRODUCT_DETAILS.priceFormatted;
-            const priceMicros = nativeProd.price
-              ? Math.round(nativeProd.price * 1000000)
-              : DEFAULT_PRODUCT_DETAILS.priceMicros;
-            const offerToken = (nativeProd as any).offerToken || undefined;
-
-            return {
-              ...DEFAULT_PRODUCT_DETAILS,
-              productId: GOOGLE_PLAY_PRODUCT_ID,
-              basePlanId: GOOGLE_PLAY_BASE_PLAN_ID,
-              title: nativeProd.title || DEFAULT_PRODUCT_DETAILS.title,
-              description: nativeProd.description || DEFAULT_PRODUCT_DETAILS.description,
-              priceFormatted: priceString,
-              priceMicros,
-              currencyCode: nativeProd.currencyCode || DEFAULT_PRODUCT_DETAILS.currencyCode,
-              offers: offerToken
-                ? [
-                    {
-                      offerId: GOOGLE_PLAY_BASE_PLAN_ID,
-                      offerToken,
-                      pricingPhases: [
-                        {
-                          priceFormatted: priceString,
-                          priceMicros,
-                          billingPeriod: 'P1M',
-                          recurrenceMode: 1,
-                          billingCycleCount: 0,
-                        },
-                      ],
-                    },
-                  ]
-                : DEFAULT_PRODUCT_DETAILS.offers,
-            };
-          }
-        }
+        return {
+          product: null,
+          isAvailable: false,
+          error: errorMsg,
+        };
       }
-    } catch (nativeErr) {
-      console.warn('[NativePurchases] Could not query store product details, falling back to server catalog:', nativeErr);
+
+      const nativeProd =
+        res.products.find(
+          (p) => p.identifier === GOOGLE_PLAY_PRODUCT_ID || (p as any).planIdentifier === GOOGLE_PLAY_PRODUCT_ID
+        ) || res.products[0];
+
+      if (!nativeProd) {
+        const errorMsg = `Product "${GOOGLE_PLAY_PRODUCT_ID}" not found in Google Play products list.`;
+        console.error('[Google Play Billing Error]', errorMsg);
+        return {
+          product: null,
+          isAvailable: false,
+          error: errorMsg,
+        };
+      }
+
+      const priceString = nativeProd.priceString || DEFAULT_PRODUCT_DETAILS.priceFormatted;
+      const priceMicros = nativeProd.price
+        ? Math.round(nativeProd.price * 1000000)
+        : DEFAULT_PRODUCT_DETAILS.priceMicros;
+      const offerToken = (nativeProd as any).offerToken || undefined;
+
+      const loadedProduct: GooglePlaySubscriptionProduct = {
+        ...DEFAULT_PRODUCT_DETAILS,
+        productId: GOOGLE_PLAY_PRODUCT_ID,
+        basePlanId: GOOGLE_PLAY_BASE_PLAN_ID,
+        title: nativeProd.title || DEFAULT_PRODUCT_DETAILS.title,
+        description: nativeProd.description || DEFAULT_PRODUCT_DETAILS.description,
+        priceFormatted: priceString,
+        priceMicros,
+        currencyCode: nativeProd.currencyCode || DEFAULT_PRODUCT_DETAILS.currencyCode,
+        offers: offerToken
+          ? [
+              {
+                offerId: GOOGLE_PLAY_BASE_PLAN_ID,
+                offerToken,
+                pricingPhases: [
+                  {
+                    priceFormatted: priceString,
+                    priceMicros,
+                    billingPeriod: 'P1M',
+                    recurrenceMode: 1,
+                    billingCycleCount: 0,
+                  },
+                ],
+              },
+            ]
+          : DEFAULT_PRODUCT_DETAILS.offers,
+      };
+
+      console.info('[Google Play Billing] Successfully loaded subscription from Google Play:', {
+        productId: loadedProduct.productId,
+        price: loadedProduct.priceFormatted,
+      });
+
+      return {
+        product: loadedProduct,
+        isAvailable: true,
+      };
+    } catch (nativeErr: any) {
+      const errorMsg = nativeErr?.message || String(nativeErr || 'Failed to query product from Google Play');
+      console.error('[Google Play Billing Error] Failed to load subscription product from Google Play Store:', {
+        error: errorMsg,
+        productId: GOOGLE_PLAY_PRODUCT_ID,
+        basePlanId: GOOGLE_PLAY_BASE_PLAN_ID,
+        raw: nativeErr,
+      });
+      return {
+        product: null,
+        isAvailable: false,
+        error: errorMsg,
+      };
     }
   }
 
-  // Fallback to server-side product-details endpoint
-  try {
-    const res = await fetch('/api/billing/product-details');
-    if (res.ok) {
-      const data = await res.json();
-      if (data.product) {
-        return data.product;
-      }
-    }
-  } catch (err) {
-    console.warn('Using default Google Play product details:', err);
-  }
-  return DEFAULT_PRODUCT_DETAILS;
+  // If running in web browser, Google Play is not available
+  const webMsg = 'Google Play Billing is unavailable in web browser environment (requires Android device).';
+  console.warn('[Google Play Billing]', webMsg);
+  return {
+    product: null,
+    isAvailable: false,
+    error: webMsg,
+  };
 }
 
 /**
@@ -360,13 +412,26 @@ export async function launchGooglePlayPurchase(
       };
     }
 
-    // 2. Fetch available offer token if available
+    // 2. Fetch available offer token and ensure product exists in Google Play catalog
     let offerToken: string | undefined;
     try {
       const prodsRes = await NativePurchases.getProducts({
         productIdentifiers: [GOOGLE_PLAY_PRODUCT_ID],
         productType: PURCHASE_TYPE.SUBS,
       });
+
+      if (!prodsRes.products || prodsRes.products.length === 0) {
+        const errLog = `Google Play returned 0 products for "${GOOGLE_PLAY_PRODUCT_ID}". Cannot launch purchase flow.`;
+        console.error('[Google Play Billing Error] Purchase launch failed:', errLog, {
+          productId: GOOGLE_PLAY_PRODUCT_ID,
+          basePlanId: GOOGLE_PLAY_BASE_PLAN_ID,
+        });
+        return {
+          success: false,
+          error: 'Subscription currently unavailable. Google Play returned 0 products for this item.',
+        };
+      }
+
       const matching =
         prodsRes.products?.find(
           (p) => p.identifier === GOOGLE_PLAY_PRODUCT_ID || (p as any).planIdentifier === GOOGLE_PLAY_PRODUCT_ID
@@ -374,8 +439,16 @@ export async function launchGooglePlayPurchase(
       if (matching && (matching as any).offerToken) {
         offerToken = (matching as any).offerToken;
       }
-    } catch {
-      // offerToken is optional if base plan has a single offer
+    } catch (queryErr: any) {
+      const rawError = queryErr?.message || String(queryErr || '');
+      console.error('[Google Play Billing Error] Failed to query product details before purchase:', {
+        error: rawError,
+        productId: GOOGLE_PLAY_PRODUCT_ID,
+      });
+      return {
+        success: false,
+        error: 'Subscription currently unavailable.',
+      };
     }
 
     // 3. Initiate native Google Play purchase flow

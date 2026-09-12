@@ -174,7 +174,7 @@ export const LeadsList: React.FC<LeadsListProps> = ({
           <div className="flex items-center gap-2 flex-shrink-0">
             {/* Export CSV Button */}
             <button
-              onClick={() => exportLeadsToCSV(leads, profile.name)}
+              onClick={() => exportLeadsToCSV(filteredLeads, profile.name)}
               className="p-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700 transition-colors flex-shrink-0"
               title={t('leads_export_csv')}
             >

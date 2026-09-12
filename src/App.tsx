@@ -176,12 +176,24 @@ export function App() {
   } | null>(null);
 
   // Toast notification
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ text: string; isError?: boolean } | null>(null);
 
-  const showToast = useCallback((msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+  const showToast = useCallback((msg: string, isError = false) => {
+    setToastMessage({ text: msg, isError });
+    setTimeout(() => setToastMessage(null), 3500);
   }, []);
+
+  useEffect(() => {
+    const handleToastEvent = (e: any) => {
+      if (e?.detail?.message) {
+        showToast(e.detail.message, Boolean(e.detail.isError));
+      } else if (typeof e?.detail === 'string') {
+        showToast(e.detail);
+      }
+    };
+    window.addEventListener('proplead:show-toast', handleToastEvent);
+    return () => window.removeEventListener('proplead:show-toast', handleToastEvent);
+  }, [showToast]);
 
   // Fresh references ref for the single back button listener
   const appStateRef = useRef({
@@ -512,8 +524,9 @@ export function App() {
     }
   }, [darkMode]);
 
-  const handleToggleDarkMode = () => {
-    const nextMode = !darkMode;
+  const handleToggleDarkMode = (target?: boolean) => {
+    const nextMode = typeof target === 'boolean' ? target : !darkMode;
+    if (nextMode === darkMode) return;
     setDarkMode(nextMode);
     const updatedProfile = { ...profile, darkMode: nextMode };
     setProfile(updatedProfile);
@@ -782,19 +795,23 @@ export function App() {
       {/* Toast Notification */}
       {toastMessage && (
         <div
-          className="fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-slate-900 text-white dark:bg-emerald-600 rounded-full text-xs font-bold shadow-xl border border-slate-700 animate-bounce"
+          className={`fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 text-white rounded-full text-xs font-bold shadow-xl border animate-bounce ${
+            toastMessage.isError
+              ? 'bg-rose-600 border-rose-700'
+              : 'bg-slate-900 dark:bg-emerald-600 border-slate-700 dark:border-emerald-500'
+          }`}
           style={{
             top: 'calc(4.5rem + max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)))',
           }}
         >
-          {toastMessage}
+          {toastMessage.text}
         </div>
       )}
 
       {!currentUser ? (
         <AuthFlow />
       ) : (
-        <div className="flex-1 flex flex-col min-h-screen bg-slate-100/70 dark:bg-slate-950 w-full max-w-full overflow-x-hidden">
+        <div className="flex-1 flex flex-col min-h-screen bg-slate-100/70 dark:bg-slate-950 w-full max-w-full overflow-x-clip">
           {/* Header */}
           <Header
             profile={profile}

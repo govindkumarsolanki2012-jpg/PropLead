@@ -59,31 +59,30 @@ export const MobileFrame: React.FC<MobileFrameProps> = ({ children, darkMode }) 
               <div className="w-2.5 h-2.5 rounded-full bg-slate-950 border border-slate-800 ring-1 ring-emerald-500/20"></div>
             </div>
 
+            {/* Android Status Bar Overlay - Fixed on top of phone screen, stays visible while scrolling */}
+            <div className="pointer-events-none absolute top-2.5 left-2.5 right-2.5 h-8 flex items-center justify-between px-6 text-[11px] font-semibold tracking-tight text-slate-700 dark:text-slate-300 select-none z-50 pt-1.5 rounded-t-[34px]">
+              <span>{currentTime}</span>
+              <div className="flex items-center gap-2">
+                <Wifi className="w-3 h-3 text-slate-700 dark:text-slate-300" />
+                <span className="text-[10px] font-bold">5G</span>
+                <Battery className="w-3.5 h-3.5 text-slate-700 dark:text-slate-300" />
+              </div>
+            </div>
+
             {/* App Screen inside phone with simulated Android edge-to-edge safe areas */}
             <div
               className="flex-1 w-full bg-slate-50 dark:bg-slate-900 rounded-[34px] overflow-y-auto no-scrollbar flex flex-col relative border border-slate-200 dark:border-slate-800"
               style={{
                 '--safe-area-inset-top': '32px',
                 '--safe-area-inset-bottom': '18px',
-                transform: 'translateZ(0)',
               } as React.CSSProperties}
             >
-              {/* Android Status Bar Overlay */}
-              <div className="pointer-events-none absolute top-0 left-0 right-0 h-8 flex items-center justify-between px-6 text-[11px] font-semibold tracking-tight text-slate-700 dark:text-slate-300 select-none z-40 pt-1.5">
-                <span>{currentTime}</span>
-                <div className="flex items-center gap-2">
-                  <Wifi className="w-3 h-3 text-slate-700 dark:text-slate-300" />
-                  <span className="text-[10px] font-bold">5G</span>
-                  <Battery className="w-3.5 h-3.5 text-slate-700 dark:text-slate-300" />
-                </div>
-              </div>
-
               {children}
+            </div>
 
-              {/* Android Navigation Gesture Pill Overlay */}
-              <div className="pointer-events-none absolute bottom-1.5 left-0 right-0 h-3 flex items-center justify-center z-40">
-                <div className="w-32 h-1 bg-slate-400 dark:bg-slate-600 rounded-full"></div>
-              </div>
+            {/* Android Navigation Gesture Pill Overlay */}
+            <div className="pointer-events-none absolute bottom-4 left-2.5 right-2.5 h-3 flex items-center justify-center z-50">
+              <div className="w-32 h-1 bg-slate-400 dark:bg-slate-600 rounded-full"></div>
             </div>
           </div>
         ) : (

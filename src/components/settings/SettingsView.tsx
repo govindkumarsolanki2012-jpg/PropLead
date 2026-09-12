@@ -4,8 +4,6 @@ import {
   Shield,
   CreditCard,
   Download,
-  Moon,
-  Sun,
   MessageSquare,
   Sparkles,
   Phone,
@@ -44,7 +42,7 @@ interface SettingsViewProps {
   isCloudSynced?: boolean;
   onGoogleSignIn?: () => void;
   onSignOut?: () => void;
-  onToggleDarkMode: () => void;
+  onToggleDarkMode: (target?: boolean) => void;
   onUpdateProfile: (profile: UserProfile) => void;
   onUpdateTemplates: (templates: WhatsAppTemplate[]) => void;
   onOpenSubscription: () => void;
@@ -366,16 +364,79 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           {t('settings_preferences')}
         </h3>
 
-        <div className="flex items-center justify-between py-1">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300">
-            {darkMode ? <Moon className="w-4 h-4 text-purple-400" /> : <Sun className="w-4 h-4 text-amber-500" />}
-            <span>{t('settings_dark_mode')}</span>
-          </div>
+        {/* Modern Horizontal Toggle Selector */}
+        <div
+          id="theme-toggle-selector"
+          role="radiogroup"
+          aria-label="Theme Selection"
+          className="w-full p-1.5 bg-slate-100 dark:bg-slate-900/90 rounded-2xl sm:rounded-full border border-slate-200 dark:border-slate-700/80 grid grid-cols-2 gap-1.5 select-none"
+        >
+          {/* Left Side: Light Mode (permanently on the left) */}
           <button
-            onClick={onToggleDarkMode}
-            className="px-3 py-1.5 bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-bold transition-colors"
+            type="button"
+            id="theme-toggle-light"
+            role="radio"
+            aria-checked={!darkMode}
+            onClick={() => {
+              if (darkMode) {
+                onToggleDarkMode(false);
+              }
+            }}
+            className={`flex flex-col items-center justify-center py-2.5 px-3 rounded-xl sm:rounded-full text-center transition-all duration-200 ease-in-out cursor-pointer active:scale-[0.98] ${
+              !darkMode
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-500 dark:border-emerald-500 shadow-xs'
+                : 'bg-transparent border-2 border-transparent hover:bg-slate-200/50 dark:hover:bg-slate-800/50'
+            }`}
           >
-            {darkMode ? `🌙 ${t('settings_dark_mode')}` : `☀️ ${t('settings_light_mode')}`}
+            <span
+              className={`text-xs sm:text-sm font-bold tracking-tight flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                !darkMode ? 'text-emerald-900 dark:text-emerald-200' : 'text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              <span>☀️</span>
+              <span>Light Mode</span>
+            </span>
+            <span
+              className={`text-[10px] sm:text-[11px] leading-tight mt-0.5 whitespace-nowrap ${
+                !darkMode ? 'text-emerald-700 dark:text-emerald-400 font-medium' : 'text-slate-400 dark:text-slate-500'
+              }`}
+            >
+              Clean &amp; Bright
+            </span>
+          </button>
+
+          {/* Right Side: Dark Mode (permanently on the right) */}
+          <button
+            type="button"
+            id="theme-toggle-dark"
+            role="radio"
+            aria-checked={darkMode}
+            onClick={() => {
+              if (!darkMode) {
+                onToggleDarkMode(true);
+              }
+            }}
+            className={`flex flex-col items-center justify-center py-2.5 px-3 rounded-xl sm:rounded-full text-center transition-all duration-200 ease-in-out cursor-pointer active:scale-[0.98] ${
+              darkMode
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-500 dark:border-emerald-500 shadow-xs'
+                : 'bg-transparent border-2 border-transparent hover:bg-slate-200/50 dark:hover:bg-slate-800/50'
+            }`}
+          >
+            <span
+              className={`text-xs sm:text-sm font-bold tracking-tight flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                darkMode ? 'text-emerald-900 dark:text-emerald-200' : 'text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              <span>🌙</span>
+              <span>Dark Mode</span>
+            </span>
+            <span
+              className={`text-[10px] sm:text-[11px] leading-tight mt-0.5 whitespace-nowrap ${
+                darkMode ? 'text-emerald-700 dark:text-emerald-400 font-medium' : 'text-slate-400 dark:text-slate-500'
+              }`}
+            >
+              Easy on your eyes
+            </span>
           </button>
         </div>
       </div>

@@ -16,6 +16,7 @@ import {
 import { UserProfile, GooglePlaySubscriptionProduct } from '../../types';
 import {
   fetchGooglePlayProduct,
+  GooglePlayProductResult,
   launchGooglePlayPurchase,
   restoreGooglePlayPurchases,
   getEffectiveSubscriptionStatus,
@@ -43,7 +44,17 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   const [processingStatus, setProcessingStatus] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [productDetails, setProductDetails] = useState<GooglePlaySubscriptionProduct | null>(null);
+  const [productState, setProductState] = useState<{
+    isLoading: boolean;
+    isAvailable: boolean;
+    product: GooglePlaySubscriptionProduct | null;
+    error: string | null;
+  }>({
+    isLoading: true,
+    isAvailable: false,
+    product: null,
+    error: null,
+  });
 
   const {
     status,
@@ -58,13 +69,27 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     if (isOpen) {
       setErrorMessage(null);
       setSuccessMessage(null);
-      fetchGooglePlayProduct().then((prod) => setProductDetails(prod));
+      setProductState((prev) => ({ ...prev, isLoading: true }));
+
+      fetchGooglePlayProduct().then((res: GooglePlayProductResult) => {
+        setProductState({
+          isLoading: false,
+          isAvailable: res.isAvailable,
+          product: res.product,
+          error: res.error || null,
+        });
+      });
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
   const handleStartPurchase = async () => {
+    if (!productState.isAvailable || !productState.product) {
+      setErrorMessage('Subscription currently unavailable. Google Play product could not be loaded.');
+      return;
+    }
+
     setIsProcessing(true);
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -283,29 +308,60 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
             </div>
           )}
 
-          {/* Pricing Box */}
-          <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-500/40 flex items-center justify-between shadow-2xs">
-            <div>
-              <div className="text-2xl font-black text-slate-900 dark:text-white">
-                ₹49<span className="text-sm font-semibold text-slate-500">/month</span>
+          {/* Pricing Box / Availability Box */}
+          {productState.isLoading ? (
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 flex items-center justify-center gap-2.5 text-slate-500 dark:text-slate-400 py-6">
+              <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" />
+              <span className="text-xs font-medium">Checking Google Play Store availability...</span>
+            </div>
+          ) : !productState.isAvailable ? (
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-amber-100 dark:bg-amber-950/60 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold text-slate-800 dark:text-slate-100">
+                      Subscription currently unavailable
+                    </div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Google Play Store package could not be reached
+                    </div>
+                  </div>
+                </div>
+                <span className="px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
+                  Unavailable
+                </span>
               </div>
-              <div className="text-xs font-bold text-emerald-700 dark:text-emerald-400 mt-0.5">
-                {status === 'TRIAL'
-                  ? `${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} trial remaining`
-                  : status === 'ACTIVE'
-                  ? 'Active Pro Subscription'
-                  : status === 'CANCELED_BUT_ACTIVE'
-                  ? 'Access until period end'
-                  : 'Monthly Subscription'}
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                Auto-renewing monthly subscription • Cancel anytime
+              <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed pt-1 border-t border-slate-200/70 dark:border-slate-700/60">
+                Google Play could not load the subscription package for this app. Purchases cannot be processed at this time.
               </p>
             </div>
-            <div className="px-2.5 py-1 rounded-full bg-emerald-600 text-white text-[11px] font-bold shadow-xs">
-              Google Play
+          ) : (
+            <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-500/40 flex items-center justify-between shadow-2xs">
+              <div>
+                <div className="text-2xl font-black text-slate-900 dark:text-white">
+                  {productState.product?.priceFormatted || '₹49/month'}
+                </div>
+                <div className="text-xs font-bold text-emerald-700 dark:text-emerald-400 mt-0.5">
+                  {status === 'TRIAL'
+                    ? `${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} trial remaining`
+                    : status === 'ACTIVE'
+                    ? 'Active Pro Subscription'
+                    : status === 'CANCELED_BUT_ACTIVE'
+                    ? 'Access until period end'
+                    : 'Monthly Subscription'}
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                  Auto-renewing monthly subscription • Cancel anytime
+                </p>
+              </div>
+              <div className="px-2.5 py-1 rounded-full bg-emerald-600 text-white text-[11px] font-bold shadow-xs">
+                Google Play
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Feature Checklist (Exact User Request) */}
           <div className="space-y-2">
@@ -336,9 +392,11 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           <div className="flex items-center gap-2.5 text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
             <ShieldCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
             <span>
-              {status === 'TRIAL' && daysRemaining > 0
-                ? `Secure Google Play Billing. You will be billed ₹49/month after your trial ends (${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} remaining). Cancel anytime.`
-                : 'Secure Google Play Billing. Auto-renews at ₹49/month. Cancel anytime in Google Play Store.'}
+              {!productState.isAvailable
+                ? 'Google Play Billing is currently unavailable for this product. You cannot be billed at this time.'
+                : status === 'TRIAL' && daysRemaining > 0
+                ? `Secure Google Play Billing. You will be billed ${productState.product?.priceFormatted || '₹49/month'} after your trial ends (${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} remaining). Cancel anytime.`
+                : `Secure Google Play Billing. Auto-renews at ${productState.product?.priceFormatted || '₹49/month'}. Cancel anytime in Google Play Store.`}
             </span>
           </div>
         </div>
@@ -354,9 +412,17 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
               <ExternalLink className="w-4 h-4" />
               <span>Manage Google Play Subscription</span>
             </button>
+          ) : !productState.isAvailable ? (
+            <button
+              disabled={true}
+              className="w-full py-3.5 bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed font-bold rounded-xl flex items-center justify-center gap-2 text-sm border border-slate-300 dark:border-slate-700/60"
+            >
+              <AlertCircle className="w-4 h-4" />
+              <span>Subscription currently unavailable</span>
+            </button>
           ) : (
             <button
-              disabled={isProcessing}
+              disabled={isProcessing || productState.isLoading}
               onClick={handleStartPurchase}
               className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60 text-white font-bold rounded-xl shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 text-sm transition-all"
             >
@@ -369,8 +435,8 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                 {isProcessing
                   ? processingStatus || 'Processing...'
                   : status === 'TRIAL' && daysRemaining > 0
-                  ? `Subscribe for ₹49/month (${daysRemaining}d trial left)`
-                  : 'Subscribe for ₹49/month'}
+                  ? `Subscribe for ${productState.product?.priceFormatted || '₹49/month'} (${daysRemaining}d trial left)`
+                  : `Subscribe for ${productState.product?.priceFormatted || '₹49/month'}`}
               </span>
             </button>
           )}
