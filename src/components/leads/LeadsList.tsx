@@ -122,7 +122,7 @@ export const LeadsList: React.FC<LeadsListProps> = ({
   }, [leads, searchQuery, activeFilter, sortBy]);
 
   return (
-    <div className="flex-1 overflow-y-auto pb-20 flex flex-col">
+    <div className="flex-1 pb-32 flex flex-col">
       {/* Filter Chips & Action Toolbar */}
       <div className="p-3.5 sm:p-4 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 space-y-2.5 sticky top-0 z-20">
         {/* Filter Chips Scrollbar */}

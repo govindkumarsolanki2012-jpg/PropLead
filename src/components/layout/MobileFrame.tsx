@@ -61,10 +61,11 @@ export const MobileFrame: React.FC<MobileFrameProps> = ({ children, darkMode }) 
 
             {/* App Screen inside phone with simulated Android edge-to-edge safe areas */}
             <div
-              className="flex-1 w-full bg-slate-50 dark:bg-slate-900 rounded-[34px] overflow-hidden flex flex-col relative border border-slate-200 dark:border-slate-800"
+              className="flex-1 w-full bg-slate-50 dark:bg-slate-900 rounded-[34px] overflow-y-auto no-scrollbar flex flex-col relative border border-slate-200 dark:border-slate-800"
               style={{
                 '--safe-area-inset-top': '32px',
                 '--safe-area-inset-bottom': '18px',
+                transform: 'translateZ(0)',
               } as React.CSSProperties}
             >
               {/* Android Status Bar Overlay */}

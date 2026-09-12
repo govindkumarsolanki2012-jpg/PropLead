@@ -109,7 +109,7 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
   const negotiationCount = properties.filter((p) => p.status === 'negotiation').length;
 
   return (
-    <div className="flex-1 overflow-y-auto pb-24 bg-slate-100/70 dark:bg-slate-950">
+    <div className="flex-1 pb-32 bg-slate-100/70 dark:bg-slate-950">
       {/* Top Banner / Title Header */}
       <div className="p-4 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
         <div className="flex items-center justify-between gap-3 mb-3">

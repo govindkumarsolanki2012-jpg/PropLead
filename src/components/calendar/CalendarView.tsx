@@ -79,7 +79,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const todayStr = new Date().toISOString().split('T')[0];
 
   return (
-    <div className="flex-1 overflow-y-auto pb-20 p-4 space-y-4">
+    <div className="flex-1 pb-32 p-4 space-y-4">
       {/* Month Header with Nav */}
       <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-slate-200 dark:border-slate-700 shadow-2xs">
         <div className="flex items-center justify-between mb-4">

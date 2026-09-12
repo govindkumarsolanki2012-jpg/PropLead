@@ -783,7 +783,7 @@ export function App() {
       {!currentUser ? (
         <AuthFlow />
       ) : (
-        <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-100/70 dark:bg-slate-950">
+        <div className="flex-1 flex flex-col min-h-screen bg-slate-100/70 dark:bg-slate-950">
           {/* Header */}
           <Header
             profile={profile}

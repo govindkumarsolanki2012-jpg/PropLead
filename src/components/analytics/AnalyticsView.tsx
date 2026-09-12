@@ -78,7 +78,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ leads, profile }) 
   ];
 
   return (
-    <div className="flex-1 overflow-y-auto pb-20 p-4 space-y-4">
+    <div className="flex-1 pb-32 p-4 space-y-4">
       {/* Top Banner */}
       <div className="p-4 bg-gradient-to-r from-emerald-600 to-teal-700 rounded-3xl text-white shadow-lg space-y-3">
         <div className="flex items-center justify-between">

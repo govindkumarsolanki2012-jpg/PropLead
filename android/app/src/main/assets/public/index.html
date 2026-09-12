@@ -22,8 +22,18 @@
         margin: 0;
         padding: 0;
         width: 100%;
-        height: 100%;
-        overflow: hidden;
+        min-height: 100%;
+        overflow-x: hidden;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-y;
+      }
+      #root {
+        min-height: 100%;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        overflow-x: hidden;
       }
       .dark, .dark body {
         background-color: #0f172a;
@@ -47,8 +57,8 @@
         color: #ffffff;
       }
     </style>
-    <script type="module" crossorigin src="/assets/index-Dw_DmpSd.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-qgACIm8F.css">
+    <script type="module" crossorigin src="/assets/index-CpF8ru3C.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CczMTOaJ.css">
   </head>
   <body class="bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100 antialiased selection:bg-emerald-500 selection:text-white font-['Plus_Jakarta_Sans',sans-serif]">
     <div id="root">
