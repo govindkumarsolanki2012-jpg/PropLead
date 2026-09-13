@@ -3,17 +3,16 @@ import { Smartphone, Monitor, Wifi, Battery, Sparkles } from 'lucide-react';
 
 interface MobileFrameProps {
   children: React.ReactNode;
-  darkMode: boolean;
 }
 
-export const MobileFrame: React.FC<MobileFrameProps> = ({ children, darkMode }) => {
+export const MobileFrame: React.FC<MobileFrameProps> = ({ children }) => {
   const [isPhoneFrame, setIsPhoneFrame] = useState<boolean>(false);
   const currentTime = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
 
   return (
-    <div className={`min-h-screen ${darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-100 text-slate-900'} transition-colors duration-200`}>
+    <div className="h-screen h-[100dvh] flex flex-col overflow-hidden bg-slate-100 text-slate-900 transition-colors duration-200">
       {/* Desktop view switcher bar (visible on large screens only) */}
-      <div className="hidden lg:flex items-center justify-between px-6 py-2.5 bg-slate-900 text-slate-300 text-xs border-b border-slate-800 shadow-sm">
+      <div className="hidden lg:flex items-center justify-between px-6 py-2.5 bg-slate-900 text-slate-300 text-xs border-b border-slate-800 shadow-sm flex-shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
           <span className="font-semibold text-white tracking-wide">PropLead • Property Agent Lead Tracker</span>
@@ -50,10 +49,10 @@ export const MobileFrame: React.FC<MobileFrameProps> = ({ children, darkMode }) 
       </div>
 
       {/* Frame Container */}
-      <div className={`mx-auto ${isPhoneFrame ? 'py-8 flex justify-center items-center min-h-[calc(100vh-45px)]' : ''}`}>
+      <div className={`flex-1 min-h-0 flex flex-col w-full mx-auto ${isPhoneFrame ? 'py-4 justify-center items-center overflow-hidden' : ''}`}>
         {isPhoneFrame ? (
           /* Realistic Android Phone Mockup Frame (Edge-to-Edge simulation) */
-          <div className="relative w-[412px] h-[860px] bg-slate-900 rounded-[44px] p-2.5 shadow-2xl ring-1 ring-slate-800 ring-offset-4 ring-offset-slate-950 flex flex-col overflow-hidden">
+          <div className="relative w-[412px] h-[860px] max-h-[95vh] bg-slate-900 rounded-[44px] p-2.5 shadow-2xl ring-1 ring-slate-800 ring-offset-4 ring-offset-slate-950 flex flex-col overflow-hidden">
             {/* Top Phone Speaker Notch */}
             <div className="absolute top-3 left-1/2 -translate-x-1/2 w-24 h-4 bg-black rounded-full z-50 flex items-center justify-center pointer-events-none">
               <div className="w-2.5 h-2.5 rounded-full bg-slate-950 border border-slate-800 ring-1 ring-emerald-500/20"></div>
@@ -71,7 +70,7 @@ export const MobileFrame: React.FC<MobileFrameProps> = ({ children, darkMode }) 
 
             {/* App Screen inside phone with simulated Android edge-to-edge safe areas */}
             <div
-              className="flex-1 w-full bg-slate-50 dark:bg-slate-900 rounded-[34px] overflow-y-auto no-scrollbar flex flex-col relative border border-slate-200 dark:border-slate-800"
+              className="flex-1 min-h-0 w-full bg-slate-50 dark:bg-slate-900 rounded-[34px] flex flex-col relative border border-slate-200 dark:border-slate-800 overflow-hidden"
               style={{
                 '--safe-area-inset-top': '32px',
                 '--safe-area-inset-bottom': '18px',
@@ -87,7 +86,7 @@ export const MobileFrame: React.FC<MobileFrameProps> = ({ children, darkMode }) 
           </div>
         ) : (
           /* Full Responsive View */
-          <div className="w-full max-w-2xl mx-auto min-h-screen bg-slate-50 dark:bg-slate-900 shadow-xl sm:border-x sm:border-slate-200 dark:sm:border-slate-800 relative flex flex-col">
+          <div className="w-full max-w-2xl mx-auto h-full min-h-0 bg-slate-50 dark:bg-slate-900 shadow-xl sm:border-x sm:border-slate-200 dark:sm:border-slate-800 relative flex flex-col overflow-hidden">
             {children}
           </div>
         )}

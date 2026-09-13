@@ -4,7 +4,6 @@ import { WHATSAPP_TEMPLATES } from './whatsapp';
 import { formatBudgetRange } from './formatters';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
 import { showAppToast } from './toast';
 
 const STORAGE_KEYS = {
@@ -13,7 +12,6 @@ const STORAGE_KEYS = {
   PROFILE: 'proplead_profile_v1',
   TEMPLATES: 'proplead_templates_v1',
   IS_LOGGED_IN: 'proplead_is_logged_in_v1',
-  THEME: 'proplead_theme_v1',
 };
 
 // Known legacy demo IDs to prevent old cached demo items from showing up
@@ -207,92 +205,84 @@ export async function exportLeadsToCSV(
   // 1. Native Android App via Capacitor
   if (Capacitor.isNativePlatform()) {
     try {
-      // Write file into device Cache directory
-      const writeResult = await Filesystem.writeFile({
-        path: filename,
-        data: csvContent,
-        directory: Directory.Cache,
-        encoding: Encoding.UTF8,
-      });
-
-      // Launch native Android Intent (ACTION_SEND) so the user can choose/save the file
-      // to their preferred device location (e.g. Save to Files, Google Drive, Downloads)
-      await Share.share({
-        title: filename,
-        text: 'PropLead Leads Export',
-        url: writeResult.uri,
-        dialogTitle: 'Save CSV File',
-      });
-
-      showAppToast('CSV downloaded successfully');
-      return { success: true, message: 'CSV downloaded successfully' };
-    } catch (nativeErr: any) {
-      const errStr = String(nativeErr?.message || nativeErr || '');
-      // If user dismissed the Android share/save dialog, treat as cancelled
-      if (errStr.toLowerCase().includes('cancel') || errStr.toLowerCase().includes('abort')) {
-        return { success: true, message: 'Cancelled' };
+      // Request storage permissions if needed on Android
+      try {
+        const permStatus = await Filesystem.checkPermissions();
+        if (permStatus.publicStorage !== 'granted') {
+          await Filesystem.requestPermissions();
+        }
+      } catch (permErr) {
+        console.warn('[CSV Export] Permission request check note:', permErr);
       }
-      console.warn('[CSV Export] Native Capacitor share warning, attempting web fallback:', nativeErr);
-    }
-  }
 
-  // 2. Android Web / Mobile Chrome / Web Share API with Files
-  const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent || '');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      let saveSuccess = false;
 
-  if (isAndroid && typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-    try {
-      const file = new File([blob], filename, { type: 'text/csv' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: filename,
-          text: 'PropLead Leads Export',
+      // Primary attempt: Save directly into user's Downloads folder
+      try {
+        await Filesystem.writeFile({
+          path: `Download/${filename}`,
+          data: csvContent,
+          directory: Directory.ExternalStorage,
+          encoding: Encoding.UTF8,
+          recursive: true,
         });
+        saveSuccess = true;
+      } catch (dlErr) {
+        console.warn('[CSV Export] Direct save to Download/ failed, trying Documents directory:', dlErr);
+      }
+
+      // Secondary attempt: Public Documents directory
+      if (!saveSuccess) {
+        try {
+          await Filesystem.writeFile({
+            path: filename,
+            data: csvContent,
+            directory: Directory.Documents,
+            encoding: Encoding.UTF8,
+            recursive: true,
+          });
+          saveSuccess = true;
+        } catch (docErr) {
+          console.warn('[CSV Export] Save to Documents failed, trying External app storage:', docErr);
+        }
+      }
+
+      // Tertiary attempt: External app storage directory
+      if (!saveSuccess) {
+        try {
+          await Filesystem.writeFile({
+            path: filename,
+            data: csvContent,
+            directory: Directory.External,
+            encoding: Encoding.UTF8,
+            recursive: true,
+          });
+          saveSuccess = true;
+        } catch (extErr) {
+          console.error('[CSV Export] All Capacitor Filesystem save attempts failed:', extErr);
+        }
+      }
+
+      if (saveSuccess) {
         showAppToast('CSV downloaded successfully');
         return { success: true, message: 'CSV downloaded successfully' };
+      } else {
+        const errMsg = 'Failed to save CSV to Downloads folder. Please check storage permissions.';
+        showAppToast(errMsg, true);
+        return { success: false, message: errMsg };
       }
-    } catch (shareErr: any) {
-      if (shareErr?.name === 'AbortError') {
-        // User dismissed the Android share sheet
-        return { success: true, message: 'Cancelled' };
-      }
-      console.warn('[CSV Export] Android Web Share warning, trying file picker/download:', shareErr);
+    } catch (nativeErr: any) {
+      console.error('[CSV Export] Native direct save error:', nativeErr);
+      const errMsg = nativeErr?.message || 'Failed to save CSV to Downloads folder.';
+      showAppToast(errMsg, true);
+      return { success: false, message: errMsg };
     }
   }
 
-  // 3. File System Access API (Modern Desktop Chrome / Edge)
-  // Lets the user choose the destination folder & file name on their device
-  if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
-    try {
-      const handle = await (window as any).showSaveFilePicker({
-        suggestedName: filename,
-        types: [
-          {
-            description: 'CSV Document',
-            accept: { 'text/csv': ['.csv'] },
-          },
-        ],
-      });
-      const writable = await handle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      showAppToast('CSV downloaded successfully');
-      return { success: true, message: 'CSV downloaded successfully' };
-    } catch (pickerErr: any) {
-      if (pickerErr?.name === 'AbortError') {
-        // User cancelled the file picker dialog
-        return { success: true, message: 'Cancelled' };
-      }
-      console.warn('[CSV Export] showSaveFilePicker failed, trying download fallback:', pickerErr);
-    }
-  }
-
-  // 4. Standard Web Download Fallback (<a download="...">)
+  // 2. Desktop / Web standard download behavior
   try {
-    // Use application/octet-stream to prevent mobile browsers from rendering raw text inline
-    const downloadBlob = new Blob([csvContent], { type: 'application/octet-stream' });
-    const url = URL.createObjectURL(downloadBlob);
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
     link.setAttribute('download', filename);
@@ -307,9 +297,9 @@ export async function exportLeadsToCSV(
     showAppToast('CSV downloaded successfully');
     return { success: true, message: 'CSV downloaded successfully' };
   } catch (dlErr: any) {
-    console.error('[CSV Export] Standard download failed:', dlErr);
+    console.error('[CSV Export] Standard web download failed:', dlErr);
     const errMsg = dlErr?.message || 'Download failed. Please check permissions.';
-    showAppToast(`Failed to download CSV: ${errMsg}`, true);
+    showAppToast(errMsg, true);
     return { success: false, message: errMsg };
   }
 }

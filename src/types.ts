@@ -183,7 +183,7 @@ export interface UserProfile {
   paymentIssueMessage?: string;
   isFeatureLocked?: boolean;
   language?: 'en' | 'hi' | 'hinglish';
-  darkMode: boolean;
+  darkMode?: boolean;
   notificationsEnabled: boolean;
   hasCompletedOnboarding?: boolean;
   isOnboarded?: boolean;
@@ -275,10 +275,12 @@ export interface LeadMatchResult {
   isSameCity?: boolean;
 }
 
+export type WhatsAppTemplateCategory = 'Greeting' | 'Property Details' | 'Site Visit' | 'Follow-up' | 'Closing';
+
 export interface WhatsAppTemplate {
   id: string;
   title: string;
-  category: 'Test Presets' | 'Greeting' | 'Site Visit' | 'Brochure' | 'Follow-up' | 'Offer' | 'Hindi' | 'Hinglish';
+  category: WhatsAppTemplateCategory;
   getMessage: (lead?: any, agentName?: string, agencyName?: string) => string;
 }
 

@@ -143,7 +143,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const totalResults = matchingLeads.length + matchingProperties.length;
 
     return (
-      <div id="dashboard-search-view" className="flex-1 pb-32 safe-content w-full max-w-full overflow-x-hidden">
+      <div id="dashboard-search-view" className="flex-1 pb-8 safe-content w-full max-w-full">
         <div className="p-4 space-y-4 max-w-3xl mx-auto">
           {/* Search Result Summary Header */}
           <div
@@ -375,7 +375,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }
 
   return (
-    <div id="dashboard-main-view" className="flex-1 pb-32 space-y-4 w-full max-w-full overflow-x-hidden">
+    <div id="dashboard-main-view" className="flex-1 pb-8 space-y-4 w-full max-w-full">
       {/* Trial Reminders Banner */}
       <TrialBanner profile={profile} onOpenSubscription={onOpenSubscription} />
 

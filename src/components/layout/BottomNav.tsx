@@ -44,7 +44,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   return (
     <nav
       id="bottom-navigation-bar"
-      className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 transition-colors safe-bottom-nav"
+      className="flex-shrink-0 z-30 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 transition-colors safe-bottom-nav w-full opacity-100"
       style={{
         paddingBottom: 'calc(0.375rem + max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px)))',
       }}

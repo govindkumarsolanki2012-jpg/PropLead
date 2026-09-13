@@ -140,20 +140,6 @@ export function App() {
   const handleSearchFocus = useCallback(() => {
     // When the user taps the search bar on Dashboard or any tab, do NOT automatically navigate away
   }, []);
-  const [darkMode, setDarkMode] = useState<boolean>(() => {
-    try {
-      const savedTheme = localStorage.getItem('proplead_theme_v1');
-      if (savedTheme === 'dark') return true;
-      if (savedTheme === 'light') return false;
-      const initialProfile = getStoredProfile();
-      if (typeof initialProfile.darkMode === 'boolean') {
-        return initialProfile.darkMode;
-      }
-    } catch (e) {
-      // Fallback to system preference
-    }
-    return typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  });
 
   // Modal states for Leads
   const [isQuickAddOpen, setIsQuickAddOpen] = useState<boolean>(false);
@@ -508,35 +494,16 @@ export function App() {
     syncSubscription();
   }, [currentUser]);
 
-  // Dark mode effect with local storage persistence & class syncing
+  // Ensure Light Mode is permanently active and cleanup any legacy theme storage
   useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-      document.body.classList.add('dark');
-    } else {
+    try {
+      localStorage.removeItem('proplead_theme_v1');
       document.documentElement.classList.remove('dark');
       document.body.classList.remove('dark');
-    }
-    try {
-      localStorage.setItem('proplead_theme_v1', darkMode ? 'dark' : 'light');
     } catch (e) {
       // ignore
     }
-  }, [darkMode]);
-
-  const handleToggleDarkMode = (target?: boolean) => {
-    const nextMode = typeof target === 'boolean' ? target : !darkMode;
-    if (nextMode === darkMode) return;
-    setDarkMode(nextMode);
-    const updatedProfile = { ...profile, darkMode: nextMode };
-    setProfile(updatedProfile);
-    saveStoredProfile(updatedProfile);
-    if (currentUser?.uid) {
-      saveUserProfile(currentUser.uid, updatedProfile).catch((e) =>
-        console.warn('Firestore update profile error:', e)
-      );
-    }
-  };
+  }, []);
 
   // Guarded actions for locked state
   const guardLockedFeature = useCallback(
@@ -787,7 +754,7 @@ export function App() {
   const todayCount = leads.filter((l) => formatRelativeDate(l.nextFollowUpDate).isToday).length;
 
   return (
-    <MobileFrame darkMode={darkMode}>
+    <MobileFrame>
       {/* Launch Splash Screen with subtle fade-out transition */}
       <AnimatePresence>
         {isSplashVisible && <SplashScreen key="app-launch-splash" />}
@@ -798,7 +765,7 @@ export function App() {
           className={`fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 text-white rounded-full text-xs font-bold shadow-xl border animate-bounce ${
             toastMessage.isError
               ? 'bg-rose-600 border-rose-700'
-              : 'bg-slate-900 dark:bg-emerald-600 border-slate-700 dark:border-emerald-500'
+              : 'bg-slate-900 border-slate-700'
           }`}
           style={{
             top: 'calc(4.5rem + max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)))',
@@ -811,7 +778,7 @@ export function App() {
       {!currentUser ? (
         <AuthFlow />
       ) : (
-        <div className="flex-1 flex flex-col min-h-screen bg-slate-100/70 dark:bg-slate-950 w-full max-w-full overflow-x-clip">
+        <div className="flex-1 min-h-0 flex flex-col h-full bg-slate-100/70 dark:bg-slate-950 w-full max-w-full">
           {/* Header */}
           <Header
             profile={profile}
@@ -835,98 +802,102 @@ export function App() {
             onOpenSubscription={() => setIsSubscriptionOpen(true)}
           />
 
-          {/* Main Tab Views */}
-          {currentTab === 'home' && (
-            <Dashboard
-              leads={leads}
-              properties={properties}
-              profile={profile}
-              searchQuery={dashboardSearchQuery}
-              onClearSearch={() => setDashboardSearchQuery('')}
-              onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
-              onOpenLeadDetail={(l) => setDetailLead(l)}
-              onOpenPropertyDetail={(p) => setDetailProperty(p)}
-              onOpenWhatsApp={(l) => setWhatsAppLead(l)}
-              onOpenSchedule={(l) => guardLockedFeature('Schedule Follow-Up', () => setScheduleLead(l))}
-              onOpenSubscription={() => setIsSubscriptionOpen(true)}
-              onNavigateToLeadsWithFilter={(filter) => {
-                setLeadsFilter(filter);
-                setSearchQuery('');
-                handleTabChange('leads');
-              }}
-              onNavigateToTab={(tab) => handleTabChange(tab)}
-              onOpenImportContacts={() => guardLockedFeature('Import Contacts', () => setIsImportContactsOpen(true))}
-            />
-          )}
+          {/* Single Vertical Scroll Container for Main Content */}
+          <main
+            id="main-content-scroll"
+            className="flex-1 min-h-0 overflow-y-auto w-full overscroll-y-contain"
+          >
+            {/* Main Tab Views */}
+            {currentTab === 'home' && (
+              <Dashboard
+                leads={leads}
+                properties={properties}
+                profile={profile}
+                searchQuery={dashboardSearchQuery}
+                onClearSearch={() => setDashboardSearchQuery('')}
+                onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
+                onOpenLeadDetail={(l) => setDetailLead(l)}
+                onOpenPropertyDetail={(p) => setDetailProperty(p)}
+                onOpenWhatsApp={(l) => setWhatsAppLead(l)}
+                onOpenSchedule={(l) => guardLockedFeature('Schedule Follow-Up', () => setScheduleLead(l))}
+                onOpenSubscription={() => setIsSubscriptionOpen(true)}
+                onNavigateToLeadsWithFilter={(filter) => {
+                  setLeadsFilter(filter);
+                  setSearchQuery('');
+                  handleTabChange('leads');
+                }}
+                onNavigateToTab={(tab) => handleTabChange(tab)}
+                onOpenImportContacts={() => guardLockedFeature('Import Contacts', () => setIsImportContactsOpen(true))}
+              />
+            )}
 
-          {currentTab === 'leads' && (
-            <LeadsList
-              leads={leads}
-              profile={profile}
-              initialFilter={leadsFilter}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
-              onOpenLeadDetail={(l) => setDetailLead(l)}
-              onOpenWhatsApp={(l) => setWhatsAppLead(l)}
-              onOpenSchedule={(l) => guardLockedFeature('Schedule Follow-Up', () => setScheduleLead(l))}
-            />
-          )}
+            {currentTab === 'leads' && (
+              <LeadsList
+                leads={leads}
+                profile={profile}
+                initialFilter={leadsFilter}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
+                onOpenLeadDetail={(l) => setDetailLead(l)}
+                onOpenWhatsApp={(l) => setWhatsAppLead(l)}
+                onOpenSchedule={(l) => guardLockedFeature('Schedule Follow-Up', () => setScheduleLead(l))}
+              />
+            )}
 
-          {currentTab === 'properties' && (
-            <PropertiesList
-              properties={properties}
-              leads={leads}
-              profile={profile}
-              searchQuery={propertySearchQuery}
-              onSearchChange={setPropertySearchQuery}
-              onOpenAddProperty={() => guardLockedFeature('Add Property', () => setIsAddPropertyOpen(true))}
-              onOpenPropertyDetail={(prop) => setDetailProperty(prop)}
-              onOpenShareModal={(prop, preselectedLead) =>
-                setSharePropertyData({ property: prop, preselectedLead })
-              }
-            />
-          )}
-
-          {currentTab === 'calendar' && (
-            <CalendarView
-              leads={leads}
-              onOpenLeadDetail={(l) => setDetailLead(l)}
-              onOpenWhatsApp={(l) => setWhatsAppLead(l)}
-              onOpenSchedule={(l) => guardLockedFeature('Schedule Follow-Up', () => setScheduleLead(l))}
-              onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
-            />
-          )}
-
-          {currentTab === 'analytics' && (
-            <AnalyticsView leads={leads} profile={profile} />
-          )}
-
-          {currentTab === 'settings' && (
-            <SettingsView
-              profile={profile}
-              leads={leads}
-              templates={templates}
-              darkMode={darkMode}
-              currentUserEmail={currentUser?.email || currentUser?.displayName}
-              isCloudSynced={isCloudSynced}
-              onGoogleSignIn={handleGoogleSignIn}
-              onSignOut={handleSignOut}
-              onToggleDarkMode={handleToggleDarkMode}
-              onUpdateProfile={(p) => {
-                setProfile(p);
-                saveStoredProfile(p);
-                if (currentUser?.uid) {
-                  saveUserProfile(currentUser.uid, p).catch((e) => console.warn('Firestore update profile error:', e));
+            {currentTab === 'properties' && (
+              <PropertiesList
+                properties={properties}
+                leads={leads}
+                profile={profile}
+                searchQuery={propertySearchQuery}
+                onSearchChange={setPropertySearchQuery}
+                onOpenAddProperty={() => guardLockedFeature('Add Property', () => setIsAddPropertyOpen(true))}
+                onOpenPropertyDetail={(prop) => setDetailProperty(prop)}
+                onOpenShareModal={(prop, preselectedLead) =>
+                  setSharePropertyData({ property: prop, preselectedLead })
                 }
-              }}
-              onUpdateTemplates={(t) => {
-                setTemplates(t);
-                saveStoredTemplates(t);
-              }}
-              onOpenSubscription={() => setIsSubscriptionOpen(true)}
-            />
-          )}
+              />
+            )}
+
+            {currentTab === 'calendar' && (
+              <CalendarView
+                leads={leads}
+                onOpenLeadDetail={(l) => setDetailLead(l)}
+                onOpenWhatsApp={(l) => setWhatsAppLead(l)}
+                onOpenSchedule={(l) => guardLockedFeature('Schedule Follow-Up', () => setScheduleLead(l))}
+                onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
+              />
+            )}
+
+            {currentTab === 'analytics' && (
+              <AnalyticsView leads={leads} profile={profile} />
+            )}
+
+            {currentTab === 'settings' && (
+              <SettingsView
+                profile={profile}
+                leads={leads}
+                templates={templates}
+                currentUserEmail={currentUser?.email || currentUser?.displayName}
+                isCloudSynced={isCloudSynced}
+                onGoogleSignIn={handleGoogleSignIn}
+                onSignOut={handleSignOut}
+                onUpdateProfile={(p) => {
+                  setProfile(p);
+                  saveStoredProfile(p);
+                  if (currentUser?.uid) {
+                    saveUserProfile(currentUser.uid, p).catch((e) => console.warn('Firestore update profile error:', e));
+                  }
+                }}
+                onUpdateTemplates={(t) => {
+                  setTemplates(t);
+                  saveStoredTemplates(t);
+                }}
+                onOpenSubscription={() => setIsSubscriptionOpen(true)}
+              />
+            )}
+          </main>
 
           {/* Bottom Navigation */}
           <BottomNav

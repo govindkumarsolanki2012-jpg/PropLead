@@ -167,8 +167,11 @@ export interface TranslationDictionary {
   wa_unicode_notice: string;
   wa_choose_template: string;
   wa_filter_all: string;
-  wa_filter_test: string;
-  wa_filter_hindi: string;
+  wa_filter_property: string;
+  wa_filter_greeting: string;
+  wa_filter_sitevisit: string;
+  wa_filter_followup: string;
+  wa_filter_closing: string;
   wa_preview_title: string;
   wa_copy_text: string;
   wa_copied: string;
@@ -419,12 +422,15 @@ export const translations: Record<Language, TranslationDictionary> = {
 
     // WhatsApp
     wa_title: 'WhatsApp to',
-    wa_unicode_notice: 'UTF-8 Unicode Safe: Emojis, ₹ Rupee, Hindi & Line breaks preserved',
-    wa_choose_template: 'Choose Template / Presets:',
+    wa_unicode_notice: 'UTF-8 Safe: Emojis, ₹ Rupee & Line breaks preserved',
+    wa_choose_template: 'Choose Template:',
     wa_filter_all: 'All',
-    wa_filter_test: '🔥 Test Presets',
-    wa_filter_hindi: '🇮🇳 हिन्दी / Hinglish',
-    wa_preview_title: 'Message Preview & Edit (Unicode Preserved)',
+    wa_filter_property: 'Property Details',
+    wa_filter_greeting: 'Greeting',
+    wa_filter_sitevisit: 'Site Visit',
+    wa_filter_followup: 'Follow-up',
+    wa_filter_closing: 'Deal Closing',
+    wa_preview_title: 'Message Preview & Edit',
     wa_copy_text: 'Copy Text',
     wa_copied: 'Copied with Emojis & ₹!',
     wa_cancel: 'Cancel',
@@ -671,11 +677,14 @@ export const translations: Record<Language, TranslationDictionary> = {
 
     // WhatsApp
     wa_title: 'व्हाट्सएप भेजें:',
-    wa_unicode_notice: 'UTF-8 सुरक्षित: इमोजी, ₹ रुपया और हिंदी पूरी तरह सही रहेगा',
-    wa_choose_template: 'टेम्प्लेट / प्रीसेट चुनें:',
+    wa_unicode_notice: 'UTF-8 सुरक्षित: इमोजी, ₹ रुपया और लाइन ब्रेक सुरक्षित',
+    wa_choose_template: 'टेम्प्लेट चुनें:',
     wa_filter_all: 'सभी',
-    wa_filter_test: '🔥 टेस्ट प्रीसेट्स',
-    wa_filter_hindi: '🇮🇳 हिन्दी / Hinglish',
+    wa_filter_property: 'प्रॉपर्टी डिटेल्स',
+    wa_filter_greeting: 'अभिवादन',
+    wa_filter_sitevisit: 'साइट विज़िट',
+    wa_filter_followup: 'फॉलो-अप',
+    wa_filter_closing: 'डील क्लोजिंग',
     wa_preview_title: 'संदेश का पूर्वावलोकन व बदलाव',
     wa_copy_text: 'टेक्स्ट कॉपी करें',
     wa_copied: 'इमोजी और ₹ के साथ कॉपी हुआ!',
@@ -923,12 +932,15 @@ export const translations: Record<Language, TranslationDictionary> = {
 
     // WhatsApp
     wa_title: 'WhatsApp to',
-    wa_unicode_notice: 'UTF-8 Unicode Safe: Emojis, ₹ Rupee, Hindi & Line breaks intact rahenge',
-    wa_choose_template: 'Template / Preset Choose Karein:',
+    wa_unicode_notice: 'UTF-8 Safe: Emojis, ₹ Rupee & Line breaks intact rahenge',
+    wa_choose_template: 'Template Choose Karein:',
     wa_filter_all: 'Sabhi',
-    wa_filter_test: '🔥 Test Presets',
-    wa_filter_hindi: '🇮🇳 हिन्दी / Hinglish',
-    wa_preview_title: 'Message Preview & Edit (Unicode Preserved)',
+    wa_filter_property: 'Property Details',
+    wa_filter_greeting: 'Greeting',
+    wa_filter_sitevisit: 'Site Visit',
+    wa_filter_followup: 'Follow-up',
+    wa_filter_closing: 'Deal Closing',
+    wa_preview_title: 'Message Preview & Edit',
     wa_copy_text: 'Text Copy Karein',
     wa_copied: 'Emojis aur ₹ ke saath Copy Ho Gaya!',
     wa_cancel: 'Cancel',

@@ -4,192 +4,242 @@ import { Lead } from '../types';
 export interface WhatsAppTemplate {
   id: string;
   title: string;
-  category: 'Test Presets' | 'Greeting' | 'Site Visit' | 'Brochure' | 'Follow-up' | 'Offer' | 'Hindi' | 'Hinglish';
+  category: 'Greeting' | 'Property Details' | 'Site Visit' | 'Follow-up' | 'Closing';
   getMessage: (lead?: Partial<Lead>, agentName?: string, agencyName?: string) => string;
 }
 
 export const WHATSAPP_TEMPLATES: WhatsAppTemplate[] = [
-  // --- TEST PRESETS AS SPECIFIED IN TEST SUITE ---
   {
-    id: 'test_1_emoji_rupee',
-    title: '🔥 Test 1: Emoji + Rupee Match',
-    category: 'Test Presets',
-    getMessage: (lead) => {
-      const name = lead?.name || 'Rahul';
-      const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations[0] : '') || lead?.preferredCity || 'Gurgaon';
+    id: 'property_match',
+    title: 'Property Match',
+    category: 'Property Details',
+    getMessage: (lead, agentName = 'your property consultant', agencyName = 'our agency') => {
+      const name = lead?.name || 'Customer';
+      const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations[0] : '') || lead?.preferredCity || 'Prime Area';
       const bhk = lead?.bhk || '2 BHK';
       const price = lead?.budgetMax ? formatIndianCurrency(lead.budgetMax) : '₹75 Lakh';
-      
-      return `Hi ${name} ji,
 
-As discussed, here are some properties matching your requirement:
+      return `Hi ${name},
 
+I found some properties that match your requirement. Please check the details below:
+
+🏠 Type: ${bhk}
 📍 Location: ${loc}
-🏢 Type: ${bhk}
 💰 Price: ${price}
-✅ RERA Approved
-🔥 Hot Property`;
+
+Please let me know if you like these options. I can arrange a site visit for you.
+
+Regards,
+${agentName}
+${agencyName}`;
     },
   },
   {
-    id: 'test_2_hindi',
-    title: '🏠 Test 2: Hindi (हिन्दी) Requirement',
-    category: 'Test Presets',
-    getMessage: (lead) => {
-      const name = lead?.name || 'राहुल';
-      const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations[0] : '') || lead?.preferredCity || 'गुरुग्राम';
-      const bhk = lead?.bhk || '2 BHK';
-      const budget = lead?.budgetMax ? formatIndianCurrency(lead.budgetMax) : '₹75 लाख';
+    id: 'welcome_customer',
+    title: 'Welcome Customer',
+    category: 'Greeting',
+    getMessage: (lead, agentName = 'your property advisor', agencyName = 'our agency') => {
+      const name = lead?.name || 'Customer';
+      const bhkText = lead?.bhk ? ` for ${lead.bhk}` : '';
+      const locText = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations[0] : '') || lead?.preferredCity || '';
+      const locSuffix = locText ? ` in ${locText}` : '';
 
-      return `नमस्ते ${name} जी,
+      return `Hi ${name},
 
-आपकी जरूरत के अनुसार कुछ प्रॉपर्टी मिली हैं। 🏠
+Thank you for contacting me. Welcome to ${agencyName}!
 
-📍 लोकेशन: ${loc}
-💰 बजट: ${budget}
-✅ ${bhk}`;
+Please share your property requirement${bhkText}${locSuffix}. I will help you find a suitable property within your budget.
+
+When is a good time to speak with you?
+
+Regards,
+${agentName}
+${agencyName}`;
     },
   },
   {
-    id: 'test_3_hinglish',
-    title: '✨ Test 3: Hinglish Property Match',
-    category: 'Test Presets',
-    getMessage: (lead) => {
-      const name = lead?.name || 'Rahul';
-      const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations[0] : '') || lead?.preferredCity || 'Gurgaon';
-      const price = lead?.budgetMax ? formatIndianCurrency(lead.budgetMax) : '₹75 Lakh';
-
-      return `Hi ${name} ji,
-
-Aapki requirement ke according ye property match karti hai. 🏠
-
-📍 ${loc}
-💰 ${price}
-🔥 Hot Property`;
-    },
-  },
-
-  // --- CORE REAL ESTATE WORKFLOW TEMPLATES ---
-  {
-    id: 'intro_greeting',
-    title: '👋 Welcome & Requirement Acknowledgment',
+    id: 'requirement_confirmation',
+    title: 'Requirement Confirmation',
     category: 'Greeting',
     getMessage: (lead, agentName = 'your property consultant', agencyName = 'our agency') => {
-      const bhkText = lead?.bhk ? ` for ${lead.bhk}` : '';
-      const locText = lead?.preferredLocations && lead.preferredLocations.length > 0 ? ` in ${lead.preferredLocations.join(', ')}` : '';
-      const budgetText = lead?.budgetMax ? ` (Budget approx ${formatIndianCurrency(lead.budgetMax)})` : '';
-      
-      return `Hello ${lead?.name || 'Customer'} ji 🙏,
+      const name = lead?.name || 'Customer';
+      const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations.join(', ') : '') || lead?.preferredCity || 'Preferred Area';
+      const bhk = lead?.bhk || 'Residential Property';
+      const budget = lead?.budgetMax ? formatIndianCurrency(lead.budgetMax) : (lead?.budgetMin ? formatIndianCurrency(lead.budgetMin) : '₹60 Lakh - ₹1 Cr');
 
-Thank you for connecting with us regarding your property requirement${bhkText}${locText}${budgetText}.
+      return `Hi ${name},
 
-I am ${agentName} from ${agencyName}. I have shortlisted some verified and ready-to-move / pre-launch options that match your exact criteria.
+I have noted your requirement:
 
-May I share the brochures and floor plans with you here on WhatsApp?
+🏠 Looking for: ${bhk}
+📍 Preferred Area: ${loc}
+💰 Budget: ${budget}
 
-Best regards,
-${agentName}`;
+I will check for suitable properties and share them with you shortly.
+
+Regards,
+${agentName}
+${agencyName}`;
     },
   },
   {
-    id: 'share_options',
-    title: '🏡 Sharing Matched Properties & Floor Plans',
-    category: 'Brochure',
-    getMessage: (lead, agentName = 'your property advisor') => {
-      const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations.join(', ') : '') || lead?.preferredCity || 'Prime Locality';
-      return `Hi ${lead?.name || 'Customer'} ji,
+    id: 'share_property_details',
+    title: 'Share Property Details',
+    category: 'Property Details',
+    getMessage: (lead, agentName = 'your property advisor', agencyName = 'our agency') => {
+      const name = lead?.name || 'Customer';
+      const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations.join(', ') : '') || lead?.preferredCity || 'Prime Area';
+      const bhk = lead?.bhk || 'Apartment';
+      const price = lead?.budgetMax ? formatIndianCurrency(lead.budgetMax) : 'Best Market Price';
 
-As discussed, here are top handpicked options matching your requirement:
+      return `Hi ${name},
 
+Here are the property details. Please check and let me know if you are interested:
+
+🏠 Property: ${bhk}
 📍 Location: ${loc}
-🏢 Type: ${lead?.bhk || 'Residential Apartment'}
-💰 Price Range: ${lead?.budgetMax ? formatIndianCurrency(lead.budgetMax) : 'Best Market Rate'}
-✅ RERA Approved • High Rental Yield & Appreciation
+💰 Price: ${price}
+🌟 Highlights: Gated society, parking, security, power backup
 
-Please review the details and let me know a convenient time for a quick 15-min site visit.
+Please let me know if you would like me to share more photos and floor plans.
 
-Thanks,
-${agentName}`;
+Regards,
+${agentName}
+${agencyName}`;
     },
   },
   {
-    id: 'site_visit_invite',
-    title: '📅 Site Visit Confirmation & Location Pin',
+    id: 'property_location',
+    title: 'Property Location',
+    category: 'Property Details',
+    getMessage: (lead, agentName = 'your property consultant', agencyName = 'our agency') => {
+      const name = lead?.name || 'Customer';
+      const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations.join(', ') : '') || lead?.preferredCity || 'the project location';
+
+      return `Hi ${name},
+
+Here is the property location:
+📍 Location: ${loc}
+
+The location has good road connectivity with nearby markets, schools, and hospitals.
+
+You can check the location and let me know if you would like to visit. I can also share the map location pin.
+
+Regards,
+${agentName}
+${agencyName}`;
+    },
+  },
+  {
+    id: 'price_details',
+    title: 'Price Details',
+    category: 'Property Details',
+    getMessage: (lead, agentName = 'your property consultant', agencyName = 'our agency') => {
+      const name = lead?.name || 'Customer';
+      const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations.join(', ') : '') || lead?.preferredCity || 'the property';
+      const bhk = lead?.bhk || 'Property';
+      const price = lead?.budgetMax ? formatIndianCurrency(lead.budgetMax) : '₹75 Lakh';
+
+      return `Hi ${name},
+
+Here are the price details for ${bhk} in ${loc}:
+
+💰 Property Price: ${price}
+📄 Booking Amount: 10%
+🏦 Bank loan facility available from all major banks
+
+Please let me know if you want more details or payment plan options.
+
+Regards,
+${agentName}
+${agencyName}`;
+    },
+  },
+  {
+    id: 'follow_up',
+    title: 'Follow-up',
+    category: 'Follow-up',
+    getMessage: (lead, agentName = 'your property advisor', agencyName = 'our agency') => {
+      const name = lead?.name || 'Customer';
+      const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations.join(', ') : '') || lead?.preferredCity || 'the property';
+
+      return `Hi ${name},
+
+Just checking if you had a chance to see the property details for ${loc}.
+
+Please let me know what you think. I will be happy to help you with more options if you need.
+
+Regards,
+${agentName}
+${agencyName}`;
+    },
+  },
+  {
+    id: 'site_visit_invitation',
+    title: 'Site Visit Invitation',
     category: 'Site Visit',
-    getMessage: (lead, agentName = 'your property advisor') => {
-      const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations[0] : '') || lead?.preferredCity || 'Project Sales Lounge';
-      return `Dear ${lead?.name || 'Customer'} ji,
+    getMessage: (lead, agentName = 'your property advisor', agencyName = 'our agency') => {
+      const name = lead?.name || 'Customer';
+      const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations.join(', ') : '') || lead?.preferredCity || 'the site';
+      const date = lead?.nextFollowUpDate || 'this weekend';
+      const time = lead?.nextFollowUpTime ? ` at ${lead.nextFollowUpTime}` : '';
 
-Your site visit has been scheduled! 🚗
+      return `Hi ${name},
 
-📅 Date: ${lead?.nextFollowUpDate || 'Tomorrow'}
-⏰ Time: ${lead?.nextFollowUpTime || '11:00 AM'}
-📍 Location: ${loc}
+Would you like to visit the property in ${loc}?
 
-I will be present at the site to guide you through the sample flat, amenities, and builder offers.
+📅 Suggested Day: ${date}${time}
+📍 Meeting Location: ${loc}
 
-See you there!
-${agentName}`;
-    },
-  },
-  {
-    id: 'post_visit_feedback',
-    title: '💬 Post Site Visit Feedback & Best Price',
-    category: 'Follow-up',
-    getMessage: (lead, agentName = 'your property advisor') => {
-      return `Hello ${lead?.name || 'Customer'} ji,
-
-Thank you for taking out the time for the site visit today! 
-
-How did you and your family like the unit layout and amenities? If you have any questions regarding the pricing, payment plan, or bank loan approval, I will be happy to assist you in getting the best negotiated builder deal.
-
-Looking forward to your thoughts.
+The sample flat is ready for viewing. Please let me know when you are free, and I will arrange your site visit.
 
 Regards,
-${agentName}`;
+${agentName}
+${agencyName}`;
     },
   },
   {
-    id: 'gentle_followup',
-    title: '⏰ Gentle Follow-up / Status Check',
+    id: 'follow_up_reminder',
+    title: 'Follow-up Reminder',
     category: 'Follow-up',
-    getMessage: (lead, agentName = 'your property consultant') => {
-      const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations[0] : '') || lead?.preferredCity || 'the area';
-      return `Hi ${lead?.name || 'Customer'} ji,
+    getMessage: (lead, agentName = 'your property consultant', agencyName = 'our agency') => {
+      const name = lead?.name || 'Customer';
+      const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations.join(', ') : '') || lead?.preferredCity || 'the property';
 
-Just wanted to check back regarding your property search in ${loc}. 
+      return `Hi ${name},
 
-Are you still looking, or should I hold the shortlisted units for you? A couple of prime corner units are currently available.
+Just following up about your property search in ${loc}.
 
-Let me know whenever you have a minute to speak.
-
-Thanks,
-${agentName}`;
-    },
-  },
-  {
-    id: 'special_offer',
-    title: '🎁 Exclusive Festival / Limited Price Deal',
-    category: 'Offer',
-    getMessage: (lead, agentName = 'your property consultant') => {
-      const budgetStr = lead?.budgetMax || lead?.budgetMin ? ` of ${formatIndianCurrency(lead.budgetMax || lead.budgetMin)}` : '';
-      return `Special Update for ${lead?.name || 'Customer'} ji! 🎁
-
-For a limited time, the developer has announced a special spot-booking discount + zero floor rise charges on selected units.
-
-Since this fits your budget${budgetStr}, I wanted to inform you first before public release.
-
-Would you like to lock this offer today?
+Please let me know if you are still looking or if you have any questions. I am happy to help.
 
 Regards,
-${agentName}`;
+${agentName}
+${agencyName}`;
+    },
+  },
+  {
+    id: 'thank_you',
+    title: 'Thank You',
+    category: 'Closing',
+    getMessage: (lead, agentName = 'your property advisor', agencyName = 'our agency') => {
+      const name = lead?.name || 'Customer';
+
+      return `Hi ${name},
+
+Thank you for your time.
+
+Please contact me if you need any help finding a property. I am always happy to help you.
+
+Regards,
+${agentName}
+${agencyName}`;
     },
   },
 ];
 
 /**
  * Builds a direct, UTF-8 safe WhatsApp Click-to-Chat URL.
- * Preserves all Unicode emojis, ₹ Indian Rupee symbols, Hindi script, Hinglish,
+ * Preserves all Unicode emojis, ₹ Indian Rupee symbols,
  * special characters, and line breaks without ASCII downgrading or character corruption.
  */
 export function buildWhatsAppUrl(phone?: string, text?: string): string {

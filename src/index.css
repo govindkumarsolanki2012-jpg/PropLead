@@ -32,10 +32,6 @@
     background-color: #ffffff;
     opacity: 1;
   }
-  :is(.dark, .dark *) .safe-header {
-    background-color: #0f172a;
-    opacity: 1;
-  }
   .safe-bottom-nav {
     padding-bottom: calc(0.375rem + max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px)));
   }
@@ -48,6 +44,10 @@
 
 html, body {
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
+}
+
+#main-content-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
 }
 

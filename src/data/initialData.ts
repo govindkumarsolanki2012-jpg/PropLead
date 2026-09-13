@@ -16,7 +16,6 @@ export const INITIAL_USER_PROFILE: UserProfile = {
   isSubscribed: false,
   subscriptionPlan: undefined,
   language: 'en',
-  darkMode: false,
   notificationsEnabled: true,
   hasCompletedOnboarding: false,
   isOnboarded: false,

@@ -24,7 +24,7 @@ export function generateCustomerPropertyMessage(
     property.priceNegotiable ? ' (Negotiable)' : ''
   }`;
 
-  const greeting = customCustomerName ? `Hello ${customCustomerName} Ji,\n\n` : `Hello,\n\n`;
+  const greeting = customCustomerName ? `Hello ${customCustomerName},\n\n` : `Hello,\n\n`;
 
   let details = `${greeting}🌟 *NEW PROPERTY RECOMMENDATION*\n\n`;
   details += `🏡 *${property.title}*\n`;
