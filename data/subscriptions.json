@@ -10,5 +10,62 @@
     "autoRenewing": false,
     "acknowledged": false,
     "updatedAt": "2026-09-09T10:00:09.003Z"
+  },
+  "JBvuUDPPPsQR9XjYG3GJP5H6sFR2": {
+    "userId": "JBvuUDPPPsQR9XjYG3GJP5H6sFR2",
+    "subscriptionStatus": "TRIAL",
+    "trialStartDate": "2026-09-10T09:23:33.448Z",
+    "trialEndDate": "2026-09-17T09:23:33.448Z",
+    "subscriptionExpiryDate": null,
+    "subscriptionProductId": "property_agent_pro",
+    "subscriptionBasePlan": "monthly",
+    "autoRenewing": false,
+    "acknowledged": false,
+    "updatedAt": "2026-09-13T07:31:39.452Z"
+  },
+  "test_uid_1": {
+    "userId": "test_uid_1",
+    "subscriptionStatus": "ACTIVE",
+    "trialStartDate": "2026-09-13T08:11:34.940Z",
+    "trialEndDate": "2026-09-20T08:11:34.940Z",
+    "subscriptionExpiryDate": "2026-10-13T08:11:34.938Z",
+    "subscriptionProductId": "property_agent_pro",
+    "subscriptionBasePlan": "monthly",
+    "autoRenewing": true,
+    "acknowledged": true,
+    "updatedAt": "2026-09-13T08:11:34.940Z",
+    "purchaseToken": "test_token_xyz",
+    "orderId": "GPA.5628-5929-3380-83553",
+    "lastVerifiedAt": "2026-09-13T08:11:34.940Z"
+  },
+  "test_uid_42": {
+    "userId": "test_uid_42",
+    "subscriptionStatus": "ACTIVE",
+    "trialStartDate": "2026-09-13T08:13:55.819Z",
+    "trialEndDate": "2026-09-20T08:13:55.819Z",
+    "subscriptionExpiryDate": "2026-10-13T08:14:00.388Z",
+    "subscriptionProductId": "property_agent_pro",
+    "subscriptionBasePlan": "monthly",
+    "autoRenewing": true,
+    "acknowledged": true,
+    "updatedAt": "2026-09-13T08:14:00.388Z",
+    "purchaseToken": "inapp_token_valid_3",
+    "orderId": "GPA.7072-6081-6802-15126",
+    "lastVerifiedAt": "2026-09-13T08:14:00.388Z"
+  },
+  "test_final_check": {
+    "userId": "test_final_check",
+    "subscriptionStatus": "ACTIVE",
+    "trialStartDate": "2026-09-13T08:14:53.324Z",
+    "trialEndDate": "2026-09-20T08:14:53.324Z",
+    "subscriptionExpiryDate": "2026-10-13T08:14:53.323Z",
+    "subscriptionProductId": "property_agent_pro",
+    "subscriptionBasePlan": "monthly",
+    "autoRenewing": true,
+    "acknowledged": true,
+    "updatedAt": "2026-09-13T08:14:53.324Z",
+    "purchaseToken": "token_final_123",
+    "orderId": "GPA.7429-7595-2730-54334",
+    "lastVerifiedAt": "2026-09-13T08:14:53.324Z"
   }
 }

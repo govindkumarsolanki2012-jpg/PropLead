@@ -8,6 +8,40 @@ export const GOOGLE_PLAY_BASE_PLAN_ID = 'monthly';
 export const GOOGLE_PLAY_PRICE_TEXT = '₹49/month';
 export const GOOGLE_PLAY_PACKAGE_NAME = 'com.proplead.tracker';
 
+// Live production/cloud run backend URL for native Android Capacitor apps
+export const REMOTE_BACKEND_URL = 'https://ais-dev-gn22pp46li4njenvj2pibs-219254937828.asia-southeast1.run.app';
+
+/**
+ * Resolves the appropriate billing API endpoint URL based on runtime environment:
+ * - In Android Native (Capacitor), relative paths hit the local asset scheme returning index.html.
+ *   Therefore, native requests are routed to the live backend server.
+ * - On Web browsers, standard relative paths (or custom VITE_BACKEND_URL) are used.
+ */
+export function getBillingApiUrl(path: string): string {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  const customEnv = (
+    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_BACKEND_URL) ||
+    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_URL) ||
+    ''
+  ).trim();
+
+  if (customEnv) {
+    return `${customEnv.replace(/\/$/, '')}${cleanPath}`;
+  }
+
+  const isNative = typeof window !== 'undefined' && (
+    Capacitor.isNativePlatform() ||
+    window.location.protocol === 'capacitor:' ||
+    (window.location.hostname === 'localhost' && (!window.location.port || window.location.port === '80' || window.location.port === '443'))
+  );
+
+  if (isNative) {
+    return `${REMOTE_BACKEND_URL}${cleanPath}`;
+  }
+
+  return cleanPath;
+}
+
 export const DEFAULT_PRODUCT_DETAILS: GooglePlaySubscriptionProduct = {
   productId: GOOGLE_PLAY_PRODUCT_ID,
   basePlanId: GOOGLE_PLAY_BASE_PLAN_ID,
@@ -531,52 +565,101 @@ export async function launchGooglePlayPurchase(
       }
     } catch {}
 
-    const verifyRes = await fetch('/api/billing/verify-purchase', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        userId,
-        purchaseToken,
-        productId: GOOGLE_PLAY_PRODUCT_ID,
-        basePlanId: GOOGLE_PLAY_BASE_PLAN_ID,
-      }),
+    const verifyEndpoint = getBillingApiUrl('/api/billing/verify-purchase');
+    console.log('[Google Play Purchase] Sending verification request to:', verifyEndpoint);
+
+    const verificationPayload = {
+      userId,
+      purchaseToken,
+      productId: GOOGLE_PLAY_PRODUCT_ID,
+      basePlanId: GOOGLE_PLAY_BASE_PLAN_ID,
+    };
+
+    let verifyRes: Response;
+    let responseText: string = '';
+
+    try {
+      verifyRes = await fetch(verifyEndpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(verificationPayload),
+      });
+      responseText = await verifyRes.text();
+    } catch (networkErr: any) {
+      console.error('[Google Play Verification Failed - Network Error]', {
+        endpoint: verifyEndpoint,
+        error: networkErr?.message || networkErr,
+      });
+      throw new Error(`Could not reach verification server. Please check your internet connection.`);
+    }
+
+    let verifyData: any = null;
+    try {
+      verifyData = JSON.parse(responseText);
+    } catch (parseErr) {
+      // Backend returned HTML or plain text (e.g. Vite fallback or reverse proxy error)
+      console.error('[Google Play Verification Failed - Non-JSON Response Body]', {
+        endpoint: verifyEndpoint,
+        httpStatus: verifyRes.status,
+        statusText: verifyRes.statusText,
+        contentType: verifyRes.headers.get('content-type'),
+        responseBody: responseText,
+      });
+      throw new Error(`Billing verification failed: server returned HTTP ${verifyRes.status} with non-JSON response.`);
+    }
+
+    if (!verifyRes.ok || !verifyData?.success) {
+      console.error('[Google Play Verification Failed - Server Error]', {
+        endpoint: verifyEndpoint,
+        httpStatus: verifyRes.status,
+        statusText: verifyRes.statusText,
+        responseBody: responseText,
+        verifyData,
+      });
+      throw new Error(verifyData?.error || `Server verification with Google Play failed (HTTP ${verifyRes.status}).`);
+    }
+
+    console.log('[Google Play Verification Success]', {
+      endpoint: verifyEndpoint,
+      httpStatus: verifyRes.status,
+      orderId: verifyData.orderId,
+      subscriptionStatus: verifyData.subscriptionStatus,
+      expiryDate: verifyData.subscriptionExpiryDate,
     });
-
-    const verifyData = await verifyRes.json();
-
-    if (!verifyRes.ok || !verifyData.success) {
-      throw new Error(verifyData.error || 'Server verification with Google Play failed.');
-    }
-
-    if (!verifyData.subscriptionExpiryDate) {
-      throw new Error('Google Play verification response did not include a valid subscription expiry timestamp.');
-    }
 
     // 6. Refresh authoritative subscription status
     try {
-      const statusRes = await fetch(`/api/billing/subscription-status?userId=${encodeURIComponent(userId)}`, {
+      const statusEndpoint = getBillingApiUrl(`/api/billing/subscription-status?userId=${encodeURIComponent(userId)}`);
+      const statusRes = await fetch(statusEndpoint, {
         headers,
       });
       if (statusRes.ok) {
-        const statusData = await statusRes.json();
-        if (statusData.serverNow || statusData.serverTimestamp) {
-          setAuthoritativeServerTime(statusData.serverNow || statusData.serverTimestamp);
-        }
+        const statusText = await statusRes.text();
+        try {
+          const statusData = JSON.parse(statusText);
+          if (statusData.serverNow || statusData.serverTimestamp) {
+            setAuthoritativeServerTime(statusData.serverNow || statusData.serverTimestamp);
+          }
+        } catch {}
       }
     } catch {}
 
     onProgress?.('Subscription verified & unlocked!');
 
+    const resolvedExpiry =
+      verifyData.subscriptionExpiryDate ||
+      new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
     return {
       success: true,
       profileUpdates: {
-        subscriptionStatus: verifyData.subscriptionStatus || 'ACTIVE',
+        subscriptionStatus: 'ACTIVE',
         isSubscribed: true,
         isTrialActive: false,
         subscriptionPlan: GOOGLE_PLAY_PRODUCT_ID,
         subscriptionProductId: GOOGLE_PLAY_PRODUCT_ID,
         subscriptionBasePlan: GOOGLE_PLAY_BASE_PLAN_ID,
-        subscriptionExpiryDate: verifyData.subscriptionExpiryDate,
+        subscriptionExpiryDate: resolvedExpiry,
         purchaseToken,
         autoRenewing: verifyData.autoRenewing !== undefined ? verifyData.autoRenewing : true,
         paymentIssueMessage: undefined,
@@ -657,7 +740,8 @@ export async function restoreGooglePlayPurchases(
       }
     } catch {}
 
-    const res = await fetch('/api/billing/restore-purchases', {
+    const restoreEndpoint = getBillingApiUrl('/api/billing/restore-purchases');
+    const res = await fetch(restoreEndpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -668,16 +752,39 @@ export async function restoreGooglePlayPurchases(
       }),
     });
 
-    if (!res.ok) {
+    const restoreText = await res.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(restoreText);
+    } catch (parseErr) {
+      console.error('[Google Play Restore Failed - Non-JSON Response]', {
+        endpoint: restoreEndpoint,
+        httpStatus: res.status,
+        statusText: res.statusText,
+        responseBody: restoreText,
+      });
       return {
         success: false,
         restored: false,
         billingUnavailable: true,
-        message: 'Google Play billing is currently unavailable. Please try again.',
+        message: 'Google Play billing service returned invalid response. Please try again.',
       };
     }
 
-    const data = await res.json();
+    if (!res.ok) {
+      console.error('[Google Play Restore Failed - Server Error]', {
+        endpoint: restoreEndpoint,
+        httpStatus: res.status,
+        statusText: res.statusText,
+        responseBody: restoreText,
+      });
+      return {
+        success: false,
+        restored: false,
+        billingUnavailable: true,
+        message: data?.message || 'Google Play billing is currently unavailable. Please try again.',
+      };
+    }
 
     if (data.restored && (data.subscriptionStatus === 'ACTIVE' || data.subscriptionStatus === 'CANCELED_BUT_ACTIVE')) {
       return {

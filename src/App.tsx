@@ -45,7 +45,7 @@ import {
 import { Lead, Property, UserProfile, WhatsAppTemplate, FollowUpType, TabType } from './types';
 import { INITIAL_USER_PROFILE } from './data/initialData';
 import { formatRelativeDate, normalizePhoneForMatch } from './utils/formatters';
-import { getEffectiveSubscriptionStatus, setAuthoritativeServerTime } from './utils/billing';
+import { getEffectiveSubscriptionStatus, setAuthoritativeServerTime, getBillingApiUrl } from './utils/billing';
 import {
   subscribeToAuth,
   signInWithGoogle,
@@ -458,13 +458,20 @@ export function App() {
         const token = await currentUser.getIdToken();
         if (!token) return;
 
-        const res = await fetch(`/api/billing/subscription-status?userId=${currentUser.uid}`, {
+        const endpoint = getBillingApiUrl(`/api/billing/subscription-status?userId=${encodeURIComponent(currentUser.uid)}`);
+        const res = await fetch(endpoint, {
           headers: {
             Authorization: `Bearer ${token}`,
           },
         });
         if (res.ok) {
-          const data = await res.json();
+          const resText = await res.text();
+          let data: any = null;
+          try {
+            data = JSON.parse(resText);
+          } catch {
+            return;
+          }
           if (data && data.subscriptionStatus) {
             if (data.serverTimestamp || data.serverNow) {
               setAuthoritativeServerTime(data.serverTimestamp || data.serverNow);
