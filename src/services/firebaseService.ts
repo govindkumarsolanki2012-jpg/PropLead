@@ -33,10 +33,59 @@ import {
   signInWithPhoneNumber,
   ConfirmationResult,
 } from 'firebase/auth';
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { SocialLogin } from '@capgo/capacitor-social-login';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { Lead, Property, UserProfile, WhatsAppTemplate } from '../types';
+
+export interface NativeAuthDiagnostics {
+  packageName: string;
+  runtimeSha1: string;
+  webClientId: string;
+  playAppSigningSha1: string;
+  uploadKeySha1: string;
+  isRegisteredFingerprint: boolean;
+}
+
+/**
+ * Retrieves live auth diagnostics from the native Android app container,
+ * including package name, runtime APK signing SHA-1, and Web Client ID.
+ */
+export async function getNativeAuthDiagnostics(): Promise<NativeAuthDiagnostics> {
+  const fallback: NativeAuthDiagnostics = {
+    packageName: 'com.proplead.tracker',
+    runtimeSha1: '71:21:34:6A:91:F9:31:7D:FB:E7:99:7B:53:96:31:CF:FC:ED:A5:06',
+    webClientId:
+      (firebaseConfig as any).oAuthClientId ||
+      '36803800158-f1e83pmo78ge5gpiosi9buukrbi6if7m.apps.googleusercontent.com',
+    playAppSigningSha1: '71:21:34:6A:91:F9:31:7D:FB:E7:99:7B:53:96:31:CF:FC:ED:A5:06',
+    uploadKeySha1: 'ED:D0:A7:BD:1E:6E:69:23:0F:95:E0:4E:1A:DC:C1:84:E9:D4:57:6D',
+    isRegisteredFingerprint: true,
+  };
+
+  if (!Capacitor.isNativePlatform()) {
+    return fallback;
+  }
+
+  try {
+    const plugin = registerPlugin<any>('AuthDiagnostics');
+    const res = await plugin.getAuthDiagnostics();
+    if (res && res.runtimeSha1) {
+      return {
+        packageName: res.packageName || fallback.packageName,
+        runtimeSha1: res.runtimeSha1,
+        webClientId: res.webClientId || fallback.webClientId,
+        playAppSigningSha1: res.playAppSigningSha1 || fallback.playAppSigningSha1,
+        uploadKeySha1: res.uploadKeySha1 || fallback.uploadKeySha1,
+        isRegisteredFingerprint: Boolean(res.isRegisteredFingerprint),
+      };
+    }
+  } catch (e) {
+    console.debug('[GoogleAuth Diagnostics] Native AuthDiagnosticsPlugin not available:', e);
+  }
+
+  return fallback;
+}
 
 // Known legacy demo IDs to filter out and purge from Firestore if ever present
 const DEMO_LEAD_IDS = new Set([
@@ -94,63 +143,128 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
   if (Capacitor.isNativePlatform()) {
     await initSocialLogin();
 
-    const packageName = 'com.proplead.tracker';
-    const signingSha1 = '71:21:34:6A:91:F9:31:7D:FB:E7:99:7B:53:96:31:CF:FC:ED:A5:06';
-    const webClientId =
-      (firebaseConfig as any).oAuthClientId ||
-      '36803800158-f1e83pmo78ge5gpiosi9buukrbi6if7m.apps.googleusercontent.com';
+    const diag = await getNativeAuthDiagnostics();
+    const packageName = diag.packageName;
+    const runtimeSha1 = diag.runtimeSha1;
+    const webClientId = diag.webClientId;
 
     console.log('[GoogleAuth Diagnostics] Pre-login configuration:', {
       'package name': packageName,
-      'signing SHA-1': signingSha1,
+      'runtime signing SHA-1': runtimeSha1,
+      'playAppSigningSha1': diag.playAppSigningSha1,
+      'uploadKeySha1': diag.uploadKeySha1,
       'webClientId': webClientId,
       'filterByAuthorizedAccounts': false,
+      'isRegisteredFingerprint': diag.isRegisteredFingerprint,
+      'style': 'standard',
     });
 
     let loginResponse: any;
-    try {
-      loginResponse = await SocialLogin.login({
+    let retryAttempted = false;
+
+    const executeStandardLogin = () =>
+      SocialLogin.login({
         provider: 'google',
         options: {
-          style: 'bottom',
+          style: 'standard',
           filterByAuthorizedAccounts: false,
           scopes: ['email', 'profile'],
         },
       });
-    } catch (err: any) {
-      const errMessage = err?.message || String(err || '');
-      const errorCodeMatch = errMessage.match(/\[(\d+)\]/);
-      const errorCode = err?.code || (errorCodeMatch ? `[${errorCodeMatch[1]}]` : 'ERROR_LOGIN_FAILED');
 
-      console.error('[GoogleAuth Diagnostics] Native Google Sign-In error:', {
-        'Google login result/error code': errorCode,
+    try {
+      // 1. Use the standard Google account selection flow without forced authorized-account filtering
+      loginResponse = await executeStandardLogin();
+    } catch (initialErr: any) {
+      const errMessage = initialErr?.message || String(initialErr || '');
+      const errorCodeMatch = errMessage.match(/\[(\d+)\]/);
+      const errorCode = initialErr?.code || (errorCodeMatch ? `[${errorCodeMatch[1]}]` : 'ERROR_LOGIN_FAILED');
+      const isReauthError =
+        errMessage.includes('16') ||
+        errMessage.toLowerCase().includes('account reauth failed') ||
+        errorCode === '[16]';
+
+      const isCancelled =
+        errorCode === 'USER_CANCELLED' ||
+        errorCode === 'auth/popup-closed-by-user' ||
+        errMessage.toLowerCase().includes('user cancelled') ||
+        errMessage.toLowerCase().includes('user canceled');
+
+      if (isCancelled) {
+        console.log('[GoogleAuth] Sign-in cancelled by user.');
+        throw initialErr;
+      }
+
+      console.warn('[GoogleAuth Diagnostics] Initial SocialLogin.login (standard flow) error:', {
+        'Google login error code/message': `${errorCode}: ${errMessage}`,
         'package name': packageName,
-        'signing SHA-1': signingSha1,
+        'runtime signing SHA-1': runtimeSha1,
         'webClientId': webClientId,
-        'whether an idToken was returned': false,
-        'errorMessage': errMessage,
+        'whether retry is attempted': isReauthError ? 'YES - Clearing state and retrying once' : 'NO',
       });
 
-      if (errMessage.includes('16') || errMessage.toLowerCase().includes('account reauth failed')) {
-        console.error(
-          '[GoogleAuth Diagnostics] [16] Account reauth failed:\n' +
-          '- Package: ' + packageName + '\n' +
-          '- Signing SHA-1: ' + signingSha1 + '\n' +
-          '- Web Client ID: ' + webClientId
+      if (isReauthError) {
+        retryAttempted = true;
+        console.log(
+          '[GoogleAuth Diagnostics] Error [16] Account reauth failed detected. Clearing Credential Manager state and retrying once with standard flow...'
         );
+
+        // 3. When [16] occurs, properly clear/reset Credential Manager credential-selection state
+        try {
+          await SocialLogin.logout({ provider: 'google' });
+          console.log('[GoogleAuth] Credential Manager state reset successfully.');
+        } catch (clearErr) {
+          console.warn('[GoogleAuth] Resetting Credential Manager state notice (non-fatal):', clearErr);
+        }
+
+        // Brief delay to allow Android Credential Manager subsystem to stabilize
+        await new Promise((resolve) => setTimeout(resolve, 250));
+
+        // 4. Retry once using the standard sign-in flow
+        try {
+          loginResponse = await executeStandardLogin();
+          console.log('[GoogleAuth Diagnostics] Retry with standard account picker succeeded!');
+        } catch (retryErr: any) {
+          const retryErrMsg = retryErr?.message || String(retryErr || '');
+          const retryCodeMatch = retryErrMsg.match(/\[(\d+)\]/);
+          const retryCode = retryErr?.code || (retryCodeMatch ? `[${retryCodeMatch[1]}]` : errorCode);
+
+          console.error('[GoogleAuth Diagnostics] Google Sign-In retry failed:', {
+            'Google login error code/message': `${retryCode}: ${retryErrMsg}`,
+            'package name': packageName,
+            'runtime signing SHA-1': runtimeSha1,
+            'playAppSigningSha1': diag.playAppSigningSha1,
+            'uploadKeySha1': diag.uploadKeySha1,
+            'webClientId': webClientId,
+            'whether retry is attempted': 'YES - Attempted fallback retry with standard picker; both failed',
+            'isRegisteredFingerprint': diag.isRegisteredFingerprint,
+          });
+
+          // 6. Return a clean user-facing error instead of leaving the login flow stuck
+          throw new Error('Google Sign-In re-authentication failed. Please ensure your device has internet access and tap Sign in with Google to select your account again.');
+        }
+      } else {
+        console.error('[GoogleAuth Diagnostics] Native Google Sign-In non-reauth error:', {
+          'Google login error code/message': `${errorCode}: ${errMessage}`,
+          'package name': packageName,
+          'runtime signing SHA-1': runtimeSha1,
+          'webClientId': webClientId,
+          'whether retry is attempted': 'NO (non-reauth error)',
+        });
+        throw initialErr;
       }
-      throw err;
     }
 
     const result = loginResponse?.result || loginResponse;
     const idToken = result?.idToken;
     const hasIdToken = Boolean(idToken);
 
-    console.log('[GoogleAuth Diagnostics] Native Google Sign-In result received:', {
-      'Google login result/error code': 'SUCCESS [0]',
+    console.log('[GoogleAuth Diagnostics] Native Google Sign-In token received:', {
+      'Google login error code/message': 'SUCCESS [0]',
       'package name': packageName,
-      'signing SHA-1': signingSha1,
+      'runtime signing SHA-1': runtimeSha1,
       'webClientId': webClientId,
+      'whether retry is attempted': retryAttempted ? 'YES (succeeded on retry)' : 'NO (succeeded on first attempt)',
       'whether an idToken was returned': hasIdToken,
       'responseType': result?.responseType || 'online',
     });
@@ -166,22 +280,26 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
     console.log('[GoogleAuth] Authenticating with Firebase signInWithCredential...');
     try {
       const userCredential = await signInWithCredential(auth, credential);
-      console.log('[GoogleAuth Diagnostics] Firebase authentication successful:', {
-        'Google login result/error code': 'AUTH_SUCCESS',
+      console.log('[GoogleAuth Diagnostics] Firebase sign-in result:', {
+        'status': 'SUCCESS',
+        'Google login error code/message': 'AUTH_SUCCESS',
         'package name': packageName,
-        'signing SHA-1': signingSha1,
+        'runtime signing SHA-1': runtimeSha1,
         'webClientId': webClientId,
+        'whether retry is attempted': retryAttempted,
         'whether an idToken was returned': true,
         'uid': userCredential.user.uid,
         'email': userCredential.user.email,
       });
       return userCredential.user;
     } catch (fbErr: any) {
-      console.error('[GoogleAuth Diagnostics] Firebase signInWithCredential failed:', {
-        'Google login result/error code': fbErr?.code || 'FIREBASE_AUTH_ERROR',
+      console.error('[GoogleAuth Diagnostics] Firebase sign-in result:', {
+        'status': 'FAILED',
+        'Google login error code/message': fbErr?.code || 'FIREBASE_AUTH_ERROR',
         'package name': packageName,
-        'signing SHA-1': signingSha1,
+        'runtime signing SHA-1': runtimeSha1,
         'webClientId': webClientId,
+        'whether retry is attempted': retryAttempted,
         'whether an idToken was returned': true,
         'errorMessage': fbErr?.message || String(fbErr),
       });
@@ -517,6 +635,19 @@ export async function deleteLeadFromFirestore(userId: string, leadId: string): P
   await deleteDoc(leadRef);
 }
 
+export async function batchDeleteLeadsFromFirestore(userId: string, leadIds: string[]): Promise<void> {
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < leadIds.length; i += CHUNK_SIZE) {
+    const chunk = leadIds.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    chunk.forEach((leadId) => {
+      const refDoc = doc(db, 'users', userId, 'leads', leadId);
+      batch.delete(refDoc);
+    });
+    await batch.commit();
+  }
+}
+
 export async function batchAddLeadsToFirestore(userId: string, leads: Lead[]): Promise<void> {
   const batch = writeBatch(db);
   leads.forEach((lead) => {
@@ -595,6 +726,19 @@ export async function updatePropertyInFirestore(userId: string, property: Proper
 export async function deletePropertyFromFirestore(userId: string, propertyId: string): Promise<void> {
   const propRef = doc(db, 'users', userId, 'properties', propertyId);
   await deleteDoc(propRef);
+}
+
+export async function batchDeletePropertiesFromFirestore(userId: string, propertyIds: string[]): Promise<void> {
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < propertyIds.length; i += CHUNK_SIZE) {
+    const chunk = propertyIds.slice(i, i + CHUNK_SIZE);
+    const batch = writeBatch(db);
+    chunk.forEach((propertyId) => {
+      const refDoc = doc(db, 'users', userId, 'properties', propertyId);
+      batch.delete(refDoc);
+    });
+    await batch.commit();
+  }
 }
 
 // --- FIREBASE STORAGE: PROPERTY PHOTOS ---

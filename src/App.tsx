@@ -57,10 +57,12 @@ import {
   addLeadToFirestore,
   updateLeadInFirestore,
   deleteLeadFromFirestore,
+  batchDeleteLeadsFromFirestore,
   batchAddLeadsToFirestore,
   addPropertyToFirestore,
   updatePropertyInFirestore,
   deletePropertyFromFirestore,
+  batchDeletePropertiesFromFirestore,
   saveUserProfile,
 } from './services/firebaseService';
 import { syncLocalDataToFirestore } from './utils/migration';
@@ -562,6 +564,21 @@ export function App() {
     showToast('Lead deleted.');
   };
 
+  const handleDeleteBulkLeads = async (leadIds: string[]): Promise<void> => {
+    if (!leadIds || leadIds.length === 0) return;
+    if (currentUser?.uid) {
+      await batchDeleteLeadsFromFirestore(currentUser.uid, leadIds);
+    }
+    const idSet = new Set(leadIds);
+    const updated = leads.filter((l) => !idSet.has(l.id));
+    setLeads(updated);
+    saveStoredLeads(updated);
+    if (detailLead && idSet.has(detailLead.id)) {
+      setDetailLead(null);
+    }
+    showToast(`${leadIds.length} lead${leadIds.length === 1 ? '' : 's'} deleted.`);
+  };
+
   const handleImportBulkLeads = (newLeads: Lead[]) => {
     const existingPhones = new Set(
       leads.map((l) => normalizePhoneForMatch(l.phone)).filter(Boolean)
@@ -670,6 +687,33 @@ export function App() {
       }
       showToast('Property removed locally.');
       return true;
+    }
+  };
+
+  const handleDeleteBulkProperties = async (propertyIds: string[]): Promise<void> => {
+    if (!propertyIds || propertyIds.length === 0) return;
+    try {
+      if (currentUser?.uid) {
+        await batchDeletePropertiesFromFirestore(currentUser.uid, propertyIds);
+      }
+      const idSet = new Set(propertyIds);
+      const updated = properties.filter((p) => !idSet.has(p.id));
+      setProperties(updated);
+      saveStoredProperties(updated);
+      if (detailProperty && idSet.has(detailProperty.id)) {
+        setDetailProperty(null);
+      }
+      showToast(`${propertyIds.length} propert${propertyIds.length === 1 ? 'y' : 'ies'} removed from inventory.`);
+    } catch (err: any) {
+      console.error('Firestore batch delete properties error:', err);
+      const idSet = new Set(propertyIds);
+      const updated = properties.filter((p) => !idSet.has(p.id));
+      setProperties(updated);
+      saveStoredProperties(updated);
+      if (detailProperty && idSet.has(detailProperty.id)) {
+        setDetailProperty(null);
+      }
+      showToast(`${propertyIds.length} propert${propertyIds.length === 1 ? 'y' : 'ies'} removed locally.`);
     }
   };
 
@@ -849,6 +893,7 @@ export function App() {
                 onOpenLeadDetail={(l) => setDetailLead(l)}
                 onOpenWhatsApp={(l) => setWhatsAppLead(l)}
                 onOpenSchedule={(l) => guardLockedFeature('Schedule Follow-Up', () => setScheduleLead(l))}
+                onDeleteBulkLeads={handleDeleteBulkLeads}
               />
             )}
 
@@ -864,6 +909,7 @@ export function App() {
                 onOpenShareModal={(prop, preselectedLead) =>
                   setSharePropertyData({ property: prop, preselectedLead })
                 }
+                onDeleteBulkProperties={handleDeleteBulkProperties}
               />
             )}
 

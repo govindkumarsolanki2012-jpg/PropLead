@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   AlertCircle,
   ChevronRight,
+  Check,
 } from 'lucide-react';
 import { Lead } from '../../types';
 import {
@@ -28,6 +29,9 @@ interface LeadCardProps {
   onOpenDetail: (lead: Lead) => void;
   onOpenWhatsApp: (lead: Lead) => void;
   onQuickFollowUp?: (lead: Lead) => void;
+  isSelectionMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (leadId: string) => void;
 }
 
 export const LeadCard: React.FC<LeadCardProps> = ({
@@ -35,6 +39,9 @@ export const LeadCard: React.FC<LeadCardProps> = ({
   onOpenDetail,
   onOpenWhatsApp,
   onQuickFollowUp,
+  isSelectionMode = false,
+  isSelected = false,
+  onToggleSelect,
 }) => {
   const { t, translateStatus, translatePriority, translateRequirement } = useTranslation();
   const statusInfo = STATUS_CONFIG[lead.status] || STATUS_CONFIG.new;
@@ -52,12 +59,43 @@ export const LeadCard: React.FC<LeadCardProps> = ({
 
   return (
     <div
-      onClick={() => onOpenDetail(lead)}
-      className="bg-white dark:bg-slate-800/90 rounded-2xl p-4 border border-slate-200/90 dark:border-slate-700/80 shadow-xs hover:shadow-md hover:border-emerald-300 dark:hover:border-emerald-700 transition-all cursor-pointer relative group"
+      onClick={() => {
+        if (isSelectionMode) {
+          onToggleSelect?.(lead.id);
+        } else {
+          onOpenDetail(lead);
+        }
+      }}
+      className={`rounded-2xl p-4 border transition-all cursor-pointer relative group ${
+        isSelectionMode && isSelected
+          ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-500/80 shadow-xs ring-1 ring-emerald-500/30'
+          : 'bg-white dark:bg-slate-800/90 border-slate-200/90 dark:border-slate-700/80 shadow-xs hover:shadow-md hover:border-emerald-300 dark:hover:border-emerald-700'
+      }`}
     >
       {/* Top Row: Avatar, Name, Priority, Status */}
       <div className="flex items-start justify-between gap-2.5">
         <div className="flex items-center gap-3 min-w-0">
+          {/* Selection Checkbox */}
+          {isSelectionMode && (
+            <div
+              className="flex items-center justify-center shrink-0"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleSelect?.(lead.id);
+              }}
+            >
+              <div
+                className={`w-5 h-5 rounded-md flex items-center justify-center border transition-all ${
+                  isSelected
+                    ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs'
+                    : 'bg-white dark:bg-slate-700 border-slate-300 dark:border-slate-600'
+                }`}
+              >
+                {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+              </div>
+            </div>
+          )}
+
           {/* Avatar */}
           <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs flex items-center justify-center flex-shrink-0 border border-slate-200 dark:border-slate-600">
             {initials}

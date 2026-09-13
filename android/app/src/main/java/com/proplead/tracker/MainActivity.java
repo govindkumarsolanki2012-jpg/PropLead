@@ -20,25 +20,32 @@ public class MainActivity extends BridgeActivity implements ModifiedMainActivity
 
     private static final String TAG = "PropLeadAuth";
     private static final String EXPECTED_PACKAGE = "com.proplead.tracker";
-    private static final String EXPECTED_SHA1 = "71:21:34:6A:91:F9:31:7D:FB:E7:99:7B:53:96:31:CF:FC:ED:A5:06";
+    private static final String PLAY_APP_SIGNING_SHA1 = "71:21:34:6A:91:F9:31:7D:FB:E7:99:7B:53:96:31:CF:FC:ED:A5:06";
+    private static final String UPLOAD_KEY_SHA1 = "ED:D0:A7:BD:1E:6E:69:23:0F:95:E0:4E:1A:DC:C1:84:E9:D4:57:6D";
     private static final String WEB_CLIENT_ID = "36803800158-f1e83pmo78ge5gpiosi9buukrbi6if7m.apps.googleusercontent.com";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(DocumentOpenerPlugin.class);
         registerPlugin(CsvDownloadPlugin.class);
+        registerPlugin(AuthDiagnosticsPlugin.class);
         super.onCreate(savedInstanceState);
         logAuthDiagnostics();
     }
 
     private void logAuthDiagnostics() {
         String runtimeSha1 = getSigningSha1(this);
+        boolean isPlaySigning = PLAY_APP_SIGNING_SHA1.equalsIgnoreCase(runtimeSha1);
+        boolean isUploadSigning = UPLOAD_KEY_SHA1.equalsIgnoreCase(runtimeSha1);
+        boolean isAuthorized = isPlaySigning || isUploadSigning;
+
         Log.i(TAG, "================ [GoogleAuth Diagnostics] ================");
         Log.i(TAG, "Package Name: " + getPackageName() + " (Expected: " + EXPECTED_PACKAGE + ")");
         Log.i(TAG, "Runtime Signing SHA-1: " + (runtimeSha1 != null ? runtimeSha1 : "UNKNOWN"));
-        Log.i(TAG, "Expected Play Signing SHA-1: " + EXPECTED_SHA1);
+        Log.i(TAG, "Play App Signing SHA-1: " + PLAY_APP_SIGNING_SHA1 + " (Match: " + isPlaySigning + ")");
+        Log.i(TAG, "Upload Keystore SHA-1: " + UPLOAD_KEY_SHA1 + " (Match: " + isUploadSigning + ")");
         Log.i(TAG, "Web Client ID: " + WEB_CLIENT_ID);
-        Log.i(TAG, "SHA-1 Matches Expected: " + EXPECTED_SHA1.equalsIgnoreCase(runtimeSha1));
+        Log.i(TAG, "Certificate Registered in Firebase: " + isAuthorized);
         Log.i(TAG, "==========================================================");
     }
 

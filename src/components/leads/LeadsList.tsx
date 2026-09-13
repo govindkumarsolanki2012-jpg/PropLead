@@ -8,6 +8,11 @@ import {
   ArrowUpDown,
   X,
   Building,
+  CheckSquare,
+  Check,
+  Minus,
+  Trash2,
+  AlertCircle,
 } from 'lucide-react';
 import { Lead, LeadStatus, LeadPriority, RequirementType, UserProfile } from '../../types';
 import { LeadCard } from './LeadCard';
@@ -26,6 +31,7 @@ interface LeadsListProps {
   onOpenLeadDetail: (lead: Lead) => void;
   onOpenWhatsApp: (lead: Lead) => void;
   onOpenSchedule: (lead: Lead) => void;
+  onDeleteBulkLeads?: (leadIds: string[]) => Promise<void>;
 }
 
 export const LeadsList: React.FC<LeadsListProps> = ({
@@ -38,10 +44,18 @@ export const LeadsList: React.FC<LeadsListProps> = ({
   onOpenLeadDetail,
   onOpenWhatsApp,
   onOpenSchedule,
+  onDeleteBulkLeads,
 }) => {
   const { t } = useTranslation();
   const [activeFilter, setActiveFilter] = useState<string>(initialFilter);
   const [sortBy, setSortBy] = useState<'followup' | 'newest' | 'budget' | 'priority'>('followup');
+
+  // Bulk selection state
+  const [isSelectionMode, setIsSelectionMode] = useState<boolean>(false);
+  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+  const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
+  const [isDeletingBulk, setIsDeletingBulk] = useState<boolean>(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Sync initialFilter prop if it updates from parent navigation
   useEffect(() => {
@@ -121,6 +135,59 @@ export const LeadsList: React.FC<LeadsListProps> = ({
       });
   }, [leads, searchQuery, activeFilter, sortBy]);
 
+  // Check if all filtered leads are selected
+  const isAllSelected = useMemo(() => {
+    if (filteredLeads.length === 0) return false;
+    return filteredLeads.every((l) => selectedLeadIds.has(l.id));
+  }, [filteredLeads, selectedLeadIds]);
+
+  // Toggle select all visible
+  const handleToggleSelectAll = () => {
+    if (isAllSelected) {
+      const next = new Set(selectedLeadIds);
+      filteredLeads.forEach((l) => next.delete(l.id));
+      setSelectedLeadIds(next);
+    } else {
+      const next = new Set(selectedLeadIds);
+      filteredLeads.forEach((l) => next.add(l.id));
+      setSelectedLeadIds(next);
+    }
+  };
+
+  // Toggle individual lead
+  const handleToggleSelectLead = (leadId: string) => {
+    setSelectedLeadIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(leadId)) {
+        next.delete(leadId);
+      } else {
+        next.add(leadId);
+      }
+      return next;
+    });
+  };
+
+  // Confirm delete bulk
+  const handleConfirmDeleteBulk = async () => {
+    if (isDeletingBulk || selectedLeadIds.size === 0) return;
+    setIsDeletingBulk(true);
+    setDeleteError(null);
+    try {
+      const ids = Array.from(selectedLeadIds);
+      if (onDeleteBulkLeads) {
+        await onDeleteBulkLeads(ids);
+      }
+      setSelectedLeadIds(new Set());
+      setIsSelectionMode(false);
+      setShowDeleteModal(false);
+    } catch (err: any) {
+      console.error('Error deleting selected leads:', err);
+      setDeleteError(err?.message || 'Unable to delete selected leads. Please try again.');
+    } finally {
+      setIsDeletingBulk(false);
+    }
+  };
+
   return (
     <div className="flex-1 pb-8 flex flex-col">
       {/* Filter Chips & Action Toolbar */}
@@ -171,7 +238,7 @@ export const LeadsList: React.FC<LeadsListProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             {/* Export CSV Button */}
             <button
               onClick={() => exportLeadsToCSV(filteredLeads, profile.name)}
@@ -180,6 +247,30 @@ export const LeadsList: React.FC<LeadsListProps> = ({
             >
               <Download className="w-3.5 h-3.5" />
               <span className="text-[11px]">CSV</span>
+            </button>
+
+            {/* Select Button */}
+            <button
+              id="btn-select-mode"
+              type="button"
+              onClick={() => {
+                if (isSelectionMode) {
+                  setIsSelectionMode(false);
+                  setSelectedLeadIds(new Set());
+                } else {
+                  setIsSelectionMode(true);
+                  setSelectedLeadIds(new Set());
+                }
+              }}
+              className={`p-1.5 px-2.5 rounded-lg text-xs font-bold flex items-center gap-1 border transition-colors flex-shrink-0 ${
+                isSelectionMode
+                  ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
+                  : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+              }`}
+              title={isSelectionMode ? 'Cancel Selection' : 'Select Leads'}
+            >
+              <CheckSquare className="w-3.5 h-3.5" />
+              <span className="text-[11px]">{isSelectionMode ? 'Cancel' : 'Select'}</span>
             </button>
 
             <div className="flex items-center gap-1">
@@ -197,6 +288,55 @@ export const LeadsList: React.FC<LeadsListProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Bulk Selection Action Bar */}
+        {isSelectionMode && (
+          <div className="flex items-center justify-between gap-2 p-2.5 bg-slate-50 dark:bg-slate-800/90 rounded-xl border border-slate-200 dark:border-slate-700 transition-all">
+            <div className="flex items-center gap-2.5">
+              {/* Select All */}
+              <button
+                type="button"
+                id="btn-select-all"
+                onClick={handleToggleSelectAll}
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold border border-slate-200 dark:border-slate-600 transition-colors"
+              >
+                <div
+                  className={`w-4 h-4 rounded flex items-center justify-center border transition-colors ${
+                    isAllSelected
+                      ? 'bg-emerald-600 border-emerald-600 text-white'
+                      : selectedLeadIds.size > 0
+                      ? 'bg-emerald-100 dark:bg-emerald-950/60 border-emerald-500 text-emerald-600'
+                      : 'border-slate-300 dark:border-slate-500 bg-transparent'
+                  }`}
+                >
+                  {isAllSelected ? (
+                    <Check className="w-3 h-3 stroke-[3]" />
+                  ) : selectedLeadIds.size > 0 ? (
+                    <Minus className="w-3 h-3 stroke-[3]" />
+                  ) : null}
+                </div>
+                <span>Select All</span>
+              </button>
+
+              {/* Number of selected leads */}
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                {selectedLeadIds.size} selected
+              </span>
+            </div>
+
+            {/* Delete Selected Button */}
+            <button
+              type="button"
+              id="btn-delete-selected"
+              disabled={selectedLeadIds.size === 0 || isDeletingBulk}
+              onClick={() => setShowDeleteModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-lg text-xs shadow-xs transition-all active:scale-95 shrink-0"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Selected</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Leads List or Empty State */}
@@ -240,10 +380,79 @@ export const LeadsList: React.FC<LeadsListProps> = ({
               onOpenDetail={onOpenLeadDetail}
               onOpenWhatsApp={onOpenWhatsApp}
               onQuickFollowUp={onOpenSchedule}
+              isSelectionMode={isSelectionMode}
+              isSelected={selectedLeadIds.has(lead.id)}
+              onToggleSelect={handleToggleSelectLead}
             />
           ))
         )}
       </div>
+
+      {/* Bulk Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-slate-800 rounded-3xl p-5 max-w-sm w-full border border-slate-200 dark:border-slate-700 shadow-xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Delete {selectedLeadIds.size} selected {selectedLeadIds.size === 1 ? 'lead' : 'leads'}?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                  This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              These {selectedLeadIds.size} selected {selectedLeadIds.size === 1 ? 'lead' : 'leads'} will be permanently deleted from Firestore.
+            </p>
+
+            {deleteError && (
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-700 dark:text-rose-300 font-medium flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              <button
+                type="button"
+                id="btn-cancel-delete"
+                disabled={isDeletingBulk}
+                onClick={() => {
+                  if (!isDeletingBulk) {
+                    setShowDeleteModal(false);
+                    setDeleteError(null);
+                  }
+                }}
+                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                id="btn-confirm-delete"
+                disabled={isDeletingBulk}
+                onClick={handleConfirmDeleteBulk}
+                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-60"
+              >
+                {isDeletingBulk ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Delete</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

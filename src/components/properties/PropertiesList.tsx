@@ -16,6 +16,11 @@ import {
   CheckCircle2,
   X,
   Compass,
+  CheckSquare,
+  Check,
+  Minus,
+  Trash2,
+  AlertCircle,
 } from 'lucide-react';
 import { Property, Lead, UserProfile, PropertyStatus, PropertyType, PropertyTransactionType } from '../../types';
 import {
@@ -38,6 +43,7 @@ interface PropertiesListProps {
   onOpenAddProperty: () => void;
   onOpenPropertyDetail: (property: Property) => void;
   onOpenShareModal: (property: Property, preselectedLead?: Lead | null) => void;
+  onDeleteBulkProperties?: (propertyIds: string[]) => Promise<void>;
 }
 
 export const PropertiesList: React.FC<PropertiesListProps> = ({
@@ -49,6 +55,7 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
   onOpenAddProperty,
   onOpenPropertyDetail,
   onOpenShareModal,
+  onDeleteBulkProperties,
 }) => {
   const { t } = useTranslation();
   const [internalSearchQuery, setInternalSearchQuery] = useState<string>('');
@@ -61,6 +68,13 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
   const [selectedBhk, setSelectedBhk] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'price_low' | 'price_high'>('newest');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(false);
+
+  // Bulk selection state
+  const [isSelectionMode, setIsSelectionMode] = useState<boolean>(false);
+  const [selectedPropertyIds, setSelectedPropertyIds] = useState<Set<string>>(new Set());
+  const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
+  const [isDeletingBulk, setIsDeletingBulk] = useState<boolean>(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Filter and Sort properties
   const filteredProperties = useMemo(() => {
@@ -108,6 +122,59 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
   const availableCount = properties.filter((p) => p.status === 'available').length;
   const negotiationCount = properties.filter((p) => p.status === 'negotiation').length;
 
+  // Check if all filtered properties are selected
+  const isAllSelected = useMemo(() => {
+    if (filteredProperties.length === 0) return false;
+    return filteredProperties.every((p) => selectedPropertyIds.has(p.id));
+  }, [filteredProperties, selectedPropertyIds]);
+
+  // Toggle select all visible
+  const handleToggleSelectAll = () => {
+    if (isAllSelected) {
+      const next = new Set(selectedPropertyIds);
+      filteredProperties.forEach((p) => next.delete(p.id));
+      setSelectedPropertyIds(next);
+    } else {
+      const next = new Set(selectedPropertyIds);
+      filteredProperties.forEach((p) => next.add(p.id));
+      setSelectedPropertyIds(next);
+    }
+  };
+
+  // Toggle single property
+  const handleToggleSelectProperty = (propertyId: string) => {
+    setSelectedPropertyIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(propertyId)) {
+        next.delete(propertyId);
+      } else {
+        next.add(propertyId);
+      }
+      return next;
+    });
+  };
+
+  // Confirm delete bulk
+  const handleConfirmDeleteBulk = async () => {
+    if (isDeletingBulk || selectedPropertyIds.size === 0) return;
+    setIsDeletingBulk(true);
+    setDeleteError(null);
+    try {
+      const ids = Array.from(selectedPropertyIds);
+      if (onDeleteBulkProperties) {
+        await onDeleteBulkProperties(ids);
+      }
+      setSelectedPropertyIds(new Set());
+      setIsSelectionMode(false);
+      setShowDeleteModal(false);
+    } catch (err: any) {
+      console.error('Error deleting selected properties:', err);
+      setDeleteError(err?.message || 'Unable to delete selected properties. Please try again.');
+    } finally {
+      setIsDeletingBulk(false);
+    }
+  };
+
   return (
     <div className="flex-1 pb-8 bg-slate-100/70 dark:bg-slate-950">
       {/* Top Banner / Title Header */}
@@ -123,14 +190,89 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
             </p>
           </div>
 
-          <button
-            onClick={onOpenAddProperty}
-            className="py-2.5 px-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-2xl text-xs flex items-center gap-1.5 shadow-md transition-all flex-shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>{t('prop_add_btn')}</span>
-          </button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Select Button */}
+            <button
+              id="btn-select-mode-props"
+              type="button"
+              onClick={() => {
+                if (isSelectionMode) {
+                  setIsSelectionMode(false);
+                  setSelectedPropertyIds(new Set());
+                } else {
+                  setIsSelectionMode(true);
+                  setSelectedPropertyIds(new Set());
+                }
+              }}
+              className={`py-2 px-3 rounded-2xl text-xs font-bold flex items-center gap-1.5 border transition-all ${
+                isSelectionMode
+                  ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 shadow-xs'
+                  : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+              }`}
+              title={isSelectionMode ? 'Cancel Selection' : 'Select Properties'}
+            >
+              <CheckSquare className="w-3.5 h-3.5" />
+              <span>{isSelectionMode ? 'Cancel' : 'Select'}</span>
+            </button>
+
+            <button
+              onClick={onOpenAddProperty}
+              className="py-2.5 px-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-2xl text-xs flex items-center gap-1.5 shadow-md transition-all flex-shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{t('prop_add_btn')}</span>
+            </button>
+          </div>
         </div>
+
+        {/* Bulk Selection Action Bar */}
+        {isSelectionMode && (
+          <div className="mb-3 flex items-center justify-between gap-2 p-2.5 bg-slate-50 dark:bg-slate-800/90 rounded-xl border border-slate-200 dark:border-slate-700 transition-all">
+            <div className="flex items-center gap-2.5">
+              {/* Select All */}
+              <button
+                type="button"
+                id="btn-select-all-props"
+                onClick={handleToggleSelectAll}
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold border border-slate-200 dark:border-slate-600 transition-colors"
+              >
+                <div
+                  className={`w-4 h-4 rounded flex items-center justify-center border transition-colors ${
+                    isAllSelected
+                      ? 'bg-emerald-600 border-emerald-600 text-white'
+                      : selectedPropertyIds.size > 0
+                      ? 'bg-emerald-100 dark:bg-emerald-950/60 border-emerald-500 text-emerald-600'
+                      : 'border-slate-300 dark:border-slate-500 bg-transparent'
+                  }`}
+                >
+                  {isAllSelected ? (
+                    <Check className="w-3 h-3 stroke-[3]" />
+                  ) : selectedPropertyIds.size > 0 ? (
+                    <Minus className="w-3 h-3 stroke-[3]" />
+                  ) : null}
+                </div>
+                <span>Select All</span>
+              </button>
+
+              {/* Number of selected properties */}
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                {selectedPropertyIds.size} selected
+              </span>
+            </div>
+
+            {/* Delete Selected Button */}
+            <button
+              type="button"
+              id="btn-delete-selected-props"
+              disabled={selectedPropertyIds.size === 0 || isDeletingBulk}
+              onClick={() => setShowDeleteModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-lg text-xs shadow-xs transition-all active:scale-95 shrink-0"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Selected</span>
+            </button>
+          </div>
+        )}
 
         {/* Search Input Bar */}
         <div className="relative mb-2.5">
@@ -300,18 +442,58 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
             const statusCfg = PROPERTY_STATUS_CONFIG[property.status] || PROPERTY_STATUS_CONFIG.available;
             const isRent = property.transactionType === 'rent' || property.transactionType === 'lease';
             const matching = findMatchingLeads(property, leads);
+            const isSelected = selectedPropertyIds.has(property.id);
 
             return (
               <div
                 key={property.id}
-                className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 overflow-hidden shadow-xs hover:shadow-md transition-all group"
+                onClick={() => {
+                  if (isSelectionMode) {
+                    handleToggleSelectProperty(property.id);
+                  }
+                }}
+                className={`bg-white dark:bg-slate-900 rounded-2xl border overflow-hidden shadow-xs transition-all group relative ${
+                  isSelectionMode
+                    ? isSelected
+                      ? 'border-emerald-500/80 ring-2 ring-emerald-500/30 bg-emerald-50/20 dark:bg-emerald-950/20 cursor-pointer'
+                      : 'border-slate-200/90 dark:border-slate-800 hover:border-emerald-300 dark:hover:border-emerald-700 cursor-pointer'
+                    : 'border-slate-200/90 dark:border-slate-800 hover:shadow-md'
+                }`}
               >
                 <div className="flex flex-col sm:flex-row">
                   {/* Photo Thumbnail */}
                   <div
-                    onClick={() => onOpenPropertyDetail(property)}
+                    onClick={(e) => {
+                      if (isSelectionMode) {
+                        e.stopPropagation();
+                        handleToggleSelectProperty(property.id);
+                      } else {
+                        onOpenPropertyDetail(property);
+                      }
+                    }}
                     className="relative sm:w-48 aspect-16/10 sm:aspect-auto bg-slate-900 cursor-pointer overflow-hidden flex-shrink-0"
                   >
+                    {/* Checkbox in selection mode */}
+                    {isSelectionMode && (
+                      <div
+                        className="absolute top-2.5 right-2.5 z-30 flex items-center justify-center cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleToggleSelectProperty(property.id);
+                        }}
+                      >
+                        <div
+                          className={`w-6 h-6 rounded-md flex items-center justify-center border shadow-md transition-all ${
+                            isSelected
+                              ? 'bg-emerald-600 border-emerald-600 text-white ring-2 ring-white/90'
+                              : 'bg-white/95 dark:bg-slate-800/95 border-slate-300 dark:border-slate-600 text-transparent hover:border-emerald-500'
+                          }`}
+                        >
+                          {isSelected && <Check className="w-4 h-4 stroke-[3]" />}
+                        </div>
+                      </div>
+                    )}
+
                     {property.photos && property.photos.length > 0 ? (
                       <img
                         src={property.photos[0]}
@@ -351,7 +533,14 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
                             {PROPERTY_TYPE_LABELS[property.propertyType]}
                           </span>
                           <h3
-                            onClick={() => onOpenPropertyDetail(property)}
+                            onClick={(e) => {
+                              if (isSelectionMode) {
+                                e.stopPropagation();
+                                handleToggleSelectProperty(property.id);
+                              } else {
+                                onOpenPropertyDetail(property);
+                              }
+                            }}
                             className="text-sm font-extrabold text-slate-900 dark:text-white leading-snug cursor-pointer hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
                           >
                             {property.title}
@@ -405,7 +594,14 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
                     <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between gap-2">
                       {matching.length > 0 ? (
                         <button
-                          onClick={() => onOpenPropertyDetail(property)}
+                          onClick={(e) => {
+                            if (isSelectionMode) {
+                              e.stopPropagation();
+                              handleToggleSelectProperty(property.id);
+                            } else {
+                              onOpenPropertyDetail(property);
+                            }
+                          }}
                           className="flex items-center gap-1 text-[11px] font-extrabold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 px-2.5 py-1 rounded-lg hover:bg-rose-100 transition-colors"
                         >
                           <Sparkles className="w-3.5 h-3.5 animate-pulse" />
@@ -417,7 +613,10 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
 
                       <div className="flex items-center gap-1.5">
                         <button
-                          onClick={() => onOpenShareModal(property)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenShareModal(property);
+                          }}
                           className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-xs transition-all"
                         >
                           <Share2 className="w-3.5 h-3.5" />
@@ -425,7 +624,14 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
                         </button>
 
                         <button
-                          onClick={() => onOpenPropertyDetail(property)}
+                          onClick={(e) => {
+                            if (isSelectionMode) {
+                              e.stopPropagation();
+                              handleToggleSelectProperty(property.id);
+                            } else {
+                              onOpenPropertyDetail(property);
+                            }
+                          }}
                           className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
                         >
                           <ChevronRight className="w-4 h-4" />
@@ -439,6 +645,72 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
           })
         )}
       </div>
+
+      {/* Bulk Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white dark:bg-slate-800 rounded-3xl p-5 max-w-sm w-full border border-slate-200 dark:border-slate-700 shadow-xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Delete {selectedPropertyIds.size} selected {selectedPropertyIds.size === 1 ? 'property' : 'properties'}?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                  This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              These {selectedPropertyIds.size} selected {selectedPropertyIds.size === 1 ? 'property' : 'properties'} will be permanently deleted from Firestore.
+            </p>
+
+            {deleteError && (
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-700 dark:text-rose-300 font-medium flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              <button
+                type="button"
+                id="btn-cancel-delete-props"
+                disabled={isDeletingBulk}
+                onClick={() => {
+                  if (!isDeletingBulk) {
+                    setShowDeleteModal(false);
+                    setDeleteError(null);
+                  }
+                }}
+                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                id="btn-confirm-delete-props"
+                disabled={isDeletingBulk}
+                onClick={handleConfirmDeleteBulk}
+                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5 shadow-xs disabled:opacity-60"
+              >
+                {isDeletingBulk ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Delete</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
