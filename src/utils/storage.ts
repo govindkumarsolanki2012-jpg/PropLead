@@ -3,8 +3,8 @@ import { INITIAL_USER_PROFILE } from '../data/initialData';
 import { WHATSAPP_TEMPLATES } from './whatsapp';
 import { formatBudgetRange } from './formatters';
 import { Capacitor } from '@capacitor/core';
-import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { showAppToast } from './toast';
+import { CsvDownload } from './csvDownload';
 
 const STORAGE_KEYS = {
   LEADS: 'proplead_leads_v1',
@@ -205,75 +205,34 @@ export async function exportLeadsToCSV(
   // 1. Native Android App via Capacitor
   if (Capacitor.isNativePlatform()) {
     try {
-      // Request storage permissions if needed on Android
-      try {
-        const permStatus = await Filesystem.checkPermissions();
-        if (permStatus.publicStorage !== 'granted') {
-          await Filesystem.requestPermissions();
-        }
-      } catch (permErr) {
-        console.warn('[CSV Export] Permission request check note:', permErr);
+      const result = await CsvDownload.saveCsvFile({
+        fileName: filename,
+        content: csvContent,
+        mimeType: 'text/csv',
+      });
+
+      // Requirement 11: If user cancels the Save As screen, do nothing and do not show a success message
+      if (result.canceled) {
+        return { success: false, message: 'Canceled by user' };
       }
 
-      let saveSuccess = false;
-
-      // Primary attempt: Save directly into user's Downloads folder
-      try {
-        await Filesystem.writeFile({
-          path: `Download/${filename}`,
-          data: csvContent,
-          directory: Directory.ExternalStorage,
-          encoding: Encoding.UTF8,
-          recursive: true,
-        });
-        saveSuccess = true;
-      } catch (dlErr) {
-        console.warn('[CSV Export] Direct save to Download/ failed, trying Documents directory:', dlErr);
-      }
-
-      // Secondary attempt: Public Documents directory
-      if (!saveSuccess) {
-        try {
-          await Filesystem.writeFile({
-            path: filename,
-            data: csvContent,
-            directory: Directory.Documents,
-            encoding: Encoding.UTF8,
-            recursive: true,
-          });
-          saveSuccess = true;
-        } catch (docErr) {
-          console.warn('[CSV Export] Save to Documents failed, trying External app storage:', docErr);
-        }
-      }
-
-      // Tertiary attempt: External app storage directory
-      if (!saveSuccess) {
-        try {
-          await Filesystem.writeFile({
-            path: filename,
-            data: csvContent,
-            directory: Directory.External,
-            encoding: Encoding.UTF8,
-            recursive: true,
-          });
-          saveSuccess = true;
-        } catch (extErr) {
-          console.error('[CSV Export] All Capacitor Filesystem save attempts failed:', extErr);
-        }
-      }
-
-      if (saveSuccess) {
-        showAppToast('CSV downloaded successfully');
-        return { success: true, message: 'CSV downloaded successfully' };
+      if (result.success) {
+        return { success: true, message: 'PropLead CSV downloaded' };
       } else {
-        const errMsg = 'Failed to save CSV to Downloads folder. Please check storage permissions.';
+        const errMsg = result.error || 'Failed to save CSV file.';
         showAppToast(errMsg, true);
         return { success: false, message: errMsg };
       }
     } catch (nativeErr: any) {
-      console.error('[CSV Export] Native direct save error:', nativeErr);
-      const errMsg = nativeErr?.message || 'Failed to save CSV to Downloads folder.';
+      console.error('[CSV Export] Native Save As error:', nativeErr);
+      if (
+        nativeErr?.message?.includes('canceled') ||
+        nativeErr?.message?.includes('CANCELED')
+      ) {
+        // User canceled: do nothing and do not show a success message
+        return { success: false, message: 'Canceled by user' };
+      }
+      const errMsg = nativeErr?.message || 'Failed to save CSV.';
       showAppToast(errMsg, true);
       return { success: false, message: errMsg };
     }
