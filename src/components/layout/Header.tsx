@@ -1,5 +1,5 @@
 import React from 'react';
-import { Building2, Search, Plus, Sparkles, X } from 'lucide-react';
+import { Building2, Search, Plus, Sparkles, X, Settings } from 'lucide-react';
 import { UserProfile, TabType } from '../../types';
 import { useTranslation } from '../../context/LanguageContext';
 
@@ -12,6 +12,7 @@ interface HeaderProps {
   onSearchFocus?: () => void;
   onOpenQuickAdd: () => void;
   onOpenSubscription: () => void;
+  onOpenSettings?: () => void;
   unreadCount?: number;
 }
 
@@ -24,6 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
   onSearchFocus,
   onOpenQuickAdd,
   onOpenSubscription,
+  onOpenSettings,
 }) => {
   const { t } = useTranslation();
 
@@ -102,6 +104,22 @@ export const Header: React.FC<HeaderProps> = ({
               <span>{addBtnLabel}</span>
             </button>
           )}
+
+          {/* Settings Gear Button: Immediately to the right of + Add Lead */}
+          <button
+            id="header-settings-btn"
+            type="button"
+            onClick={onOpenSettings}
+            className={`w-9 h-9 rounded-xl border flex items-center justify-center transition-all shadow-xs active:scale-95 flex-shrink-0 ${
+              currentTab === 'settings'
+                ? 'bg-emerald-50 dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 border-emerald-300 dark:border-emerald-600 shadow-sm ring-2 ring-emerald-500/20'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white border-slate-200/90 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-750'
+            }`}
+            aria-label={t('nav_settings') || 'Settings'}
+            title={t('nav_settings') || 'Settings'}
+          >
+            <Settings className="w-5 h-5 stroke-[1.85px]" />
+          </button>
         </div>
       </div>
 

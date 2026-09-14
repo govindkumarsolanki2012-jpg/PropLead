@@ -851,6 +851,13 @@ export function App() {
               }
             }}
             onOpenSubscription={() => setIsSubscriptionOpen(true)}
+            onOpenSettings={() => {
+              if (currentTab === 'settings') {
+                handleTabChange('home');
+              } else {
+                handleTabChange('settings');
+              }
+            }}
           />
 
           {/* Single Vertical Scroll Container for Main Content */}

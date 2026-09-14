@@ -219,17 +219,25 @@ export const LeadsList: React.FC<LeadsListProps> = ({
         </div>
 
         {/* Results Header, CSV Export & Sort Selector */}
-        <div className="flex items-center justify-between text-xs text-slate-500 pt-0.5">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-semibold text-slate-700 dark:text-slate-300 flex-shrink-0">
+        <div
+          id="leads-toolbar"
+          className="w-full flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 text-xs text-slate-500 pt-0.5"
+        >
+          {/* Row 1: "Showing X leads" (Full Width on Mobile, completely separate row) */}
+          <div
+            id="leads-toolbar-row-1"
+            className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-2 flex-wrap"
+          >
+            <span className="font-semibold text-slate-700 dark:text-slate-300 text-xs sm:text-sm tracking-tight">
               {t('leads_showing_count', { count: filteredLeads.length, total: leads.length })}
             </span>
             {searchQuery && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200/50 dark:border-emerald-800/50 truncate">
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200/50 dark:border-emerald-800/50 truncate max-w-[160px]">
                 <span className="truncate">"{searchQuery}"</span>
                 <button
+                  type="button"
                   onClick={() => onSearchChange?.('')}
-                  className="hover:text-emerald-900 dark:hover:text-emerald-100 flex-shrink-0"
+                  className="hover:text-emerald-900 dark:hover:text-emerald-100 flex-shrink-0 p-0.5"
                   aria-label="Clear filter"
                 >
                   <X className="w-3 h-3" />
@@ -238,47 +246,57 @@ export const LeadsList: React.FC<LeadsListProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            {/* Export CSV Button */}
-            <button
-              onClick={() => exportLeadsToCSV(filteredLeads, profile.name)}
-              className="p-1.5 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700 transition-colors flex-shrink-0"
-              title={t('leads_export_csv')}
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span className="text-[11px]">CSV</span>
-            </button>
+          {/* Row 2: Action Controls - CSV | Select | Follow-Up Date (Full Width on Mobile, placed below Row 1) */}
+          <div
+            id="leads-toolbar-row-2"
+            className="w-full sm:w-auto flex items-center justify-between sm:justify-end gap-2 flex-wrap sm:flex-nowrap"
+          >
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {/* Export CSV Button */}
+              <button
+                type="button"
+                id="btn-export-csv"
+                onClick={() => exportLeadsToCSV(filteredLeads, profile.name)}
+                className="p-1.5 px-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 active:scale-95 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 transition-all flex-shrink-0"
+                title={t('leads_export_csv')}
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span className="text-[11px]">CSV</span>
+              </button>
 
-            {/* Select Button */}
-            <button
-              id="btn-select-mode"
-              type="button"
-              onClick={() => {
-                if (isSelectionMode) {
-                  setIsSelectionMode(false);
-                  setSelectedLeadIds(new Set());
-                } else {
-                  setIsSelectionMode(true);
-                  setSelectedLeadIds(new Set());
-                }
-              }}
-              className={`p-1.5 px-2.5 rounded-lg text-xs font-bold flex items-center gap-1 border transition-colors flex-shrink-0 ${
-                isSelectionMode
-                  ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
-                  : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
-              }`}
-              title={isSelectionMode ? 'Cancel Selection' : 'Select Leads'}
-            >
-              <CheckSquare className="w-3.5 h-3.5" />
-              <span className="text-[11px]">{isSelectionMode ? 'Cancel' : 'Select'}</span>
-            </button>
+              {/* Select Button */}
+              <button
+                id="btn-select-mode"
+                type="button"
+                onClick={() => {
+                  if (isSelectionMode) {
+                    setIsSelectionMode(false);
+                    setSelectedLeadIds(new Set());
+                  } else {
+                    setIsSelectionMode(true);
+                    setSelectedLeadIds(new Set());
+                  }
+                }}
+                className={`p-1.5 px-2.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-all active:scale-95 flex-shrink-0 ${
+                  isSelectionMode
+                    ? 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700'
+                    : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                }`}
+                title={isSelectionMode ? 'Cancel Selection' : 'Select Leads'}
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span className="text-[11px]">{isSelectionMode ? 'Cancel' : 'Select'}</span>
+              </button>
+            </div>
 
-            <div className="flex items-center gap-1">
-              <ArrowUpDown className="w-3.5 h-3.5" />
+            {/* Follow-Up Date Sorting Selector */}
+            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 flex-shrink-0">
+              <ArrowUpDown className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 flex-shrink-0" />
               <select
+                id="leads-sort-select"
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
-                className="bg-transparent text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer outline-hidden"
+                className="bg-transparent text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer outline-hidden pr-0.5"
               >
                 <option value="followup">{t('leads_sort_followup')}</option>
                 <option value="newest">{t('leads_sort_newest')}</option>
