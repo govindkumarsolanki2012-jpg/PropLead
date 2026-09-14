@@ -8,8 +8,8 @@ interface OnboardingFlowProps {
 }
 
 export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) => {
-  // Step 1: Splash, Step 2: Welcome, Step 3: Login/Register, Step 4: 3-screen Walkthrough, Step 5: Trial Activation
-  const [step, setStep] = useState<number>(1);
+  // Step 2: Welcome, Step 3: Login/Register, Step 4: 3-screen Walkthrough, Step 5: Trial Activation
+  const [step, setStep] = useState<number>(2);
   const [loginMethod, setLoginMethod] = useState<'selection' | 'otp'>('selection');
   const [phoneInput, setPhoneInput] = useState<string>('');
   const [otpInput, setOtpInput] = useState<string>('');
@@ -20,16 +20,6 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
   const [agentName, setAgentName] = useState<string>('');
   const [agencyName, setAgencyName] = useState<string>('');
   const [city, setCity] = useState<string>('');
-
-  // Auto transition from Splash (Step 1) to Welcome (Step 2) after 1.5 seconds
-  useEffect(() => {
-    if (step === 1) {
-      const timer = setTimeout(() => {
-        setStep(2);
-      }, 1400);
-      return () => clearTimeout(timer);
-    }
-  }, [step]);
 
   const walkthroughScreens = [
     {
@@ -91,25 +81,6 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
 
   return (
     <div className="flex-1 flex flex-col justify-between bg-white dark:bg-slate-900 text-slate-900 dark:text-white p-6 relative overflow-y-auto">
-      {/* STEP 1: SPLASH SCREEN */}
-      {step === 1 && (
-        <div className="flex-1 flex flex-col items-center justify-center animate-fade-in text-center">
-          <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-xl shadow-emerald-500/20 mb-6 animate-bounce">
-            <Building2 className="w-10 h-10" />
-          </div>
-          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
-            PropLead
-          </h1>
-          <p className="text-sm text-emerald-600 dark:text-emerald-400 font-semibold mt-1">
-            Property Agent Lead Tracker
-          </p>
-          <div className="mt-8 flex items-center gap-2 text-xs text-slate-400 font-medium">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-            <span>Starting your lead engine...</span>
-          </div>
-        </div>
-      )}
-
       {/* STEP 2: WELCOME SCREEN */}
       {step === 2 && (
         <div className="flex-1 flex flex-col justify-between py-6">

@@ -11,8 +11,6 @@ import { PropertiesList } from './components/properties/PropertiesList';
 import { CalendarView } from './components/calendar/CalendarView';
 import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { SettingsView } from './components/settings/SettingsView';
-import { SplashScreen } from './components/common/SplashScreen';
-import { AnimatePresence } from 'motion/react';
 
 // Modals
 import { QuickAddLeadModal } from './components/leads/QuickAddLeadModal';
@@ -51,6 +49,7 @@ import {
   signInWithGoogle,
   signOutUser,
   initSocialLogin,
+  getCurrentUser,
   subscribeUserProfile,
   subscribeLeadsFromFirestore,
   subscribePropertiesFromFirestore,
@@ -68,20 +67,25 @@ import {
 import { syncLocalDataToFirestore } from './utils/migration';
 import { FirebaseUser } from './lib/firebase';
 
-export function App() {
-  // Launch Splash and Firebase Authentication coordination
-  // Display the PropLead logo and app name for ~1 second while checking Firebase auth state concurrently
-  const [isSplashTimerActive, setIsSplashTimerActive] = useState<boolean>(true);
-  const [isAuthResolved, setIsAuthResolved] = useState<boolean>(false);
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+const checkHasActiveSession = (): boolean => {
+  try {
+    if (typeof window === 'undefined') return false;
+    if (localStorage.getItem('proplead_is_logged_in_v1') === 'true') return true;
+    const raw = localStorage.getItem('proplead_profile_v1');
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (p && (p.isOnboarded || p.email || (p.id && p.id !== 'usr_001'))) {
+        return true;
+      }
+    }
+  } catch {}
+  return false;
+};
 
-  // 1-second splash timer
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsSplashTimerActive(false);
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, []);
+export function App() {
+  // Firebase Authentication coordination
+  const [isAuthResolved, setIsAuthResolved] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(() => getCurrentUser());
 
   // Safety fallback for offline / extreme latency
   useEffect(() => {
@@ -98,7 +102,7 @@ export function App() {
     }
   }, []);
 
-  const isSplashVisible = isSplashTimerActive || !isAuthResolved;
+  const isUserAuthenticated = Boolean(currentUser) || (!isAuthResolved && checkHasActiveSession());
   const [profile, setProfile] = useState<UserProfile>(getStoredProfile());
   const [leads, setLeads] = useState<Lead[]>(getStoredLeads());
   const [properties, setProperties] = useState<Property[]>(getStoredProperties());
@@ -185,8 +189,8 @@ export function App() {
 
   // Fresh references ref for the single back button listener
   const appStateRef = useRef({
-    isSplashVisible,
     currentUser,
+    isUserAuthenticated,
     currentTab,
     tabHistory,
     isQuickAddOpen,
@@ -205,8 +209,8 @@ export function App() {
 
   useEffect(() => {
     appStateRef.current = {
-      isSplashVisible,
       currentUser,
+      isUserAuthenticated,
       currentTab,
       tabHistory,
       isQuickAddOpen,
@@ -228,8 +232,8 @@ export function App() {
   const handleBack = useCallback(() => {
     const s = appStateRef.current;
 
-    // If during launch splash or not authenticated, back exits the app
-    if (s.isSplashVisible || !s.currentUser) {
+    // If not authenticated, back exits the app
+    if (!s.isUserAuthenticated) {
       if (Capacitor.isNativePlatform()) {
         CapApp.exitApp();
       } else {
@@ -386,6 +390,9 @@ export function App() {
       setIsAuthResolved(true);
 
       if (user) {
+        try {
+          localStorage.setItem('proplead_is_logged_in_v1', 'true');
+        } catch {}
         setIsCloudSynced(true);
         // Safely migrate/initialize user data in Firestore with user phone
         await syncLocalDataToFirestore(user.uid, user.email, user.displayName, user.phoneNumber);
@@ -786,6 +793,9 @@ export function App() {
   const handleSignOut = async () => {
     try {
       await signOutUser();
+      try {
+        localStorage.removeItem('proplead_is_logged_in_v1');
+      } catch {}
       setCurrentUser(null);
       setIsCloudSynced(false);
       setLeads([]);
@@ -806,10 +816,6 @@ export function App() {
 
   return (
     <MobileFrame>
-      {/* Launch Splash Screen with subtle fade-out transition */}
-      <AnimatePresence>
-        {isSplashVisible && <SplashScreen key="app-launch-splash" />}
-      </AnimatePresence>
       {/* Toast Notification */}
       {toastMessage && (
         <div
@@ -826,7 +832,7 @@ export function App() {
         </div>
       )}
 
-      {!currentUser ? (
+      {!isUserAuthenticated ? (
         <AuthFlow />
       ) : (
         <div className="flex-1 min-h-0 flex flex-col h-full bg-slate-100/70 dark:bg-slate-950 w-full max-w-full">
