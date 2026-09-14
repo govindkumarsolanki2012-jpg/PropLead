@@ -21,70 +21,46 @@ import {
 } from 'firebase/storage';
 import { db, storage, auth, googleProvider, FirebaseUser } from '../lib/firebase';
 import {
-  signInWithPopup,
-  signInWithCredential,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   updateProfile,
-  GoogleAuthProvider,
   signOut as fbSignOut,
   onAuthStateChanged,
   RecaptchaVerifier,
   signInWithPhoneNumber,
   ConfirmationResult,
+  signInWithPopup,
+  signInWithCredential,
+  GoogleAuthProvider,
 } from 'firebase/auth';
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
 import { SocialLogin } from '@capgo/capacitor-social-login';
-import firebaseConfig from '../../firebase-applet-config.json';
 import { Lead, Property, UserProfile, WhatsAppTemplate } from '../types';
 
-export interface NativeAuthDiagnostics {
-  packageName: string;
-  runtimeSha1: string;
-  webClientId: string;
-  playAppSigningSha1: string;
-  uploadKeySha1: string;
-  isRegisteredFingerprint: boolean;
-}
+export const GOOGLE_WEB_CLIENT_ID =
+  '36803800158-f1e83pmo78ge5gpiosi9buukrbi6if7m.apps.googleusercontent.com';
+
+let isSocialLoginInitialized = false;
 
 /**
- * Retrieves live auth diagnostics from the native Android app container,
- * including package name, runtime APK signing SHA-1, and Web Client ID.
+ * Initializes the SocialLogin plugin with Google Credential Manager configuration.
  */
-export async function getNativeAuthDiagnostics(): Promise<NativeAuthDiagnostics> {
-  const fallback: NativeAuthDiagnostics = {
-    packageName: 'com.proplead.tracker',
-    runtimeSha1: '71:21:34:6A:91:F9:31:7D:FB:E7:99:7B:53:96:31:CF:FC:ED:A5:06',
-    webClientId:
-      (firebaseConfig as any).oAuthClientId ||
-      '36803800158-f1e83pmo78ge5gpiosi9buukrbi6if7m.apps.googleusercontent.com',
-    playAppSigningSha1: '71:21:34:6A:91:F9:31:7D:FB:E7:99:7B:53:96:31:CF:FC:ED:A5:06',
-    uploadKeySha1: 'ED:D0:A7:BD:1E:6E:69:23:0F:95:E0:4E:1A:DC:C1:84:E9:D4:57:6D',
-    isRegisteredFingerprint: true,
-  };
-
-  if (!Capacitor.isNativePlatform()) {
-    return fallback;
+export async function initSocialLogin(): Promise<void> {
+  if (isSocialLoginInitialized || !Capacitor.isNativePlatform()) {
+    return;
   }
-
   try {
-    const plugin = registerPlugin<any>('AuthDiagnostics');
-    const res = await plugin.getAuthDiagnostics();
-    if (res && res.runtimeSha1) {
-      return {
-        packageName: res.packageName || fallback.packageName,
-        runtimeSha1: res.runtimeSha1,
-        webClientId: res.webClientId || fallback.webClientId,
-        playAppSigningSha1: res.playAppSigningSha1 || fallback.playAppSigningSha1,
-        uploadKeySha1: res.uploadKeySha1 || fallback.uploadKeySha1,
-        isRegisteredFingerprint: Boolean(res.isRegisteredFingerprint),
-      };
-    }
-  } catch (e) {
-    console.debug('[GoogleAuth Diagnostics] Native AuthDiagnosticsPlugin not available:', e);
+    await SocialLogin.initialize({
+      google: {
+        webClientId: GOOGLE_WEB_CLIENT_ID,
+        mode: 'online',
+      },
+    });
+    isSocialLoginInitialized = true;
+    console.log('[GoogleAuth] Native SocialLogin initialized with Credential Manager.');
+  } catch (err) {
+    console.error('[GoogleAuth] Error initializing native SocialLogin:', err);
   }
-
-  return fallback;
 }
 
 // Known legacy demo IDs to filter out and purge from Firestore if ever present
@@ -99,214 +75,44 @@ const DEMO_PROP_IDS = new Set([
 
 export type { ConfirmationResult, RecaptchaVerifier };
 
-let isSocialLoginInitialized = false;
-
-/**
- * Initializes native Android Google Sign-In (Credential Manager) using the Web Client ID.
- */
-export async function initSocialLogin(): Promise<void> {
-  if (isSocialLoginInitialized || !Capacitor.isNativePlatform()) {
-    return;
-  }
-  const webClientId =
-    (firebaseConfig as any).oAuthClientId ||
-    '36803800158-f1e83pmo78ge5gpiosi9buukrbi6if7m.apps.googleusercontent.com';
-
-  console.log('[Auth] Initializing native SocialLogin with Web Client ID:', webClientId);
-
-  try {
-    await SocialLogin.initialize({
-      google: {
-        webClientId,
-        mode: 'online',
-      },
-    });
-    isSocialLoginInitialized = true;
-    console.log('[Auth] SocialLogin initialized successfully.');
-  } catch (err) {
-    console.error('[Auth] Error initializing native SocialLogin:', err);
-  }
-}
-
 export function subscribeToAuth(callback: (user: FirebaseUser | null) => void): Unsubscribe {
   return onAuthStateChanged(auth, callback);
 }
 
 /**
  * Signs in with Google:
- * - On Native Android: Uses native Google Credential Manager (bottom sheet account selector)
- *   without launching Chrome or web redirect flows, obtains the ID token, and authenticates
- *   directly with Firebase via signInWithCredential.
- * - On Web / Preview: Uses standard signInWithPopup.
+ * - On Native Android: Uses Android Credential Manager via @capgo/capacitor-social-login,
+ *   retrieves the Google ID token using the Web Client ID,
+ *   and authenticates with Firebase using GoogleAuthProvider.credential(idToken) and signInWithCredential().
+ * - On Web / Preview: Uses standard Firebase signInWithPopup.
  */
 export async function signInWithGoogle(): Promise<FirebaseUser> {
   if (Capacitor.isNativePlatform()) {
     await initSocialLogin();
 
-    const diag = await getNativeAuthDiagnostics();
-    const packageName = diag.packageName;
-    const runtimeSha1 = diag.runtimeSha1;
-    const webClientId = diag.webClientId;
-
-    console.log('[GoogleAuth Diagnostics] Pre-login configuration:', {
-      'package name': packageName,
-      'runtime signing SHA-1': runtimeSha1,
-      'playAppSigningSha1': diag.playAppSigningSha1,
-      'uploadKeySha1': diag.uploadKeySha1,
-      'webClientId': webClientId,
-      'filterByAuthorizedAccounts': false,
-      'isRegisteredFingerprint': diag.isRegisteredFingerprint,
-      'style': 'standard',
+    console.log('[GoogleAuth] Launching Google Credential Manager standard sign-in flow...');
+    const response = await SocialLogin.login({
+      provider: 'google',
+      options: {
+        style: 'standard',
+      },
     });
 
-    let loginResponse: any;
-    let retryAttempted = false;
-
-    const executeStandardLogin = () =>
-      SocialLogin.login({
-        provider: 'google',
-        options: {
-          style: 'standard',
-          filterByAuthorizedAccounts: false,
-          scopes: ['email', 'profile'],
-        },
-      });
-
-    try {
-      // 1. Use the standard Google account selection flow without forced authorized-account filtering
-      loginResponse = await executeStandardLogin();
-    } catch (initialErr: any) {
-      const errMessage = initialErr?.message || String(initialErr || '');
-      const errorCodeMatch = errMessage.match(/\[(\d+)\]/);
-      const errorCode = initialErr?.code || (errorCodeMatch ? `[${errorCodeMatch[1]}]` : 'ERROR_LOGIN_FAILED');
-      const isReauthError =
-        errMessage.includes('16') ||
-        errMessage.toLowerCase().includes('account reauth failed') ||
-        errorCode === '[16]';
-
-      const isCancelled =
-        errorCode === 'USER_CANCELLED' ||
-        errorCode === 'auth/popup-closed-by-user' ||
-        errMessage.toLowerCase().includes('user cancelled') ||
-        errMessage.toLowerCase().includes('user canceled');
-
-      if (isCancelled) {
-        console.log('[GoogleAuth] Sign-in cancelled by user.');
-        throw initialErr;
-      }
-
-      console.warn('[GoogleAuth Diagnostics] Initial SocialLogin.login (standard flow) error:', {
-        'Google login error code/message': `${errorCode}: ${errMessage}`,
-        'package name': packageName,
-        'runtime signing SHA-1': runtimeSha1,
-        'webClientId': webClientId,
-        'whether retry is attempted': isReauthError ? 'YES - Clearing state and retrying once' : 'NO',
-      });
-
-      if (isReauthError) {
-        retryAttempted = true;
-        console.log(
-          '[GoogleAuth Diagnostics] Error [16] Account reauth failed detected. Clearing Credential Manager state and retrying once with standard flow...'
-        );
-
-        // 3. When [16] occurs, properly clear/reset Credential Manager credential-selection state
-        try {
-          await SocialLogin.logout({ provider: 'google' });
-          console.log('[GoogleAuth] Credential Manager state reset successfully.');
-        } catch (clearErr) {
-          console.warn('[GoogleAuth] Resetting Credential Manager state notice (non-fatal):', clearErr);
-        }
-
-        // Brief delay to allow Android Credential Manager subsystem to stabilize
-        await new Promise((resolve) => setTimeout(resolve, 250));
-
-        // 4. Retry once using the standard sign-in flow
-        try {
-          loginResponse = await executeStandardLogin();
-          console.log('[GoogleAuth Diagnostics] Retry with standard account picker succeeded!');
-        } catch (retryErr: any) {
-          const retryErrMsg = retryErr?.message || String(retryErr || '');
-          const retryCodeMatch = retryErrMsg.match(/\[(\d+)\]/);
-          const retryCode = retryErr?.code || (retryCodeMatch ? `[${retryCodeMatch[1]}]` : errorCode);
-
-          console.error('[GoogleAuth Diagnostics] Google Sign-In retry failed:', {
-            'Google login error code/message': `${retryCode}: ${retryErrMsg}`,
-            'package name': packageName,
-            'runtime signing SHA-1': runtimeSha1,
-            'playAppSigningSha1': diag.playAppSigningSha1,
-            'uploadKeySha1': diag.uploadKeySha1,
-            'webClientId': webClientId,
-            'whether retry is attempted': 'YES - Attempted fallback retry with standard picker; both failed',
-            'isRegisteredFingerprint': diag.isRegisteredFingerprint,
-          });
-
-          // 6. Return a clean user-facing error instead of leaving the login flow stuck
-          throw new Error('Google Sign-In re-authentication failed. Please ensure your device has internet access and tap Sign in with Google to select your account again.');
-        }
-      } else {
-        console.error('[GoogleAuth Diagnostics] Native Google Sign-In non-reauth error:', {
-          'Google login error code/message': `${errorCode}: ${errMessage}`,
-          'package name': packageName,
-          'runtime signing SHA-1': runtimeSha1,
-          'webClientId': webClientId,
-          'whether retry is attempted': 'NO (non-reauth error)',
-        });
-        throw initialErr;
-      }
-    }
-
-    const result = loginResponse?.result || loginResponse;
+    const result = (response as any)?.result || response;
     const idToken = result?.idToken;
-    const hasIdToken = Boolean(idToken);
-
-    console.log('[GoogleAuth Diagnostics] Native Google Sign-In token received:', {
-      'Google login error code/message': 'SUCCESS [0]',
-      'package name': packageName,
-      'runtime signing SHA-1': runtimeSha1,
-      'webClientId': webClientId,
-      'whether retry is attempted': retryAttempted ? 'YES (succeeded on retry)' : 'NO (succeeded on first attempt)',
-      'whether an idToken was returned': hasIdToken,
-      'responseType': result?.responseType || 'online',
-    });
 
     if (!idToken) {
-      console.error('[GoogleAuth Diagnostics] No idToken in login result:', result);
-      throw new Error('Google Sign-In completed natively, but no ID token was returned.');
+      console.error('[GoogleAuth] No ID token returned in Google login response:', result);
+      throw new Error('Google Sign-In completed, but no ID token was returned.');
     }
 
-    console.log('[GoogleAuth] Passing idToken to Firebase GoogleAuthProvider.credential()...');
+    console.log('[GoogleAuth] ID token received. Authenticating with Firebase signInWithCredential...');
     const credential = GoogleAuthProvider.credential(idToken);
-
-    console.log('[GoogleAuth] Authenticating with Firebase signInWithCredential...');
-    try {
-      const userCredential = await signInWithCredential(auth, credential);
-      console.log('[GoogleAuth Diagnostics] Firebase sign-in result:', {
-        'status': 'SUCCESS',
-        'Google login error code/message': 'AUTH_SUCCESS',
-        'package name': packageName,
-        'runtime signing SHA-1': runtimeSha1,
-        'webClientId': webClientId,
-        'whether retry is attempted': retryAttempted,
-        'whether an idToken was returned': true,
-        'uid': userCredential.user.uid,
-        'email': userCredential.user.email,
-      });
-      return userCredential.user;
-    } catch (fbErr: any) {
-      console.error('[GoogleAuth Diagnostics] Firebase sign-in result:', {
-        'status': 'FAILED',
-        'Google login error code/message': fbErr?.code || 'FIREBASE_AUTH_ERROR',
-        'package name': packageName,
-        'runtime signing SHA-1': runtimeSha1,
-        'webClientId': webClientId,
-        'whether retry is attempted': retryAttempted,
-        'whether an idToken was returned': true,
-        'errorMessage': fbErr?.message || String(fbErr),
-      });
-      throw fbErr;
-    }
+    const userCredential = await signInWithCredential(auth, credential);
+    console.log('[GoogleAuth] Firebase authentication successful. User:', userCredential.user.uid);
+    return userCredential.user;
   } else {
-    console.log('[GoogleAuth] Web platform: launching Firebase signInWithPopup...');
+    console.log('[GoogleAuth] Web platform: Launching Firebase signInWithPopup...');
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
   }
@@ -376,7 +182,7 @@ export async function signOutUser(): Promise<void> {
     try {
       await SocialLogin.logout({ provider: 'google' });
     } catch (e) {
-      console.warn('SocialLogin native logout non-critical error:', e);
+      console.warn('[GoogleAuth] Native SocialLogin logout notice:', e);
     }
   }
   await fbSignOut(auth);

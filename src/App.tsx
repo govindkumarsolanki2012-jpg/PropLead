@@ -107,10 +107,10 @@ export function App() {
     return () => clearTimeout(safetyTimer);
   }, []);
 
-  // Pre-warm native Android Google authentication on startup
+  // Pre-initialize native Google Credential Manager on Android startup
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
-      initSocialLogin().catch((e) => console.debug('Native Google Auth init:', e));
+      initSocialLogin().catch((err) => console.debug('[GoogleAuth] Pre-init error:', err));
     }
   }, []);
 
