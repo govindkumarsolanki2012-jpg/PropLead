@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import {
-  Search,
   Plus,
   Filter,
   Building,
@@ -273,26 +272,6 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
             </button>
           </div>
         )}
-
-        {/* Search Input Bar */}
-        <div className="relative mb-2.5">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t('prop_search_placeholder')}
-            className="w-full pl-9 pr-8 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
 
         {/* Horizontal Quick Filter Pills */}
         <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-1 text-xs font-semibold">

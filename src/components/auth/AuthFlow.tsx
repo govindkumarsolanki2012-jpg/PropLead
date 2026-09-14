@@ -98,7 +98,7 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
             Property Agent Lead & Follow-up Tracker
           </p>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
-            Close property deals faster with intelligent lead tracking, automated matching, and multi-device cloud sync.
+            Smart lead tracking for property agents.
           </p>
         </div>
 

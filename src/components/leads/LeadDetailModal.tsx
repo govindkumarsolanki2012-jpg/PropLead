@@ -45,7 +45,8 @@ import {
   REQUIREMENT_TYPE_LABELS,
   PROPERTY_TYPE_LABELS,
 } from '../../utils/formatters';
-import { openDialer, copyUnicodeTextToClipboard } from '../../utils/whatsapp';
+import { openDialer } from '../../utils/whatsapp';
+import { shareLead } from '../../utils/leadSharing';
 import { VoiceNoteRecorder } from './VoiceNoteRecorder';
 import { LeadAttachmentManager } from './LeadAttachmentManager';
 import {
@@ -199,24 +200,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   };
 
   const handleShareLead = async () => {
-    const text = `📋 PropLead Client Card:
-👤 Name: ${lead.name}
-📞 Phone: ${lead.phone}
-🏢 Requirement: ${lead.requirement.toUpperCase()} ${lead.bhk || ''} (${PROPERTY_TYPE_LABELS[lead.propertyType]})
-💰 Budget: ${formatBudgetRange(lead.budgetMin, lead.budgetMax)}
-📍 Target Location: ${lead.preferredLocations.join(', ') || lead.preferredCity || 'Any'}
-📝 Notes: ${lead.notes || 'None'}`;
-
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: `${lead.name} - Property Requirement`, text });
-        return;
-      } catch {
-        // Fallback to clipboard
-      }
-    }
-    await copyUnicodeTextToClipboard(text);
-    alert('Lead summary copied to clipboard with emojis & formatting!');
+    await shareLead(lead);
   };
 
   return (

@@ -11,6 +11,8 @@ import { PropertiesList } from './components/properties/PropertiesList';
 import { CalendarView } from './components/calendar/CalendarView';
 import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { SettingsView } from './components/settings/SettingsView';
+import { SplashScreen } from './components/common/SplashScreen';
+import { AnimatePresence } from 'motion/react';
 
 // Modals
 import { QuickAddLeadModal } from './components/leads/QuickAddLeadModal';
@@ -83,6 +85,16 @@ const checkHasActiveSession = (): boolean => {
 };
 
 export function App() {
+  // WhatsApp / YouTube style clean 1.5-second smooth splash screen
+  const [isSplashActive, setIsSplashActive] = useState<boolean>(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsSplashActive(false);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Firebase Authentication coordination
   const [isAuthResolved, setIsAuthResolved] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(() => getCurrentUser());
@@ -191,6 +203,7 @@ export function App() {
   const appStateRef = useRef({
     currentUser,
     isUserAuthenticated,
+    isSplashActive,
     currentTab,
     tabHistory,
     isQuickAddOpen,
@@ -211,6 +224,7 @@ export function App() {
     appStateRef.current = {
       currentUser,
       isUserAuthenticated,
+      isSplashActive,
       currentTab,
       tabHistory,
       isQuickAddOpen,
@@ -232,8 +246,8 @@ export function App() {
   const handleBack = useCallback(() => {
     const s = appStateRef.current;
 
-    // If not authenticated, back exits the app
-    if (!s.isUserAuthenticated) {
+    // If during splash or not authenticated, back exits the app
+    if (s.isSplashActive || !s.isUserAuthenticated) {
       if (Capacitor.isNativePlatform()) {
         CapApp.exitApp();
       } else {
@@ -724,6 +738,15 @@ export function App() {
     }
   };
 
+  const handleOpenEditProperty = (propertyToEdit: Property) => {
+    guardLockedFeature('Edit Property', () => {
+      // Dismiss the Property Detail view first so two competing modal layers do not remain open
+      setDetailProperty(null);
+      // Immediately open the Edit Property view as the active foreground view
+      setEditProperty(propertyToEdit);
+    });
+  };
+
   const handleScheduleFollowUp = (
     leadId: string,
     date: string,
@@ -816,6 +839,11 @@ export function App() {
 
   return (
     <MobileFrame>
+      {/* WhatsApp / YouTube style clean animated splash screen */}
+      <AnimatePresence>
+        {isSplashActive && <SplashScreen key="app-launch-splash" />}
+      </AnimatePresence>
+
       {/* Toast Notification */}
       {toastMessage && (
         <div
@@ -1062,19 +1090,7 @@ export function App() {
         />
       )}
 
-      {/* 2. Edit Property Modal */}
-      {editProperty && (
-        <EditPropertyModal
-          key={editProperty.id}
-          isOpen={Boolean(editProperty)}
-          onClose={() => setEditProperty(null)}
-          property={editProperty}
-          onSaveProperty={handleUpdateProperty}
-          onSave={handleUpdateProperty}
-        />
-      )}
-
-      {/* 3. Property Detail Modal */}
+      {/* 2. Property Detail Modal */}
       {detailProperty && (
         <PropertyDetailModal
           isOpen={Boolean(detailProperty)}
@@ -1084,14 +1100,26 @@ export function App() {
           profile={profile}
           onUpdateProperty={handleUpdateProperty}
           onDeleteProperty={handleDeleteProperty}
-          onOpenEditModal={(prop) => guardLockedFeature('Edit Property', () => setEditProperty(prop))}
-          onOpenEdit={(prop) => guardLockedFeature('Edit Property', () => setEditProperty(prop))}
+          onOpenEditModal={handleOpenEditProperty}
+          onOpenEdit={handleOpenEditProperty}
           onOpenShareModal={(prop, lead) =>
             setSharePropertyData({ property: prop, preselectedLead: lead })
           }
           onShareToLead={(prop, lead) =>
             setSharePropertyData({ property: prop, preselectedLead: lead })
           }
+        />
+      )}
+
+      {/* 3. Edit Property Modal */}
+      {editProperty && (
+        <EditPropertyModal
+          key={editProperty.id}
+          isOpen={Boolean(editProperty)}
+          onClose={() => setEditProperty(null)}
+          property={editProperty}
+          onSaveProperty={handleUpdateProperty}
+          onSave={handleUpdateProperty}
         />
       )}
 
