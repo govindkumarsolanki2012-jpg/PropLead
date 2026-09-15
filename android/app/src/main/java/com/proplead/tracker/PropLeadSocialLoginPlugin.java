@@ -80,7 +80,7 @@ public class PropLeadSocialLoginPlugin extends Plugin {
 
         // Pass the foreground Activity, not the application Context: Credential
         // Manager may need to present account-selection or reauthentication UI.
-        credentialManager.getCredentialAsync(
+        activity.runOnUiThread(() -> credentialManager.getCredentialAsync(
             activity,
             request,
             null,
@@ -107,7 +107,7 @@ public class PropLeadSocialLoginPlugin extends Plugin {
                     call.reject("Google Sign-In failed: " + message, error);
                 }
             }
-        );
+        ));
     }
 
     private void resolveGoogleCredential(PluginCall call, GetCredentialResponse response) {
