@@ -54,17 +54,18 @@ interface PropLeadSocialLoginPlugin {
   logout(): Promise<void>;
 }
 
-// Android uses the app-owned bridge. The similarly named Capgo plugin remains
-// installed for other native features but is never invoked by this auth path.
+// Android uses the app-owned bridge. The Capgo SocialLogin plugin remains
+// installed but is never invoked by this auth path.
 const PropLeadSocialLogin = registerPlugin<PropLeadSocialLoginPlugin>('PropLeadSocialLogin');
 
+const isNativeAndroid = () => Capacitor.getPlatform() === 'android';
 let isSocialLoginInitialized = false;
 
 /**
  * Initializes the app-owned Android Google Credential Manager bridge.
  */
 export async function initSocialLogin(): Promise<void> {
-  if (isSocialLoginInitialized || !Capacitor.isNativePlatform()) {
+  if (isSocialLoginInitialized || !isNativeAndroid()) {
     return;
   }
   try {
@@ -105,7 +106,7 @@ export function subscribeToAuth(callback: (user: FirebaseUser | null) => void): 
  * - On Web / Preview: Uses standard Firebase signInWithPopup.
  */
 export async function signInWithGoogle(): Promise<FirebaseUser> {
-  if (Capacitor.isNativePlatform()) {
+  if (isNativeAndroid()) {
     await initSocialLogin();
 
     console.log('[GoogleAuth] Launching Google Credential Manager standard sign-in flow...');
@@ -193,7 +194,7 @@ export async function signInWithDeveloperAccount(): Promise<FirebaseUser> {
 export const signInWithTestAccount = signInWithDeveloperAccount;
 
 export async function signOutUser(): Promise<void> {
-  if (Capacitor.isNativePlatform()) {
+  if (isNativeAndroid()) {
     try {
       await PropLeadSocialLogin.logout();
     } catch (e) {
