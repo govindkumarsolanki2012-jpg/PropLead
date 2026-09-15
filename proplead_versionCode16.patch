@@ -1,0 +1,20 @@
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -10,2 +10,2 @@
+-        versionCode 15
+-        versionName "1.2.15"
++        versionCode 16
++        versionName "1.2.16"
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -4,1 +4,1 @@
+-  "version": "1.0.15",
++  "version": "1.0.16",
+diff --git a/android/app/google-services.json b/android/app/google-services.json
+--- a/android/app/google-services.json
++++ b/android/app/google-services.json
+@@ -17,1 +17,1 @@
+-          "client_id": "36803800158-2o3v7cficijapngr05artpm9r2mchv8s.apps.googleusercontent.com",
++          "client_id": "36803800158-tsvu01f333o93ehelo1bqsbr0ddpo3oj.apps.googleusercontent.com",
