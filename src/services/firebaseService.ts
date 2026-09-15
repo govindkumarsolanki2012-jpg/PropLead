@@ -95,7 +95,12 @@ const DEMO_PROP_IDS = new Set([
 export type { ConfirmationResult, RecaptchaVerifier };
 
 export function subscribeToAuth(callback: (user: FirebaseUser | null) => void): Unsubscribe {
-  return onAuthStateChanged(auth, callback);
+  return onAuthStateChanged(auth, (user) => {
+    if (isNativeAndroid()) {
+      console.info('[GoogleAuth] auth_state_received', { authenticated: Boolean(user) });
+    }
+    callback(user);
+  });
 }
 
 /**
@@ -112,20 +117,36 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
     console.log('[GoogleAuth] Launching Google Credential Manager standard sign-in flow...');
     const response = await PropLeadSocialLogin.login({
       provider: 'google',
+    }).catch((error: unknown) => {
+      const cancelled = (error as { code?: string } | null)?.code === 'USER_CANCELLED';
+      console.info('[GoogleAuth] native_login_rejected', { cancelled });
+      throw error;
+    });
+    console.info('[GoogleAuth] native_login_resolved', {
+      hasResult: Boolean(response?.result),
+      hasIdToken: typeof response?.result?.idToken === 'string' && response.result.idToken.length > 0,
     });
 
     const result = (response as any)?.result || response;
     const idToken = result?.idToken;
 
     if (!idToken) {
-      console.error('[GoogleAuth] No ID token returned in Google login response:', result);
+      console.error('[GoogleAuth] native_login_missing_id_token');
       throw new Error('Google Sign-In completed, but no ID token was returned.');
     }
 
     console.log('[GoogleAuth] ID token received. Authenticating with Firebase signInWithCredential...');
     const credential = GoogleAuthProvider.credential(idToken);
-    const userCredential = await signInWithCredential(auth, credential);
-    console.log('[GoogleAuth] Firebase authentication successful. User:', userCredential.user.uid);
+    console.info('[GoogleAuth] firebase_credential_created');
+    const userCredential = await signInWithCredential(auth, credential).catch((error: unknown) => {
+      // Record only a Firebase error code, never credentials or the error payload.
+      const code = (error as { code?: unknown } | null)?.code;
+      console.info('[GoogleAuth] firebase_sign_in_rejected', {
+        code: typeof code === 'string' && /^auth\/[a-z-]+$/.test(code) ? code : 'unknown',
+      });
+      throw error;
+    });
+    console.info('[GoogleAuth] firebase_sign_in_resolved', { authenticated: Boolean(userCredential.user) });
     return userCredential.user;
   } else {
     console.log('[GoogleAuth] Web platform: Launching Firebase signInWithPopup...');
