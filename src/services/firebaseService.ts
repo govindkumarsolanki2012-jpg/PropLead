@@ -33,31 +33,50 @@ import {
   signInWithCredential,
   GoogleAuthProvider,
 } from 'firebase/auth';
-import { Capacitor } from '@capacitor/core';
-import { SocialLogin } from '@capgo/capacitor-social-login';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Lead, Property, UserProfile, WhatsAppTemplate } from '../types';
 
 export const GOOGLE_WEB_CLIENT_ID =
   '36803800158-f1e83pmo78ge5gpiosi9buukrbi6if7m.apps.googleusercontent.com';
 
+interface PropLeadSocialLoginPlugin {
+  initialize(options: {
+    google: {
+      webClientId: string;
+      mode: 'online';
+    };
+  }): Promise<void>;
+  login(options: { provider: 'google' }): Promise<{
+    result: {
+      idToken: string;
+    };
+  }>;
+  logout(): Promise<void>;
+}
+
+// Android uses the app-owned bridge. The Capgo SocialLogin plugin remains
+// installed but is never invoked by this auth path.
+const PropLeadSocialLogin = registerPlugin<PropLeadSocialLoginPlugin>('PropLeadSocialLogin');
+
+const isNativeAndroid = () => Capacitor.getPlatform() === 'android';
 let isSocialLoginInitialized = false;
 
 /**
- * Initializes the SocialLogin plugin with Google Credential Manager configuration.
+ * Initializes the app-owned Android Google Credential Manager bridge.
  */
 export async function initSocialLogin(): Promise<void> {
-  if (isSocialLoginInitialized || !Capacitor.isNativePlatform()) {
+  if (isSocialLoginInitialized || !isNativeAndroid()) {
     return;
   }
   try {
-    await SocialLogin.initialize({
+    await PropLeadSocialLogin.initialize({
       google: {
         webClientId: GOOGLE_WEB_CLIENT_ID,
         mode: 'online',
       },
     });
     isSocialLoginInitialized = true;
-    console.log('[GoogleAuth] Native SocialLogin initialized with Credential Manager.');
+    console.log('[GoogleAuth] Native PropLead Google bridge initialized with Credential Manager.');
   } catch (err) {
     console.error('[GoogleAuth] Error initializing native SocialLogin:', err);
   }
@@ -81,21 +100,18 @@ export function subscribeToAuth(callback: (user: FirebaseUser | null) => void): 
 
 /**
  * Signs in with Google:
- * - On Native Android: Uses Android Credential Manager via @capgo/capacitor-social-login,
- *   retrieves the Google ID token using the Web Client ID,
+ * - On Native Android: Uses the app-owned Credential Manager bridge with the
+ *   foreground Activity and GetSignInWithGoogleOption to retrieve the Google ID token,
  *   and authenticates with Firebase using GoogleAuthProvider.credential(idToken) and signInWithCredential().
  * - On Web / Preview: Uses standard Firebase signInWithPopup.
  */
 export async function signInWithGoogle(): Promise<FirebaseUser> {
-  if (Capacitor.isNativePlatform()) {
+  if (isNativeAndroid()) {
     await initSocialLogin();
 
     console.log('[GoogleAuth] Launching Google Credential Manager standard sign-in flow...');
-    const response = await SocialLogin.login({
+    const response = await PropLeadSocialLogin.login({
       provider: 'google',
-      options: {
-        style: 'standard',
-      },
     });
 
     const result = (response as any)?.result || response;
@@ -178,11 +194,11 @@ export async function signInWithDeveloperAccount(): Promise<FirebaseUser> {
 export const signInWithTestAccount = signInWithDeveloperAccount;
 
 export async function signOutUser(): Promise<void> {
-  if (Capacitor.isNativePlatform()) {
+  if (isNativeAndroid()) {
     try {
-      await SocialLogin.logout({ provider: 'google' });
+      await PropLeadSocialLogin.logout();
     } catch (e) {
-      console.warn('[GoogleAuth] Native SocialLogin logout notice:', e);
+      console.warn('[GoogleAuth] Native Google bridge logout notice:', e);
     }
   }
   await fbSignOut(auth);

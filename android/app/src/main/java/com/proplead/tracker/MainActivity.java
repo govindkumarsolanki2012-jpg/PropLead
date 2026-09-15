@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(DocumentOpenerPlugin.class);
         registerPlugin(CsvDownloadPlugin.class);
+        registerPlugin(PropLeadSocialLoginPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
