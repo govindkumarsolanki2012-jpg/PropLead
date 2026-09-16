@@ -12,6 +12,12 @@ import {
   FlaskConical,
 } from 'lucide-react';
 import { signInWithGoogle, signInWithDeveloperAccount } from '../../services/firebaseService';
+import { GoogleAuthDiagnosticPanel } from './GoogleAuthDiagnosticPanel';
+import {
+  reportGoogleAuthDiagnostic,
+  resetGoogleAuthDiagnostics,
+  safeGoogleAuthError,
+} from '../../utils/googleAuthDiagnostics';
 
 interface AuthFlowProps {
   onSuccess?: () => void;
@@ -37,6 +43,12 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
 
   const handleGoogleSignIn = async () => {
     setErrorMessage(null);
+    resetGoogleAuthDiagnostics();
+    reportGoogleAuthDiagnostic({
+      stage: 1,
+      status: 'success',
+      detail: 'Google button clicked',
+    });
     try {
       setLoading(true);
       // Authoritative Firebase Google Authentication
@@ -45,6 +57,14 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
       // syncs/initializes the Firestore profile and 7-day trial, and opens the Dashboard.
     } catch (err: any) {
       console.error('[AuthFlow] Google sign-in error:', err);
+      const safeError = safeGoogleAuthError(err);
+      reportGoogleAuthDiagnostic({
+        stage: 13,
+        status: 'failed',
+        detail: 'Final state: not authenticated',
+        errorCode: safeError.code,
+        errorMessage: safeError.message,
+      });
       const msg = err?.message || String(err || '');
       const isTechnicalError =
         msg.includes('16') ||
@@ -197,6 +217,9 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
           <p className="text-center text-[11px] text-slate-400 dark:text-slate-500">
             One tap to sign in to your existing account or create a new account.
           </p>
+
+          {/* TEMPORARY INTERNAL-TESTING UI: remove after Google Sign-In is fixed. */}
+          <GoogleAuthDiagnosticPanel />
 
           {/* DEVELOPER / TEST LOGIN BUTTON */}
           <div className="pt-3 border-t border-dashed border-amber-300 dark:border-amber-700/60">
