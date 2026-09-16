@@ -8,9 +8,11 @@ import androidx.core.content.ContextCompat;
 import androidx.credentials.Credential;
 import androidx.credentials.CredentialManager;
 import androidx.credentials.CredentialManagerCallback;
+import androidx.credentials.ClearCredentialStateRequest;
 import androidx.credentials.CustomCredential;
 import androidx.credentials.GetCredentialRequest;
 import androidx.credentials.GetCredentialResponse;
+import androidx.credentials.exceptions.ClearCredentialException;
 import androidx.credentials.exceptions.GetCredentialCancellationException;
 import androidx.credentials.exceptions.GetCredentialException;
 
@@ -28,7 +30,7 @@ import java.util.concurrent.Executor;
  * Android-only Google Sign-In bridge for PropLead.
  *
  * It deliberately uses the foreground Capacitor Activity for Credential Manager's
- * UI request and performs exactly one sign-in attempt. Firebase owns the session;
+ * UI request and performs at most one account-reauth recovery attempt. Firebase owns the session;
  * this bridge returns only the Google ID token needed by the web layer.
  */
 @CapacitorPlugin(name = "PropLeadSocialLogin")
@@ -104,9 +106,25 @@ public class PropLeadSocialLoginPlugin extends Plugin {
         final CredentialManager credentialManager = CredentialManager.create(activity);
         final Executor mainExecutor = ContextCompat.getMainExecutor(activity);
 
+        requestGoogleCredential(call, activity, credentialManager, request, mainExecutor, false);
+    }
+
+    private void requestGoogleCredential(
+        PluginCall call,
+        Activity activity,
+        CredentialManager credentialManager,
+        GetCredentialRequest request,
+        Executor mainExecutor,
+        boolean isReauthRetry
+    ) {
+        String requestStage = isReauthRetry
+            ? "RETRY_CREDENTIAL_REQUEST_STARTED"
+            : "INITIAL_CREDENTIAL_REQUEST_STARTED";
+        Log.i(LOG_TAG, requestStage);
+        diagnostic(3, "pending", requestStage, null, null);
+
         // Pass the foreground Activity, not the application Context: Credential
         // Manager may need to present account-selection or reauthentication UI.
-        Log.i(LOG_TAG, "credential_request_started");
         activity.runOnUiThread(() -> credentialManager.getCredentialAsync(
             activity,
             request,
@@ -116,6 +134,9 @@ public class PropLeadSocialLoginPlugin extends Plugin {
                 @Override
                 public void onResult(@NonNull GetCredentialResponse response) {
                     Log.i(LOG_TAG, "credential_success_callback");
+                    if (isReauthRetry) {
+                        diagnostic(3, "success", "RETRY_CREDENTIAL_SUCCESS", null, null);
+                    }
                     diagnostic(3, "success", "Credential Manager callback received", null, null);
                     resolveGoogleCredential(call, response);
                 }
@@ -123,26 +144,107 @@ public class PropLeadSocialLoginPlugin extends Plugin {
                 @Override
                 public void onError(@NonNull GetCredentialException error) {
                     Log.i(LOG_TAG, "credential_error_callback: " + error.getClass().getSimpleName());
+                    if (isAccountReauthFailed(error)) {
+                        handleAccountReauthFailure(
+                            call,
+                            activity,
+                            credentialManager,
+                            request,
+                            mainExecutor,
+                            isReauthRetry,
+                            error
+                        );
+                        return;
+                    }
+
+                    if (error instanceof GetCredentialCancellationException) {
+                        diagnostic(3, "failed", "USER_CANCELLED", "USER_CANCELLED",
+                            "Google Sign-In was cancelled.");
+                        diagnostic(7, "failed", "Native Capacitor call rejected", "USER_CANCELLED",
+                            "The native Google Sign-In request was cancelled.");
+                        call.reject("Google Sign-In cancelled by user.", "USER_CANCELLED", error);
+                        return;
+                    }
+
                     String safeCode = error.getClass().getSimpleName();
                     diagnostic(3, "failed", "Credential Manager error callback received", safeCode,
                         "Credential Manager did not return a credential.");
                     diagnostic(7, "failed", "Native Capacitor call rejected", safeCode,
                         "The native Google Sign-In request was rejected.");
-                    String message = error.getMessage();
-                    if (message == null || message.isEmpty()) {
-                        message = error.getClass().getSimpleName();
-                    }
-
-                    if (error instanceof GetCredentialCancellationException) {
-                        call.reject("Google Sign-In cancelled by user.", "USER_CANCELLED", error);
-                        return;
-                    }
-
-                    Log.e(LOG_TAG, "Credential Manager Google sign-in failed: " + message, error);
-                    call.reject("Google Sign-In failed: " + message, error);
+                    Log.e(LOG_TAG, "Credential Manager Google sign-in failed.", error);
+                    call.reject("Google Sign-In failed.", safeCode, error);
                 }
             }
         ));
+    }
+
+    private boolean isAccountReauthFailed(GetCredentialException error) {
+        String message = error.getMessage();
+        return message != null && message.toLowerCase(java.util.Locale.ROOT)
+            .contains("account reauth failed");
+    }
+
+    private void handleAccountReauthFailure(
+        PluginCall call,
+        Activity activity,
+        CredentialManager credentialManager,
+        GetCredentialRequest request,
+        Executor mainExecutor,
+        boolean isReauthRetry,
+        GetCredentialException error
+    ) {
+        if (isReauthRetry) {
+            diagnostic(3, "failed", "RETRY_ACCOUNT_REAUTH_FAILED", "ACCOUNT_REAUTH_FAILED",
+                "Google account re-authentication failed after one retry.");
+            diagnostic(7, "failed", "Native Capacitor call rejected", "ACCOUNT_REAUTH_FAILED",
+                "Google account re-authentication failed after one retry.");
+            call.reject(
+                "Google Sign-In failed after the account re-authentication retry.",
+                "ACCOUNT_REAUTH_FAILED",
+                error
+            );
+            return;
+        }
+
+        diagnostic(3, "failed", "INITIAL_ACCOUNT_REAUTH_FAILED", "ACCOUNT_REAUTH_FAILED",
+            "Google account re-authentication failed on the initial request.");
+        diagnostic(3, "pending", "CREDENTIAL_STATE_CLEAR_STARTED", null, null);
+        Log.i(LOG_TAG, "CREDENTIAL_STATE_CLEAR_STARTED");
+
+        credentialManager.clearCredentialStateAsync(
+            new ClearCredentialStateRequest(),
+            null,
+            mainExecutor,
+            new CredentialManagerCallback<Void, ClearCredentialException>() {
+                @Override
+                public void onResult(Void unused) {
+                    Log.i(LOG_TAG, "CREDENTIAL_STATE_CLEAR_SUCCESS");
+                    diagnostic(3, "success", "CREDENTIAL_STATE_CLEAR_SUCCESS", null, null);
+                    requestGoogleCredential(
+                        call,
+                        activity,
+                        credentialManager,
+                        request,
+                        mainExecutor,
+                        true
+                    );
+                }
+
+                @Override
+                public void onError(@NonNull ClearCredentialException clearError) {
+                    Log.e(LOG_TAG, "Credential Manager state clear failed.", clearError);
+                    diagnostic(3, "failed", "CREDENTIAL_STATE_CLEAR_FAILED",
+                        "CREDENTIAL_STATE_CLEAR_FAILED", "Credential Manager state could not be cleared.");
+                    diagnostic(7, "failed", "Native Capacitor call rejected",
+                        "CREDENTIAL_STATE_CLEAR_FAILED", "Credential Manager recovery could not start.");
+                    call.reject(
+                        "Google Sign-In recovery failed while clearing credential state.",
+                        "CREDENTIAL_STATE_CLEAR_FAILED",
+                        clearError
+                    );
+                }
+            }
+        );
     }
 
     private void resolveGoogleCredential(PluginCall call, GetCredentialResponse response) {
@@ -177,6 +279,7 @@ public class PropLeadSocialLoginPlugin extends Plugin {
                 return;
             }
             diagnostic(6, "success", "ID token received: YES", null, null);
+            diagnostic(6, "success", "ID_TOKEN_RECEIVED", null, null);
 
             JSObject result = new JSObject();
             result.put("idToken", idToken);
