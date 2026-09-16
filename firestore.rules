@@ -21,20 +21,20 @@ service cloud.firestore {
       allow create: if isOwner(userId) && 
         (!('isSubscribed' in request.resource.data) || request.resource.data.isSubscribed == false || request.resource.data.subscriptionStatus == 'TRIAL');
 
-      // Update: user can update profile details (name, agency, phone, city, rera, etc.)
-      // Prevent client-side arbitrary tampering of active subscription state
+      // Update: user can update profile details (name, agency, phone, city, rera, trial dates, preferences, etc.)
+      // Prevent client-side unauthorized privilege escalation to active paid subscription:
+      // An unsubscribed user cannot unilaterally grant themselves active paid subscription
       allow update: if isOwner(userId) &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'isSubscribed',
-          'subscriptionStatus',
-          'subscriptionExpiryDate',
-          'purchaseToken',
-          'orderId',
-          'trialStartDate',
-          'trialEndDate',
-          'subscriptionProductId',
-          'subscriptionBasePlan'
-        ]);
+        (
+          !('isSubscribed' in request.resource.data) ||
+          request.resource.data.isSubscribed == false ||
+          (resource.data.isSubscribed == true)
+        ) &&
+        (
+          !('subscriptionStatus' in request.resource.data) ||
+          request.resource.data.subscriptionStatus != 'ACTIVE' ||
+          resource.data.subscriptionStatus == 'ACTIVE'
+        );
 
       // Delete: only the owner can delete their own account
       allow delete: if isOwner(userId);

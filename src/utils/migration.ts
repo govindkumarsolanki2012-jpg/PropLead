@@ -17,6 +17,16 @@ const DEMO_PROP_IDS = new Set([
   'prop_201', 'prop_202', 'prop_203', 'prop_204', 'prop_205', 'prop_206', 'prop_207', 'prop_208'
 ]);
 
+function cleanFirestorePayload<T extends Record<string, any>>(obj: T): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 /**
  * Safely migrates existing device localStorage leads, properties, and profile
  * to the authenticated agent's Firestore cloud container.
@@ -36,6 +46,15 @@ export async function syncLocalDataToFirestore(
   const migrationKey = `proplead_migrated_v1_${userId}`;
 
   try {
+    // Check if user already migrated on this device to avoid redundant operations
+    if (typeof window !== 'undefined' && localStorage.getItem(migrationKey) === 'true') {
+      return {
+        migrated: true,
+        leadsUploaded: 0,
+        propertiesUploaded: 0,
+      };
+    }
+
     // 1. Check if user profile already exists in Firestore
     const userDocRef = doc(db, 'users', userId);
     const userSnap = await getDoc(userDocRef);
@@ -99,7 +118,7 @@ export async function syncLocalDataToFirestore(
         subscriptionStatus: 'TRIAL',
         isSubscribed: false,
       };
-      batch.set(userDocRef, mergedProfile, { merge: true });
+      batch.set(userDocRef, cleanFirestorePayload(mergedProfile), { merge: true });
       batchOperations++;
     }
 
@@ -108,7 +127,7 @@ export async function syncLocalDataToFirestore(
     for (const lead of validLocalLeads) {
       if (!existingLeadIds.has(lead.id)) {
         const leadRef = doc(db, 'users', userId, 'leads', lead.id);
-        batch.set(leadRef, lead, { merge: true });
+        batch.set(leadRef, cleanFirestorePayload(lead), { merge: true });
         leadsToUpload++;
         batchOperations++;
       }
@@ -119,7 +138,7 @@ export async function syncLocalDataToFirestore(
     for (const property of validLocalProperties) {
       if (!existingPropIds.has(property.id)) {
         const propRef = doc(db, 'users', userId, 'properties', property.id);
-        batch.set(propRef, property, { merge: true });
+        batch.set(propRef, cleanFirestorePayload(property), { merge: true });
         propsToUpload++;
         batchOperations++;
       }
@@ -129,7 +148,9 @@ export async function syncLocalDataToFirestore(
       await batch.commit();
     }
 
-    localStorage.setItem(migrationKey, 'true');
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(migrationKey, 'true');
+    }
 
     return {
       migrated: true,

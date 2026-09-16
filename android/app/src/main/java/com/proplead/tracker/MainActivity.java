@@ -11,6 +11,9 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(CsvDownloadPlugin.class);
         registerPlugin(PropLeadSocialLoginPlugin.class);
         super.onCreate(savedInstanceState);
+        if (bridge != null) {
+            bridge.registerPlugin(PropLeadSocialLoginPlugin.class);
+        }
     }
 }
 
