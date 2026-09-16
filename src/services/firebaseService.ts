@@ -35,6 +35,11 @@ import {
 } from 'firebase/auth';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Lead, Property, UserProfile, WhatsAppTemplate } from '../types';
+import {
+  isGoogleAuthDiagnosticsActive,
+  reportGoogleAuthDiagnostic,
+  safeGoogleAuthError,
+} from '../utils/googleAuthDiagnostics';
 
 export const GOOGLE_WEB_CLIENT_ID =
   '36803800158-f1e83pmo78ge5gpiosi9buukrbi6if7m.apps.googleusercontent.com';
@@ -52,6 +57,16 @@ interface PropLeadSocialLoginPlugin {
     };
   }>;
   logout(): Promise<void>;
+  addListener(
+    eventName: 'googleAuthDiagnostic',
+    listener: (event: {
+      stage: number;
+      status: 'pending' | 'success' | 'failed' | 'info';
+      detail?: string;
+      errorCode?: string;
+      errorMessage?: string;
+    }) => void
+  ): Promise<{ remove: () => Promise<void> }>;
 }
 
 // Android uses the app-owned bridge. The Capgo SocialLogin plugin remains
@@ -60,6 +75,16 @@ const PropLeadSocialLogin = registerPlugin<PropLeadSocialLoginPlugin>('PropLeadS
 
 const isNativeAndroid = () => Capacitor.getPlatform() === 'android';
 let isSocialLoginInitialized = false;
+
+// TEMPORARY INTERNAL-TESTING DIAGNOSTICS: forwards only safe native stage metadata.
+// Remove this listener together with the login-screen diagnostic panel after Google Sign-In is fixed.
+if (isNativeAndroid()) {
+  void PropLeadSocialLogin.addListener('googleAuthDiagnostic', (event) => {
+    reportGoogleAuthDiagnostic(event);
+  }).catch(() => {
+    // Diagnostics must never alter or block the authentication flow.
+  });
+}
 
 /**
  * Initializes the app-owned Android Google Credential Manager bridge.
@@ -98,6 +123,18 @@ export function subscribeToAuth(callback: (user: FirebaseUser | null) => void): 
   return onAuthStateChanged(auth, (user) => {
     if (isNativeAndroid()) {
       console.info('[GoogleAuth] auth_state_received', { authenticated: Boolean(user) });
+      if (isGoogleAuthDiagnosticsActive()) {
+        reportGoogleAuthDiagnostic({
+          stage: 12,
+          status: 'success',
+          detail: 'Firebase auth-state listener fired',
+        });
+        reportGoogleAuthDiagnostic({
+          stage: 13,
+          status: user ? 'success' : 'failed',
+          detail: user ? 'Final state: authenticated' : 'Final state: not authenticated',
+        });
+      }
     }
     callback(user);
   });
@@ -120,7 +157,20 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
     }).catch((error: unknown) => {
       const cancelled = (error as { code?: string } | null)?.code === 'USER_CANCELLED';
       console.info('[GoogleAuth] native_login_rejected', { cancelled });
+      const safeError = safeGoogleAuthError(error);
+      reportGoogleAuthDiagnostic({
+        stage: 8,
+        status: 'failed',
+        detail: 'TypeScript received native rejection',
+        errorCode: safeError.code,
+        errorMessage: safeError.message,
+      });
       throw error;
+    });
+    reportGoogleAuthDiagnostic({
+      stage: 8,
+      status: 'success',
+      detail: 'TypeScript received native result',
     });
     console.info('[GoogleAuth] native_login_resolved', {
       hasResult: Boolean(response?.result),
@@ -138,15 +188,43 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
     console.log('[GoogleAuth] ID token received. Authenticating with Firebase signInWithCredential...');
     const credential = GoogleAuthProvider.credential(idToken);
     console.info('[GoogleAuth] firebase_credential_created');
+    reportGoogleAuthDiagnostic({
+      stage: 9,
+      status: 'success',
+      detail: 'Firebase credential created',
+    });
+    reportGoogleAuthDiagnostic({
+      stage: 10,
+      status: 'pending',
+      detail: 'Firebase signInWithCredential started',
+    });
     const userCredential = await signInWithCredential(auth, credential).catch((error: unknown) => {
       // Record only a Firebase error code, never credentials or the error payload.
       const code = (error as { code?: unknown } | null)?.code;
       console.info('[GoogleAuth] firebase_sign_in_rejected', {
         code: typeof code === 'string' && /^auth\/[a-z-]+$/.test(code) ? code : 'unknown',
       });
+      const safeError = safeGoogleAuthError(error);
+      reportGoogleAuthDiagnostic({
+        stage: 11,
+        status: 'failed',
+        detail: 'Firebase signInWithCredential failed',
+        errorCode: safeError.code,
+        errorMessage: safeError.message,
+      });
+      reportGoogleAuthDiagnostic({
+        stage: 13,
+        status: 'failed',
+        detail: 'Final state: not authenticated',
+      });
       throw error;
     });
     console.info('[GoogleAuth] firebase_sign_in_resolved', { authenticated: Boolean(userCredential.user) });
+    reportGoogleAuthDiagnostic({
+      stage: 11,
+      status: 'success',
+      detail: 'Firebase signInWithCredential succeeded',
+    });
     return userCredential.user;
   } else {
     console.log('[GoogleAuth] Web platform: Launching Firebase signInWithPopup...');
