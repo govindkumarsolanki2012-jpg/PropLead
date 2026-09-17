@@ -8,26 +8,30 @@ export const GOOGLE_PLAY_BASE_PLAN_ID = 'monthly';
 export const GOOGLE_PLAY_PRICE_TEXT = '₹49/month';
 export const GOOGLE_PLAY_PACKAGE_NAME = 'com.proplead.tracker';
 
-// Live production/cloud run backend URL for native Android Capacitor apps
-export const REMOTE_BACKEND_URL = 'https://ais-dev-gn22pp46li4njenvj2pibs-219254937828.asia-southeast1.run.app';
+// Production Cloud Run billing service endpoint
+// In Native Android (Capacitor), requests hit this public HTTPS endpoint directly (bypassing AI Studio dev cookie proxy)
+export const DEFAULT_PRODUCTION_BILLING_URL = 'https://proplead-billing-219254937828.asia-southeast1.run.app';
+
+export const REMOTE_BACKEND_URL = (
+  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_BILLING_BACKEND_URL) ||
+  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_BACKEND_URL) ||
+  DEFAULT_PRODUCTION_BILLING_URL
+).trim().replace(/\/$/, '');
 
 /**
  * Resolves the appropriate billing API endpoint URL based on runtime environment:
  * - In Android Native (Capacitor), relative paths hit the local asset scheme returning index.html.
- *   Therefore, native requests are routed to the live backend server.
- * - On Web browsers, standard relative paths (or custom VITE_BACKEND_URL) are used.
+ *   Therefore, native requests are routed to the live production Cloud Run backend server.
+ * - On Web browsers, standard relative paths /api/* (or custom VITE_BILLING_BACKEND_URL) are used.
  */
 export function getBillingApiUrl(path: string): string {
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   const customEnv = (
+    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_BILLING_BACKEND_URL) ||
     (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_BACKEND_URL) ||
     (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_URL) ||
     ''
   ).trim();
-
-  if (customEnv) {
-    return `${customEnv.replace(/\/$/, '')}${cleanPath}`;
-  }
 
   const isNative = typeof window !== 'undefined' && (
     Capacitor.isNativePlatform() ||
@@ -36,7 +40,13 @@ export function getBillingApiUrl(path: string): string {
   );
 
   if (isNative) {
-    return `${REMOTE_BACKEND_URL}${cleanPath}`;
+    const baseUrl = customEnv || REMOTE_BACKEND_URL;
+    return `${baseUrl.replace(/\/$/, '')}${cleanPath}`;
+  }
+
+  // Web / local dev environment
+  if (customEnv) {
+    return `${customEnv.replace(/\/$/, '')}${cleanPath}`;
   }
 
   return cleanPath;

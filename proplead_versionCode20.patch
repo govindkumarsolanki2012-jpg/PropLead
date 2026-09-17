@@ -6,6 +6,27 @@ diff --git a/android/app/build.gradle b/android/app/build.gradle
 -        versionName "1.2.19"
 +        versionCode 20
 +        versionName "1.2.20"
+@@ -37,2 +37,5 @@
+     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
++    implementation "androidx.credentials:credentials:$androidxCredentialsVersion"
++    implementation "androidx.credentials:credentials-play-services-auth:$androidxCredentialsVersion"
++    implementation "com.google.android.libraries.identity.googleid:googleid:$googleIdVersion"
+     implementation project(':capacitor-android')
+diff --git a/android/variables.gradle b/android/variables.gradle
+--- a/android/variables.gradle
++++ b/android/variables.gradle
+@@ -15,1 +15,3 @@
+     cordovaAndroidVersion = '14.0.1'
++    androidxCredentialsVersion = '1.5.0'
++    googleIdVersion = '1.1.1'
+ }
+diff --git a/android/gradle.properties b/android/gradle.properties
+--- a/android/gradle.properties
++++ b/android/gradle.properties
+@@ -26,3 +26,1 @@
+ socialLogin.twitter.include=false
+-systemProp.javax.net.ssl.trustStore=/usr/lib/jvm/java-17-openjdk-amd64/lib/security/cacerts
+-systemProp.javax.net.ssl.trustStorePassword=changeit
 diff --git a/package.json b/package.json
 --- a/package.json
 +++ b/package.json

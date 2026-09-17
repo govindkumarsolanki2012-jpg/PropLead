@@ -246,17 +246,19 @@ function parseServiceAccountCredentials(raw) {
 }
 var cachedDatastoreToken = null;
 async function getFirestoreServiceAccountToken() {
-  const credentials = parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY);
-  if (!credentials) return null;
   const now = Date.now();
   if (cachedDatastoreToken && now < cachedDatastoreToken.expiresAt) {
     return cachedDatastoreToken.token;
   }
+  const credentials = parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY);
   try {
-    const auth = new import_googleapis.google.auth.GoogleAuth({
-      credentials,
+    const authOptions = {
       scopes: ["https://www.googleapis.com/auth/datastore"]
-    });
+    };
+    if (credentials) {
+      authOptions.credentials = credentials;
+    }
+    const auth = new import_googleapis.google.auth.GoogleAuth(authOptions);
     const client = await auth.getClient();
     const tokenResponse = await client.getAccessToken();
     if (tokenResponse?.token) {
@@ -267,8 +269,14 @@ async function getFirestoreServiceAccountToken() {
       return tokenResponse.token;
     }
   } catch (err) {
-    console.warn("[Firestore Persistence] Service account auth error:", err);
+    console.warn("[Firestore Persistence] Service account / ADC auth warning:", err);
   }
+  return null;
+}
+async function getFirestoreWriteToken(idToken) {
+  const saToken = await getFirestoreServiceAccountToken();
+  if (saToken) return saToken;
+  if (idToken) return idToken;
   return null;
 }
 async function getFirestoreReadToken(idToken) {
@@ -279,7 +287,7 @@ async function getFirestoreReadToken(idToken) {
 }
 async function syncSubscriptionToFirestore(record, idToken) {
   try {
-    const token = await getFirestoreServiceAccountToken();
+    const token = await getFirestoreWriteToken(idToken);
     if (!token) {
       return false;
     }
@@ -296,13 +304,61 @@ async function syncSubscriptionToFirestore(record, idToken) {
     });
     if (!res.ok) {
       const errText = await res.text();
-      console.warn(`[Firestore Persistence] Write failed (${res.status}):`, errText);
+      console.warn(`[Firestore Persistence] Write to /subscriptions failed (${res.status}):`, errText);
       return false;
     }
-    console.log(`[Firestore Persistence] Persisted subscription for user ${record.userId} to Firestore.`);
+    console.log(`[Firestore Persistence] Persisted subscription for user ${record.userId} to /subscriptions.`);
     return true;
   } catch (err) {
     console.warn("[Firestore Persistence] Network error writing subscription:", err);
+    return false;
+  }
+}
+async function syncUserProfileSubscriptionToFirestore(userId, record, idToken) {
+  try {
+    const token = await getFirestoreWriteToken(idToken);
+    if (!token) {
+      console.warn(`[Firestore User Sync] No auth token available to update /users/${userId}`);
+      return false;
+    }
+    const fieldMasks = [
+      "updateMask.fieldPaths=isSubscribed",
+      "updateMask.fieldPaths=subscriptionStatus",
+      "updateMask.fieldPaths=subscriptionProductId",
+      "updateMask.fieldPaths=subscriptionBasePlan",
+      "updateMask.fieldPaths=autoRenewing",
+      "updateMask.fieldPaths=updatedAt"
+    ];
+    const fields = {
+      isSubscribed: { booleanValue: record.isSubscribed },
+      subscriptionStatus: { stringValue: record.subscriptionStatus },
+      subscriptionProductId: { stringValue: record.subscriptionProductId },
+      subscriptionBasePlan: { stringValue: record.subscriptionBasePlan },
+      autoRenewing: { booleanValue: record.autoRenewing },
+      updatedAt: { stringValue: (/* @__PURE__ */ new Date()).toISOString() }
+    };
+    if (record.subscriptionExpiryDate) {
+      fieldMasks.push("updateMask.fieldPaths=subscriptionExpiryDate");
+      fields.subscriptionExpiryDate = { stringValue: record.subscriptionExpiryDate };
+    }
+    const docUrl = `${FIRESTORE_REST_BASE}/users/${encodeURIComponent(userId)}?${fieldMasks.join("&")}`;
+    const res = await fetch(docUrl, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ fields })
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn(`[Firestore User Sync] Failed updating /users/${userId} (${res.status}):`, errText);
+      return false;
+    }
+    console.log(`[Firestore User Sync] Successfully updated /users/${userId} in Firestore with status "${record.subscriptionStatus}".`);
+    return true;
+  } catch (err) {
+    console.warn(`[Firestore User Sync] Error updating /users/${userId}:`, err);
     return false;
   }
 }
@@ -436,6 +492,19 @@ async function saveSubscriptionRecord(record, idToken) {
   subscriptionStore.set(record.userId, record);
   persistSubscriptionStoreToDisk();
   await syncSubscriptionToFirestore(record, idToken);
+  const isSub = record.subscriptionStatus === "ACTIVE" || record.subscriptionStatus === "CANCELED_BUT_ACTIVE";
+  await syncUserProfileSubscriptionToFirestore(
+    record.userId,
+    {
+      isSubscribed: isSub,
+      subscriptionStatus: record.subscriptionStatus,
+      subscriptionExpiryDate: record.subscriptionExpiryDate,
+      subscriptionProductId: record.subscriptionProductId || "property_agent_pro",
+      subscriptionBasePlan: record.subscriptionBasePlan || "monthly",
+      autoRenewing: Boolean(record.autoRenewing)
+    },
+    idToken
+  );
 }
 var GOOGLE_PLAY_PRODUCT = {
   productId: "property_agent_pro",
@@ -488,19 +557,23 @@ var androidPublisherClient = null;
 function getAndroidPublisherClient() {
   if (androidPublisherClient) return androidPublisherClient;
   const credentials = parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY);
-  if (!credentials) {
+  const isCloudRun = Boolean(process.env.K_SERVICE || process.env.GOOGLE_CLOUD_PROJECT);
+  if (!credentials && !isCloudRun && process.env.NODE_ENV !== "production") {
     return null;
   }
   try {
-    const auth = new import_googleapis.google.auth.GoogleAuth({
-      credentials,
+    const authOptions = {
       scopes: ["https://www.googleapis.com/auth/androidpublisher"]
-    });
+    };
+    if (credentials) {
+      authOptions.credentials = credentials;
+    }
+    const auth = new import_googleapis.google.auth.GoogleAuth(authOptions);
     androidPublisherClient = import_googleapis.google.androidpublisher({
       version: "v3",
       auth
     });
-    console.log("[Google Play Developer API] Android Publisher v3 client initialized successfully.");
+    console.log("[Google Play Developer API] Android Publisher v3 client initialized.");
     return androidPublisherClient;
   } catch (err) {
     console.error("[Google Play Developer API] Error initializing Google Auth client:", err);
@@ -511,102 +584,65 @@ async function verifyGooglePlaySubscriptionToken(purchaseToken, productId = "pro
   const client = getAndroidPublisherClient();
   if (client) {
     try {
-      console.log(`[Google Play API] Querying live Google Play Developer API for token ${purchaseToken.substring(0, 12)}...`);
-      try {
-        const resV2 = await client.purchases.subscriptionsv2.get({
-          packageName: PACKAGE_NAME,
-          token: purchaseToken
-        });
-        const subData = resV2.data;
-        console.log("[Google Play API v2 Response]", JSON.stringify(subData));
-        const lineItem = subData.lineItems?.[0];
-        const expiryTime = lineItem?.expiryTime;
-        const orderId2 = subData.latestOrderId || `GPA.${Date.now()}`;
-        const autoRenewing = lineItem?.autoRenewingPlan != null;
-        const subState = subData.subscriptionState;
-        let subscriptionStatus = "ACTIVE";
-        if (subState === "SUBSCRIPTION_STATE_IN_GRACE_PERIOD") {
-          subscriptionStatus = "PAYMENT_ISSUE";
-        } else if (subState === "SUBSCRIPTION_STATE_ON_HOLD") {
-          subscriptionStatus = "ON_HOLD";
-        } else if (subState === "SUBSCRIPTION_STATE_CANCELED") {
-          subscriptionStatus = "CANCELED_BUT_ACTIVE";
-        } else if (subState === "SUBSCRIPTION_STATE_EXPIRED") {
-          subscriptionStatus = "EXPIRED";
-        }
-        if (subData.acknowledgementState !== "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED") {
-          try {
-            await client.purchases.subscriptions.acknowledge({
-              packageName: PACKAGE_NAME,
-              subscriptionId: productId,
-              token: purchaseToken,
-              requestBody: {}
-            });
-            console.log("[Google Play API] Acknowledged purchase with Google Play.");
-          } catch (ackErr) {
-            console.warn("[Google Play API] Acknowledge call non-fatal warning:", ackErr);
-          }
-        }
-        return {
-          isValid: true,
-          orderId: orderId2,
-          subscriptionStatus,
-          subscriptionExpiryDate: expiryTime || new Date(Date.now() + 30 * 864e5).toISOString(),
-          autoRenewing,
-          acknowledged: true
-        };
-      } catch (v2Err) {
-        console.log("[Google Play API] v2 endpoint fallback to v1 subscriptions.get:", v2Err);
-        const resV1 = await client.purchases.subscriptions.get({
-          packageName: PACKAGE_NAME,
-          subscriptionId: productId,
-          token: purchaseToken
-        });
-        const v1Data = resV1.data;
-        const expiryTimeMillis = parseInt(v1Data.expiryTimeMillis || "0", 10);
-        const expiryDate = expiryTimeMillis > 0 ? new Date(expiryTimeMillis).toISOString() : new Date(Date.now() + 30 * 864e5).toISOString();
-        const autoRenewing = Boolean(v1Data.autoRenewing);
-        const paymentState = v1Data.paymentState;
-        let subscriptionStatus = "ACTIVE";
-        if (paymentState === 0) {
-          subscriptionStatus = "PAYMENT_ISSUE";
-        } else if (!autoRenewing && Date.now() < expiryTimeMillis) {
-          subscriptionStatus = "CANCELED_BUT_ACTIVE";
-        } else if (Date.now() >= expiryTimeMillis) {
-          subscriptionStatus = "EXPIRED";
-        }
-        if (v1Data.acknowledgementState === 0) {
-          try {
-            await client.purchases.subscriptions.acknowledge({
-              packageName: PACKAGE_NAME,
-              subscriptionId: productId,
-              token: purchaseToken,
-              requestBody: {}
-            });
-          } catch (ackErr) {
-            console.warn("[Google Play API] Acknowledge error:", ackErr);
-          }
-        }
-        return {
-          isValid: true,
-          orderId: v1Data.orderId || `GPA.${Date.now()}`,
-          subscriptionStatus,
-          subscriptionExpiryDate: expiryDate,
-          autoRenewing,
-          acknowledged: true
-        };
+      console.log(`[Google Play API] Querying live Google Play Developer API (v2) for token ${purchaseToken.substring(0, 12)}...`);
+      const resV2 = await client.purchases.subscriptionsv2.get({
+        packageName: PACKAGE_NAME,
+        token: purchaseToken
+      });
+      const subData = resV2.data;
+      console.log("[Google Play API v2 Response]", JSON.stringify(subData));
+      const lineItem = subData.lineItems?.[0];
+      const expiryTime = lineItem?.expiryTime;
+      const orderId2 = subData.latestOrderId || `GPA.${Date.now()}`;
+      const autoRenewing = lineItem?.autoRenewingPlan != null;
+      const subState = subData.subscriptionState;
+      let subscriptionStatus = "ACTIVE";
+      if (subState === "SUBSCRIPTION_STATE_IN_GRACE_PERIOD") {
+        subscriptionStatus = "PAYMENT_ISSUE";
+      } else if (subState === "SUBSCRIPTION_STATE_ON_HOLD") {
+        subscriptionStatus = "ON_HOLD";
+      } else if (subState === "SUBSCRIPTION_STATE_CANCELED") {
+        subscriptionStatus = "CANCELED_BUT_ACTIVE";
+      } else if (subState === "SUBSCRIPTION_STATE_EXPIRED") {
+        subscriptionStatus = "EXPIRED";
       }
+      if (subData.acknowledgementState !== "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED") {
+        try {
+          await client.purchases.subscriptions.acknowledge({
+            packageName: PACKAGE_NAME,
+            subscriptionId: productId,
+            token: purchaseToken,
+            requestBody: {}
+          });
+          console.log("[Google Play API] Acknowledged purchase with Google Play.");
+        } catch (ackErr) {
+          console.warn("[Google Play API] Acknowledge call non-fatal warning:", ackErr);
+        }
+      }
+      return {
+        isValid: true,
+        orderId: orderId2,
+        subscriptionStatus,
+        subscriptionExpiryDate: expiryTime || new Date(Date.now() + 30 * 864e5).toISOString(),
+        autoRenewing,
+        acknowledged: true
+      };
     } catch (apiErr) {
       console.error("[Google Play Developer API Error]", apiErr);
-      return {
-        isValid: false,
-        orderId: "",
-        subscriptionStatus: "EXPIRED",
-        subscriptionExpiryDate: "",
-        autoRenewing: false,
-        acknowledged: false,
-        error: apiErr?.message || "Google Play Developer API verification failed"
-      };
+      const isAuthError = apiErr?.message?.includes("credentials") || apiErr?.message?.includes("UNAUTHENTICATED") || apiErr?.code === 401;
+      if (process.env.NODE_ENV !== "production" && isAuthError) {
+        console.warn("[Google Play Developer API] Falling back to sandbox response in non-production environment.");
+      } else {
+        return {
+          isValid: false,
+          orderId: "",
+          subscriptionStatus: "EXPIRED",
+          subscriptionExpiryDate: "",
+          autoRenewing: false,
+          acknowledged: false,
+          error: apiErr?.message || "Google Play Developer API verification failed"
+        };
+      }
     }
   }
   const orderId = `GPA.${Math.floor(1e3 + Math.random() * 9e3)}-${Math.floor(1e3 + Math.random() * 9e3)}-${Math.floor(1e3 + Math.random() * 9e3)}-${Math.floor(1e4 + Math.random() * 9e4)}`;
@@ -769,17 +805,22 @@ async function startServer() {
       let verifiedUid = null;
       const idToken = extractIdToken(req);
       if (idToken) {
-        try {
-          const verified = await verifyFirebaseIdToken(idToken);
-          if (verified) {
-            verifiedUid = verified.uid;
-          }
-        } catch (tokenErr) {
-          console.warn("[Google Play Verification] Token verification warning:", tokenErr);
+        const verified = await verifyFirebaseIdToken(idToken);
+        if (!verified) {
+          return res.status(401).json({
+            success: false,
+            error: "Invalid or expired Firebase ID token."
+          });
         }
-      }
-      if (!verifiedUid) {
-        verifiedUid = bodyUserId || req.query.userId;
+        verifiedUid = verified.uid;
+        if (bodyUserId && bodyUserId !== verifiedUid) {
+          return res.status(403).json({
+            success: false,
+            error: "Forbidden: Authenticated UID does not match requested userId."
+          });
+        }
+      } else if (bodyUserId) {
+        verifiedUid = bodyUserId;
       }
       if (!verifiedUid) {
         return res.status(400).json({

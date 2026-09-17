@@ -292,23 +292,26 @@ function parseServiceAccountCredentials(raw?: string): any | null {
 let cachedDatastoreToken: { token: string; expiresAt: number } | null = null;
 
 async function getFirestoreServiceAccountToken(): Promise<string | null> {
-  const credentials = parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY);
-  if (!credentials) return null;
-
   const now = Date.now();
   if (cachedDatastoreToken && now < cachedDatastoreToken.expiresAt) {
     return cachedDatastoreToken.token;
   }
 
+  const credentials = parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY);
+
   try {
-    const auth = new google.auth.GoogleAuth({
-      credentials,
+    // 1. Prefer explicit Service Account JSON credentials if configured
+    // 2. Otherwise use Application Default Credentials (ADC) natively available on Google Cloud Run
+    const authOptions: any = {
       scopes: ['https://www.googleapis.com/auth/datastore'],
-    });
+    };
+    if (credentials) {
+      authOptions.credentials = credentials;
+    }
+    const auth = new google.auth.GoogleAuth(authOptions);
     const client = await auth.getClient();
     const tokenResponse = await client.getAccessToken();
     if (tokenResponse?.token) {
-      // Cache token for 50 minutes (tokens typically valid for 60 min)
       cachedDatastoreToken = {
         token: tokenResponse.token,
         expiresAt: now + 50 * 60 * 1000,
@@ -316,9 +319,18 @@ async function getFirestoreServiceAccountToken(): Promise<string | null> {
       return tokenResponse.token;
     }
   } catch (err) {
-    console.warn('[Firestore Persistence] Service account auth error:', err);
+    console.warn('[Firestore Persistence] Service account / ADC auth warning:', err);
   }
 
+  return null;
+}
+
+async function getFirestoreWriteToken(idToken?: string): Promise<string | null> {
+  // 1. Prefer Service Account or ADC token which has admin privileges
+  const saToken = await getFirestoreServiceAccountToken();
+  if (saToken) return saToken;
+  // 2. Fall back to user's Firebase ID token (authorized by Firestore rules to update their own /users/{userId})
+  if (idToken) return idToken;
   return null;
 }
 
@@ -327,17 +339,14 @@ async function getFirestoreReadToken(idToken?: string): Promise<string | null> {
   if (idToken) {
     return idToken;
   }
-  // 2. Otherwise try service account token if configured
+  // 2. Otherwise try service account / ADC token
   return getFirestoreServiceAccountToken();
 }
 
 async function syncSubscriptionToFirestore(record: UserSubscriptionRecord, idToken?: string): Promise<boolean> {
   try {
-    // Only a Service Account token can write to /subscriptions/{userId}
-    // (Firebase Security Rules specify: allow write: if false; which denies client ID tokens)
-    const token = await getFirestoreServiceAccountToken();
+    const token = await getFirestoreWriteToken(idToken);
     if (!token) {
-      // Remote Firestore sync skipped (no service account configured; disk persistence active)
       return false;
     }
 
@@ -355,14 +364,85 @@ async function syncSubscriptionToFirestore(record: UserSubscriptionRecord, idTok
 
     if (!res.ok) {
       const errText = await res.text();
-      console.warn(`[Firestore Persistence] Write failed (${res.status}):`, errText);
+      console.warn(`[Firestore Persistence] Write to /subscriptions failed (${res.status}):`, errText);
       return false;
     }
 
-    console.log(`[Firestore Persistence] Persisted subscription for user ${record.userId} to Firestore.`);
+    console.log(`[Firestore Persistence] Persisted subscription for user ${record.userId} to /subscriptions.`);
     return true;
   } catch (err) {
     console.warn('[Firestore Persistence] Network error writing subscription:', err);
+    return false;
+  }
+}
+
+/**
+ * Persists active subscription fields directly to /users/{userId} in Firestore.
+ * This guarantees the client app's onSnapshot real-time listener fires immediately,
+ * unlocking Pro status on all screens without requiring a manual refresh.
+ */
+async function syncUserProfileSubscriptionToFirestore(
+  userId: string,
+  record: {
+    isSubscribed: boolean;
+    subscriptionStatus: string;
+    subscriptionExpiryDate: string | null;
+    subscriptionProductId: string;
+    subscriptionBasePlan: string;
+    autoRenewing: boolean;
+  },
+  idToken?: string
+): Promise<boolean> {
+  try {
+    const token = await getFirestoreWriteToken(idToken);
+    if (!token) {
+      console.warn(`[Firestore User Sync] No auth token available to update /users/${userId}`);
+      return false;
+    }
+
+    const fieldMasks = [
+      'updateMask.fieldPaths=isSubscribed',
+      'updateMask.fieldPaths=subscriptionStatus',
+      'updateMask.fieldPaths=subscriptionProductId',
+      'updateMask.fieldPaths=subscriptionBasePlan',
+      'updateMask.fieldPaths=autoRenewing',
+      'updateMask.fieldPaths=updatedAt',
+    ];
+
+    const fields: Record<string, any> = {
+      isSubscribed: { booleanValue: record.isSubscribed },
+      subscriptionStatus: { stringValue: record.subscriptionStatus },
+      subscriptionProductId: { stringValue: record.subscriptionProductId },
+      subscriptionBasePlan: { stringValue: record.subscriptionBasePlan },
+      autoRenewing: { booleanValue: record.autoRenewing },
+      updatedAt: { stringValue: new Date().toISOString() },
+    };
+
+    if (record.subscriptionExpiryDate) {
+      fieldMasks.push('updateMask.fieldPaths=subscriptionExpiryDate');
+      fields.subscriptionExpiryDate = { stringValue: record.subscriptionExpiryDate };
+    }
+
+    const docUrl = `${FIRESTORE_REST_BASE}/users/${encodeURIComponent(userId)}?${fieldMasks.join('&')}`;
+    const res = await fetch(docUrl, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ fields }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn(`[Firestore User Sync] Failed updating /users/${userId} (${res.status}):`, errText);
+      return false;
+    }
+
+    console.log(`[Firestore User Sync] Successfully updated /users/${userId} in Firestore with status "${record.subscriptionStatus}".`);
+    return true;
+  } catch (err) {
+    console.warn(`[Firestore User Sync] Error updating /users/${userId}:`, err);
     return false;
   }
 }
@@ -539,7 +619,24 @@ async function saveSubscriptionRecord(
   record.updatedAt = new Date().toISOString();
   subscriptionStore.set(record.userId, record);
   persistSubscriptionStoreToDisk();
+
+  // 1. Sync to /subscriptions/{userId}
   await syncSubscriptionToFirestore(record, idToken);
+
+  // 2. Sync to /users/{userId} to immediately unlock Pro capabilities for the client
+  const isSub = record.subscriptionStatus === 'ACTIVE' || record.subscriptionStatus === 'CANCELED_BUT_ACTIVE';
+  await syncUserProfileSubscriptionToFirestore(
+    record.userId,
+    {
+      isSubscribed: isSub,
+      subscriptionStatus: record.subscriptionStatus,
+      subscriptionExpiryDate: record.subscriptionExpiryDate,
+      subscriptionProductId: record.subscriptionProductId || 'property_agent_pro',
+      subscriptionBasePlan: record.subscriptionBasePlan || 'monthly',
+      autoRenewing: Boolean(record.autoRenewing),
+    },
+    idToken
+  );
 }
 
 // Default subscription product catalog matching Google Play Console setup
@@ -599,22 +696,29 @@ function getAndroidPublisherClient() {
   if (androidPublisherClient) return androidPublisherClient;
 
   const credentials = parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY);
-  if (!credentials) {
+
+  // In Cloud Run (K_SERVICE is set) or production, Application Default Credentials are provided by the container
+  // In local development, credentials must be provided or we fall back to sandbox mode
+  const isCloudRun = Boolean(process.env.K_SERVICE || process.env.GOOGLE_CLOUD_PROJECT);
+  if (!credentials && !isCloudRun && process.env.NODE_ENV !== 'production') {
     return null;
   }
 
   try {
-    const auth = new google.auth.GoogleAuth({
-      credentials,
+    const authOptions: any = {
       scopes: ['https://www.googleapis.com/auth/androidpublisher'],
-    });
+    };
+    if (credentials) {
+      authOptions.credentials = credentials;
+    }
+    const auth = new google.auth.GoogleAuth(authOptions);
 
     androidPublisherClient = google.androidpublisher({
       version: 'v3',
       auth,
     });
 
-    console.log('[Google Play Developer API] Android Publisher v3 client initialized successfully.');
+    console.log('[Google Play Developer API] Android Publisher v3 client initialized.');
     return androidPublisherClient;
   } catch (err) {
     console.error('[Google Play Developer API] Error initializing Google Auth client:', err);
@@ -642,117 +746,77 @@ async function verifyGooglePlaySubscriptionToken(
 
   if (client) {
     try {
-      console.log(`[Google Play API] Querying live Google Play Developer API for token ${purchaseToken.substring(0, 12)}...`);
+      console.log(`[Google Play API] Querying live Google Play Developer API (v2) for token ${purchaseToken.substring(0, 12)}...`);
 
-      // Try Google Play Subscriptions v2 API first
-      try {
-        const resV2 = await client.purchases.subscriptionsv2.get({
-          packageName: PACKAGE_NAME,
-          token: purchaseToken,
-        });
+      const resV2 = await client.purchases.subscriptionsv2.get({
+        packageName: PACKAGE_NAME,
+        token: purchaseToken,
+      });
 
-        const subData = resV2.data;
-        console.log('[Google Play API v2 Response]', JSON.stringify(subData));
+      const subData = resV2.data;
+      console.log('[Google Play API v2 Response]', JSON.stringify(subData));
 
-        const lineItem = subData.lineItems?.[0];
-        const expiryTime = lineItem?.expiryTime; // ISO timestamp string from Google Play
-        const orderId = subData.latestOrderId || `GPA.${Date.now()}`;
-        const autoRenewing = lineItem?.autoRenewingPlan != null;
-        const subState = subData.subscriptionState; // 1: PENDING, 2: ACTIVE, 3: PAUSED, 4: IN_GRACE_PERIOD, 5: ON_HOLD, 6: CANCELED, 7: EXPIRED
+      const lineItem = subData.lineItems?.[0];
+      const expiryTime = lineItem?.expiryTime; // ISO timestamp string from Google Play
+      const orderId = subData.latestOrderId || `GPA.${Date.now()}`;
+      const autoRenewing = lineItem?.autoRenewingPlan != null;
+      const subState = subData.subscriptionState; // 1: PENDING, 2: ACTIVE, 3: PAUSED, 4: IN_GRACE_PERIOD, 5: ON_HOLD, 6: CANCELED, 7: EXPIRED
 
-        let subscriptionStatus: 'ACTIVE' | 'CANCELED_BUT_ACTIVE' | 'PAYMENT_ISSUE' | 'EXPIRED' | 'ON_HOLD' = 'ACTIVE';
+      let subscriptionStatus: 'ACTIVE' | 'CANCELED_BUT_ACTIVE' | 'PAYMENT_ISSUE' | 'EXPIRED' | 'ON_HOLD' = 'ACTIVE';
 
-        if (subState === 'SUBSCRIPTION_STATE_IN_GRACE_PERIOD') {
-          subscriptionStatus = 'PAYMENT_ISSUE';
-        } else if (subState === 'SUBSCRIPTION_STATE_ON_HOLD') {
-          subscriptionStatus = 'ON_HOLD';
-        } else if (subState === 'SUBSCRIPTION_STATE_CANCELED') {
-          subscriptionStatus = 'CANCELED_BUT_ACTIVE';
-        } else if (subState === 'SUBSCRIPTION_STATE_EXPIRED') {
-          subscriptionStatus = 'EXPIRED';
-        }
-
-        // Acknowledge if pending
-        if (subData.acknowledgementState !== 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED') {
-          try {
-            await client.purchases.subscriptions.acknowledge({
-              packageName: PACKAGE_NAME,
-              subscriptionId: productId,
-              token: purchaseToken,
-              requestBody: {},
-            });
-            console.log('[Google Play API] Acknowledged purchase with Google Play.');
-          } catch (ackErr) {
-            console.warn('[Google Play API] Acknowledge call non-fatal warning:', ackErr);
-          }
-        }
-
-        return {
-          isValid: true,
-          orderId,
-          subscriptionStatus,
-          subscriptionExpiryDate: expiryTime || new Date(Date.now() + 30 * 86400000).toISOString(),
-          autoRenewing,
-          acknowledged: true,
-        };
-      } catch (v2Err) {
-        console.log('[Google Play API] v2 endpoint fallback to v1 subscriptions.get:', v2Err);
-        // Fallback to legacy v1 purchases.subscriptions.get
-        const resV1 = await client.purchases.subscriptions.get({
-          packageName: PACKAGE_NAME,
-          subscriptionId: productId,
-          token: purchaseToken,
-        });
-
-        const v1Data = resV1.data;
-        const expiryTimeMillis = parseInt(v1Data.expiryTimeMillis || '0', 10);
-        const expiryDate = expiryTimeMillis > 0 ? new Date(expiryTimeMillis).toISOString() : new Date(Date.now() + 30 * 86400000).toISOString();
-        const autoRenewing = Boolean(v1Data.autoRenewing);
-        const paymentState = v1Data.paymentState; // 0=pending, 1=payment received, 2=free trial, 3=deferred
-
-        let subscriptionStatus: 'ACTIVE' | 'CANCELED_BUT_ACTIVE' | 'PAYMENT_ISSUE' | 'EXPIRED' | 'ON_HOLD' = 'ACTIVE';
-
-        if (paymentState === 0) {
-          subscriptionStatus = 'PAYMENT_ISSUE';
-        } else if (!autoRenewing && Date.now() < expiryTimeMillis) {
-          subscriptionStatus = 'CANCELED_BUT_ACTIVE';
-        } else if (Date.now() >= expiryTimeMillis) {
-          subscriptionStatus = 'EXPIRED';
-        }
-
-        if (v1Data.acknowledgementState === 0) {
-          try {
-            await client.purchases.subscriptions.acknowledge({
-              packageName: PACKAGE_NAME,
-              subscriptionId: productId,
-              token: purchaseToken,
-              requestBody: {},
-            });
-          } catch (ackErr) {
-            console.warn('[Google Play API] Acknowledge error:', ackErr);
-          }
-        }
-
-        return {
-          isValid: true,
-          orderId: v1Data.orderId || `GPA.${Date.now()}`,
-          subscriptionStatus,
-          subscriptionExpiryDate: expiryDate,
-          autoRenewing,
-          acknowledged: true,
-        };
+      if (subState === 'SUBSCRIPTION_STATE_IN_GRACE_PERIOD') {
+        subscriptionStatus = 'PAYMENT_ISSUE';
+      } else if (subState === 'SUBSCRIPTION_STATE_ON_HOLD') {
+        subscriptionStatus = 'ON_HOLD';
+      } else if (subState === 'SUBSCRIPTION_STATE_CANCELED') {
+        subscriptionStatus = 'CANCELED_BUT_ACTIVE';
+      } else if (subState === 'SUBSCRIPTION_STATE_EXPIRED') {
+        subscriptionStatus = 'EXPIRED';
       }
+
+      // Acknowledge if pending
+      if (subData.acknowledgementState !== 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED') {
+        try {
+          await client.purchases.subscriptions.acknowledge({
+            packageName: PACKAGE_NAME,
+            subscriptionId: productId,
+            token: purchaseToken,
+            requestBody: {},
+          });
+          console.log('[Google Play API] Acknowledged purchase with Google Play.');
+        } catch (ackErr) {
+          console.warn('[Google Play API] Acknowledge call non-fatal warning:', ackErr);
+        }
+      }
+
+      return {
+        isValid: true,
+        orderId,
+        subscriptionStatus,
+        subscriptionExpiryDate: expiryTime || new Date(Date.now() + 30 * 86400000).toISOString(),
+        autoRenewing,
+        acknowledged: true,
+      };
     } catch (apiErr: any) {
       console.error('[Google Play Developer API Error]', apiErr);
-      return {
-        isValid: false,
-        orderId: '',
-        subscriptionStatus: 'EXPIRED',
-        subscriptionExpiryDate: '',
-        autoRenewing: false,
-        acknowledged: false,
-        error: apiErr?.message || 'Google Play Developer API verification failed',
-      };
+      const isAuthError = apiErr?.message?.includes('credentials') || 
+                          apiErr?.message?.includes('UNAUTHENTICATED') || 
+                          apiErr?.code === 401;
+
+      // In non-production or if credentials are not configured yet, fallback to sandbox response
+      if (process.env.NODE_ENV !== 'production' && isAuthError) {
+        console.warn('[Google Play Developer API] Falling back to sandbox response in non-production environment.');
+      } else {
+        return {
+          isValid: false,
+          orderId: '',
+          subscriptionStatus: 'EXPIRED',
+          subscriptionExpiryDate: '',
+          autoRenewing: false,
+          acknowledged: false,
+          error: apiErr?.message || 'Google Play Developer API verification failed',
+        };
+      }
     }
   }
 
@@ -961,24 +1025,28 @@ async function startServer() {
         });
       }
 
-      // Try authenticating via Bearer token if provided
+      // Authenticate via Bearer token if provided
       let verifiedUid: string | null = null;
       const idToken = extractIdToken(req);
 
       if (idToken) {
-        try {
-          const verified = await verifyFirebaseIdToken(idToken);
-          if (verified) {
-            verifiedUid = verified.uid;
-          }
-        } catch (tokenErr) {
-          console.warn('[Google Play Verification] Token verification warning:', tokenErr);
+        const verified = await verifyFirebaseIdToken(idToken);
+        if (!verified) {
+          return res.status(401).json({
+            success: false,
+            error: 'Invalid or expired Firebase ID token.',
+          });
         }
-      }
-
-      // Fallback to client-provided userId if ID token was absent or in test mode
-      if (!verifiedUid) {
-        verifiedUid = bodyUserId || (req.query.userId as string);
+        verifiedUid = verified.uid;
+        // Verify client-supplied userId matches the verified UID
+        if (bodyUserId && bodyUserId !== verifiedUid) {
+          return res.status(403).json({
+            success: false,
+            error: 'Forbidden: Authenticated UID does not match requested userId.',
+          });
+        }
+      } else if (bodyUserId) {
+        verifiedUid = bodyUserId;
       }
 
       if (!verifiedUid) {
