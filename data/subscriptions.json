@@ -13,7 +13,7 @@
   },
   "JBvuUDPPPsQR9XjYG3GJP5H6sFR2": {
     "userId": "JBvuUDPPPsQR9XjYG3GJP5H6sFR2",
-    "subscriptionStatus": "TRIAL",
+    "subscriptionStatus": "EXPIRED",
     "trialStartDate": "2026-09-10T09:23:33.448Z",
     "trialEndDate": "2026-09-17T09:23:33.448Z",
     "subscriptionExpiryDate": null,
@@ -21,7 +21,7 @@
     "subscriptionBasePlan": "monthly",
     "autoRenewing": false,
     "acknowledged": false,
-    "updatedAt": "2026-09-13T07:31:39.452Z"
+    "updatedAt": "2026-09-17T18:35:49.658Z"
   },
   "test_uid_1": {
     "userId": "test_uid_1",
@@ -67,5 +67,32 @@
     "purchaseToken": "token_final_123",
     "orderId": "GPA.7429-7595-2730-54334",
     "lastVerifiedAt": "2026-09-13T08:14:53.324Z"
+  },
+  "hy2zTx8bpzb09dinXZgUWzhCJBh2": {
+    "userId": "hy2zTx8bpzb09dinXZgUWzhCJBh2",
+    "subscriptionStatus": "TRIAL",
+    "trialStartDate": "2026-09-11T18:00:46.187Z",
+    "trialEndDate": "2026-09-18T18:00:46.187Z",
+    "subscriptionExpiryDate": null,
+    "subscriptionProductId": "property_agent_pro",
+    "subscriptionBasePlan": "monthly",
+    "autoRenewing": false,
+    "acknowledged": false,
+    "updatedAt": "2026-09-17T19:33:34.167Z"
+  },
+  "test_user_123": {
+    "userId": "test_user_123",
+    "subscriptionStatus": "ACTIVE",
+    "trialStartDate": "2026-09-17T19:39:08.439Z",
+    "trialEndDate": "2026-09-24T19:39:08.439Z",
+    "subscriptionExpiryDate": "2026-10-17T19:39:08.439Z",
+    "subscriptionProductId": "property_agent_pro",
+    "subscriptionBasePlan": "monthly",
+    "autoRenewing": true,
+    "acknowledged": true,
+    "updatedAt": "2026-09-17T19:39:08.440Z",
+    "purchaseToken": "test_purchase_token_abc",
+    "orderId": "GPA.1667-2356-4146-25355",
+    "lastVerifiedAt": "2026-09-17T19:39:08.440Z"
   }
 }
