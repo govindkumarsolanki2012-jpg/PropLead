@@ -45,7 +45,7 @@ import {
 import { Lead, Property, UserProfile, WhatsAppTemplate, FollowUpType, TabType } from './types';
 import { INITIAL_USER_PROFILE } from './data/initialData';
 import { formatRelativeDate, normalizePhoneForMatch } from './utils/formatters';
-import { getEffectiveSubscriptionStatus, setAuthoritativeServerTime, getBillingApiUrl } from './utils/billing';
+import { getEffectiveSubscriptionStatus, hasProAccess, setAuthoritativeServerTime, getBillingApiUrl } from './utils/billing';
 import {
   subscribeToAuth,
   signInWithGoogle,
@@ -587,17 +587,17 @@ export function App() {
     }
   }, [leads]);
 
-  // Guarded actions for locked state
+  // Guarded actions for locked state / Pro access
   const guardLockedFeature = useCallback(
     (featureName: string, action: () => void) => {
-      if (isLocked) {
+      if (!hasProAccess(profile)) {
         setLockedFeatureName(featureName);
         setIsFeatureLockedOpen(true);
       } else {
         action();
       }
     },
-    [isLocked]
+    [profile]
   );
 
   // Lead CRUD handlers
@@ -616,6 +616,21 @@ export function App() {
   };
 
   const handleUpdateLead = (updatedLead: Lead) => {
+    // Pro access check: If trial is expired and subscription is not active, block follow-up modifications
+    if (!hasProAccess(profile)) {
+      const existing = leads.find((l) => l.id === updatedLead.id);
+      const followUpModified =
+        existing &&
+        (existing.nextFollowUpDate !== updatedLead.nextFollowUpDate ||
+          existing.nextFollowUpTime !== updatedLead.nextFollowUpTime ||
+          existing.nextFollowUpNote !== updatedLead.nextFollowUpNote);
+      if (followUpModified) {
+        setLockedFeatureName('Follow-Ups');
+        setIsFeatureLockedOpen(true);
+        return;
+      }
+    }
+
     const updated = leads.map((l) => (l.id === updatedLead.id ? updatedLead : l));
     setLeads(updated);
     saveStoredLeads(updated);
@@ -824,6 +839,13 @@ export function App() {
     type: FollowUpType,
     note: string
   ) => {
+    // Pro access check: Block follow-up scheduling for expired non-subscribed users
+    if (!hasProAccess(profile)) {
+      setLockedFeatureName('Follow-Ups');
+      setIsFeatureLockedOpen(true);
+      return;
+    }
+
     const target =
       (detailLead && detailLead.id === leadId ? detailLead : null) ||
       (scheduleLead && scheduleLead.id === leadId ? scheduleLead : null) ||
@@ -982,7 +1004,7 @@ export function App() {
                 onOpenLeadDetail={(l) => setDetailLead(l)}
                 onOpenPropertyDetail={(p) => setDetailProperty(p)}
                 onOpenWhatsApp={(l) => setWhatsAppLead(l)}
-                onOpenSchedule={(l) => guardLockedFeature('Schedule Follow-Up', () => setScheduleLead(l))}
+                onOpenSchedule={(l) => guardLockedFeature('Follow-Ups', () => setScheduleLead(l))}
                 onOpenSubscription={() => setIsSubscriptionOpen(true)}
                 onNavigateToLeadsWithFilter={(filter) => {
                   setLeadsFilter(filter);
@@ -1004,7 +1026,7 @@ export function App() {
                 onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
                 onOpenLeadDetail={(l) => setDetailLead(l)}
                 onOpenWhatsApp={(l) => setWhatsAppLead(l)}
-                onOpenSchedule={(l) => guardLockedFeature('Schedule Follow-Up', () => setScheduleLead(l))}
+                onOpenSchedule={(l) => guardLockedFeature('Follow-Ups', () => setScheduleLead(l))}
                 onDeleteBulkLeads={handleDeleteBulkLeads}
               />
             )}
@@ -1030,7 +1052,7 @@ export function App() {
                 leads={leads}
                 onOpenLeadDetail={(l) => setDetailLead(l)}
                 onOpenWhatsApp={(l) => setWhatsAppLead(l)}
-                onOpenSchedule={(l) => guardLockedFeature('Schedule Follow-Up', () => setScheduleLead(l))}
+                onOpenSchedule={(l) => guardLockedFeature('Follow-Ups', () => setScheduleLead(l))}
                 onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
               />
             )}
@@ -1110,8 +1132,12 @@ export function App() {
           onUpdateLead={handleUpdateLead}
           onDeleteLead={handleDeleteLead}
           onOpenWhatsApp={(l) => setWhatsAppLead(l)}
-          onOpenSchedule={(l) => setScheduleLead(l)}
+          onOpenSchedule={(l) => guardLockedFeature('Follow-Ups', () => setScheduleLead(l))}
           onOpenEdit={(l) => guardLockedFeature('Edit Lead', () => setEditLead(l))}
+          onRequirePro={(feat) => {
+            setLockedFeatureName(feat || 'Follow-Ups');
+            setIsFeatureLockedOpen(true);
+          }}
           onSharePropertyWithLead={(prop, lead) =>
             setSharePropertyData({ property: prop, preselectedLead: lead })
           }
@@ -1124,6 +1150,11 @@ export function App() {
           isOpen={Boolean(scheduleLead)}
           onClose={() => setScheduleLead(null)}
           lead={scheduleLead}
+          profile={profile}
+          onRequirePro={(feat) => {
+            setLockedFeatureName(feat || 'Follow-Ups');
+            setIsFeatureLockedOpen(true);
+          }}
           onSchedule={handleScheduleFollowUp}
           onSaveFollowUp={handleScheduleFollowUp}
         />
@@ -1221,8 +1252,19 @@ export function App() {
       <FeatureLockedModal
         isOpen={isFeatureLockedOpen}
         onClose={() => setIsFeatureLockedOpen(false)}
-        onSubscribe={() => setIsSubscriptionOpen(true)}
+        onSubscribe={() => {
+          setIsFeatureLockedOpen(false);
+          setIsSubscriptionOpen(true);
+        }}
         featureName={lockedFeatureName}
+        title="PropLead Pro Required"
+        message={
+          lockedFeatureName === 'Follow-Ups' || !lockedFeatureName || lockedFeatureName === 'Schedule Follow-Up'
+            ? 'Your free trial has expired. Subscribe to continue managing follow-ups.'
+            : `Your free trial has expired. Subscribe to continue using ${lockedFeatureName}.`
+        }
+        confirmText="View Plans"
+        cancelText="Not Now"
       />
 
       {/* Import Contacts Modal */}

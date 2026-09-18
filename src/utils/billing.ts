@@ -313,6 +313,22 @@ export function getEffectiveSubscriptionStatus(
   };
 }
 
+/**
+ * Authoritative Pro Access Check
+ * Access is allowed ONLY when:
+ *   trialActive === true (trial status with valid trial days remaining and not locked)
+ *   OR
+ *   subscriptionActive === true (active or canceled-but-active subscription)
+ * Expired users without an active subscription return false.
+ */
+export function hasProAccess(profile?: UserProfile | null): boolean {
+  if (!profile) return false;
+  const { status, daysRemaining, isSubscribed, isLocked } = getEffectiveSubscriptionStatus(profile);
+  const trialActive = status === 'TRIAL' && daysRemaining > 0 && !isLocked;
+  const subscriptionActive = isSubscribed && (status === 'ACTIVE' || status === 'CANCELED_BUT_ACTIVE');
+  return trialActive || subscriptionActive;
+}
+
 export interface GooglePlayProductResult {
   product: GooglePlaySubscriptionProduct | null;
   isAvailable: boolean;

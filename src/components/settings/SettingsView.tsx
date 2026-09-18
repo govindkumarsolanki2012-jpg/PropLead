@@ -23,6 +23,7 @@ import {
   Cloud,
   LogOut,
   Bell,
+  ChevronRight,
 } from 'lucide-react';
 import { UserProfile, Lead, WhatsAppTemplate, NotificationSettings } from '../../types';
 import { exportLeadsToCSV } from '../../utils/storage';
@@ -43,6 +44,7 @@ import {
   syncAllLeadNotifications,
 } from '../../utils/notifications';
 import { useLanguage } from '../../context/LanguageContext';
+import { NotificationSettingsPage } from './NotificationSettingsPage';
 
 interface SettingsViewProps {
   profile: UserProfile;
@@ -83,6 +85,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   } | null>(null);
 
   // Notification Settings State
+  const [showNotificationsPage, setShowNotificationsPage] = useState<boolean>(false);
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(() => {
     return profile?.notificationSettings || getStoredNotificationSettings();
   });
@@ -91,6 +94,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     display: 'granted',
   });
   const [isRequestingPerm, setIsRequestingPerm] = useState<boolean>(false);
+
+  // Compute summary subtitle for the main Settings screen:
+  // "All reminders enabled" | "Some reminders disabled" | "Notifications off"
+  const enabledNotificationsCount = [
+    notificationSettings.followUpReminders,
+    notificationSettings.propertyVisitReminders,
+    notificationSettings.dailySummary,
+  ].filter(Boolean).length;
+
+  let notificationSubtitle = 'All reminders enabled';
+  if (enabledNotificationsCount === 0) {
+    notificationSubtitle = 'Notifications off';
+  } else if (enabledNotificationsCount < 3) {
+    notificationSubtitle = 'Some reminders disabled';
+  }
 
   React.useEffect(() => {
     checkNotificationPermission().then((res) => {
@@ -153,6 +171,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const text = `Hi PropLead Support, I am ${profile.name} (${profile.agencyName}, ${profile.city}). I need assistance with the app.`;
     openWhatsAppDirect('919876543210', text);
   };
+
+  if (showNotificationsPage) {
+    return (
+      <div className="flex-1 pb-8 p-4 space-y-4">
+        <NotificationSettingsPage
+          notificationSettings={notificationSettings}
+          permissionState={permissionState}
+          isRequestingPerm={isRequestingPerm}
+          onBack={() => setShowNotificationsPage(false)}
+          onToggleNotification={handleToggleNotification}
+          onRequestPermission={handleRequestPermission}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 pb-8 p-4 space-y-4">
@@ -409,158 +442,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             {status !== 'ACTIVE' && (
               <button
                 type="button"
+                id="btn-settings-view-pro-plans"
                 onClick={onOpenSubscription}
                 className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>
-                  {status === 'TRIAL' ? 'View Pro Plans (Save ₹38)' : 'Subscribe to Pro'}
-                </span>
+                <span>View Pro Plans</span>
               </button>
             )}
           </div>
         );
       })()}
 
-      {/* Local Notifications & Reminders */}
-      <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3.5 shadow-2xs">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-              <Bell className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-xs font-bold text-slate-900 dark:text-white">
-                Notifications & Reminders
-              </h3>
-              <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                Android local alerts for follow-ups
-              </span>
-            </div>
+      {/* Notifications Row */}
+      <div
+        id="settings-notifications-nav-row"
+        onClick={() => setShowNotificationsPage(true)}
+        className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-750 transition-colors group"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+            <Bell className="w-4 h-4" />
           </div>
-          {permissionState.granted ? (
-            <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
-              <CheckCircle2 className="w-3 h-3" />
-              <span>Active</span>
-            </span>
-          ) : (
-            <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 flex items-center gap-1">
-              <AlertCircle className="w-3 h-3" />
-              <span>Off</span>
-            </span>
-          )}
+          <div className="min-w-0">
+            <h3 className="text-xs font-bold text-slate-900 dark:text-white">
+              Notifications
+            </h3>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+              {notificationSubtitle}
+            </p>
+          </div>
         </div>
-
-        {!permissionState.granted && (
-          <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-              <p className="text-[11px] text-amber-800 dark:text-amber-200 leading-tight">
-                Notification permission is required to receive follow-up & visit alerts.
-              </p>
-            </div>
-            <button
-              type="button"
-              disabled={isRequestingPerm}
-              onClick={handleRequestPermission}
-              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs shrink-0 shadow-2xs transition-colors"
-            >
-              {isRequestingPerm ? 'Enabling...' : 'Enable'}
-            </button>
-          </div>
-        )}
-
-        <div className="space-y-3 pt-1">
-          {/* Toggle 1: Follow-up reminders */}
-          <div className="flex items-center justify-between py-1">
-            <div className="pr-4">
-              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                Follow-up Reminders
-              </h4>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Alerts 30 mins before and at scheduled follow-up time
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={notificationSettings.followUpReminders}
-              onClick={() => handleToggleNotification('followUpReminders')}
-              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 ease-in-out shrink-0 ${
-                notificationSettings.followUpReminders
-                  ? 'bg-emerald-600'
-                  : 'bg-slate-300 dark:bg-slate-600'
-              }`}
-            >
-              <div
-                className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${
-                  notificationSettings.followUpReminders ? 'translate-x-5' : 'translate-x-0'
-                }`}
-              />
-            </button>
-          </div>
-
-          <div className="border-t border-slate-100 dark:border-slate-800" />
-
-          {/* Toggle 2: Property visit reminders */}
-          <div className="flex items-center justify-between py-1">
-            <div className="pr-4">
-              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                Property Visit Reminders
-              </h4>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Alerts 30 mins before and at scheduled visit time
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={notificationSettings.propertyVisitReminders}
-              onClick={() => handleToggleNotification('propertyVisitReminders')}
-              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 ease-in-out shrink-0 ${
-                notificationSettings.propertyVisitReminders
-                  ? 'bg-emerald-600'
-                  : 'bg-slate-300 dark:bg-slate-600'
-              }`}
-            >
-              <div
-                className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${
-                  notificationSettings.propertyVisitReminders ? 'translate-x-5' : 'translate-x-0'
-                }`}
-              />
-            </button>
-          </div>
-
-          <div className="border-t border-slate-100 dark:border-slate-800" />
-
-          {/* Toggle 3: Daily summary */}
-          <div className="flex items-center justify-between py-1">
-            <div className="pr-4">
-              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                Daily Summary
-              </h4>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Morning reminder at 9:00 AM of today's scheduled follow-ups
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={notificationSettings.dailySummary}
-              onClick={() => handleToggleNotification('dailySummary')}
-              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 ease-in-out shrink-0 ${
-                notificationSettings.dailySummary
-                  ? 'bg-emerald-600'
-                  : 'bg-slate-300 dark:bg-slate-600'
-              }`}
-            >
-              <div
-                className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${
-                  notificationSettings.dailySummary ? 'translate-x-5' : 'translate-x-0'
-                }`}
-              />
-            </button>
-          </div>
+        <div className="flex items-center text-slate-400 dark:text-slate-500 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors shrink-0 pl-2">
+          <ChevronRight className="w-4 h-4" />
         </div>
       </div>
 

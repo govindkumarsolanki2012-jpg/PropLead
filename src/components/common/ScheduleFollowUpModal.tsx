@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { X, Calendar, Clock, Check, Phone, MessageSquare, Car, Users, FileText } from 'lucide-react';
-import { Lead, FollowUpType } from '../../types';
+import { Lead, FollowUpType, UserProfile } from '../../types';
+import { hasProAccess } from '../../utils/billing';
 
 interface ScheduleFollowUpModalProps {
   isOpen: boolean;
   onClose: () => void;
   lead: Lead;
+  profile?: UserProfile;
+  onRequirePro?: (featureName?: string) => void;
   onSaveFollowUp?: (
     leadId: string,
     date: string,
@@ -26,6 +29,8 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
   isOpen,
   onClose,
   lead,
+  profile,
+  onRequirePro,
   onSaveFollowUp,
   onSchedule,
 }) => {
@@ -47,6 +52,14 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
     lead.nextFollowUpNote || `Follow-up regarding property requirements with ${lead.name}`
   );
 
+  // If user does not have active trial or active subscription, close immediately and show paywall
+  useEffect(() => {
+    if (isOpen && profile && !hasProAccess(profile)) {
+      onClose();
+      onRequirePro?.('Follow-Ups');
+    }
+  }, [isOpen, profile, onClose, onRequirePro]);
+
   // Sync state whenever modal opens or lead updates (handles rescheduling existing follow-up)
   useEffect(() => {
     if (isOpen && lead) {
@@ -60,6 +73,11 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (profile && !hasProAccess(profile)) {
+      onClose();
+      onRequirePro?.('Follow-Ups');
+      return;
+    }
     if (!selectedDate) {
       alert('Please select a date');
       return;

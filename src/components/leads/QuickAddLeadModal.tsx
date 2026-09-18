@@ -29,7 +29,7 @@ import {
 import { BudgetCustomizer } from './BudgetCustomizer';
 import { formatIndianCurrency, cleanIndianPhone } from '../../utils/formatters';
 import { openDialer, openWhatsApp, WHATSAPP_TEMPLATES } from '../../utils/whatsapp';
-import { getEffectiveSubscriptionStatus } from '../../utils/billing';
+import { getEffectiveSubscriptionStatus, hasProAccess } from '../../utils/billing';
 import { useTranslation } from '../../context/LanguageContext';
 
 interface QuickAddLeadModalProps {
@@ -48,7 +48,7 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
   onOpenSubscription,
 }) => {
   const { t, translateRequirement, translatePriority, language } = useTranslation();
-  const { isLocked } = getEffectiveSubscriptionStatus(profile);
+  const isLocked = !hasProAccess(profile);
 
   const today = new Date();
   const todayStr = today.toISOString().split('T')[0];

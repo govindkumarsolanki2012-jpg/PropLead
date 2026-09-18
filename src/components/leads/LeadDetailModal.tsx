@@ -54,6 +54,7 @@ import {
   getLeadTargetLocation,
   isSameCity,
 } from '../../utils/propertyMatching';
+import { hasProAccess } from '../../utils/billing';
 
 interface LeadDetailModalProps {
   isOpen: boolean;
@@ -66,6 +67,7 @@ interface LeadDetailModalProps {
   onOpenWhatsApp: (lead: Lead) => void;
   onOpenSchedule: (lead: Lead) => void;
   onOpenEdit: (lead: Lead) => void;
+  onRequirePro?: (featureName?: string) => void;
   onSharePropertyWithLead?: (property: Property, lead: Lead) => void;
   onOpenPropertyDetail?: (property: Property) => void;
 }
@@ -81,6 +83,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   onOpenWhatsApp,
   onOpenSchedule,
   onOpenEdit,
+  onRequirePro,
   onSharePropertyWithLead,
   onOpenPropertyDetail,
 }) => {
@@ -137,6 +140,15 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
   // Mark Follow-Up Complete
   const handleMarkFollowUpComplete = () => {
+    if (!hasProAccess(profile)) {
+      if (onRequirePro) {
+        onRequirePro('Follow-Ups');
+      } else {
+        onOpenSchedule(lead);
+      }
+      return;
+    }
+
     const updatedActivities = [
       {
         id: `act_${Date.now()}`,
@@ -308,8 +320,17 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
 
             <button
               type="button"
+              id="btn-lead-detail-follow-up"
               onClick={(e) => {
                 e.stopPropagation();
+                if (!hasProAccess(profile)) {
+                  if (onRequirePro) {
+                    onRequirePro('Follow-Ups');
+                  } else {
+                    onOpenSchedule(lead);
+                  }
+                  return;
+                }
                 onOpenSchedule(lead);
               }}
               className="py-2.5 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
@@ -355,8 +376,17 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               {lead.nextFollowUpDate && (
                 <button
                   type="button"
+                  id="btn-lead-detail-mark-complete"
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (!hasProAccess(profile)) {
+                      if (onRequirePro) {
+                        onRequirePro('Follow-Ups');
+                      } else {
+                        onOpenSchedule(lead);
+                      }
+                      return;
+                    }
                     handleMarkFollowUpComplete();
                   }}
                   className="px-2.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-emerald-50 text-emerald-700 dark:text-emerald-300 rounded-lg text-xs font-bold border border-emerald-300 dark:border-emerald-700 flex items-center gap-1 transition-colors cursor-pointer"
@@ -367,8 +397,17 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               )}
               <button
                 type="button"
+                id="btn-lead-detail-reschedule"
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (!hasProAccess(profile)) {
+                    if (onRequirePro) {
+                      onRequirePro('Follow-Ups');
+                    } else {
+                      onOpenSchedule(lead);
+                    }
+                    return;
+                  }
                   onOpenSchedule(lead);
                 }}
                 className="px-2.5 py-1.5 bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95 rounded-lg text-xs font-bold transition-all cursor-pointer"
