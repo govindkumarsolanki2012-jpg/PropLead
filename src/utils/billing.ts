@@ -79,22 +79,29 @@ export function getBillingApiUrl(path: string): string {
     ''
   ).trim();
 
-  const isNative = typeof window !== 'undefined' && (
-    Capacitor.isNativePlatform() ||
-    window.location.protocol === 'capacitor:' ||
-    (window.location.hostname === 'localhost' && (!window.location.port || window.location.port === '80' || window.location.port === '443'))
-  );
-
-  if (isNative) {
-    const baseUrl = customEnv || REMOTE_BACKEND_URL;
-    return `${baseUrl.replace(/\/$/, '')}${cleanPath}`;
-  }
-
-  // Web / local dev environment
+  // If custom environment URL is explicitly provided, use it
   if (customEnv) {
     return `${customEnv.replace(/\/$/, '')}${cleanPath}`;
   }
 
+  // Detect Android Capacitor / WebView environment:
+  // 1. Capacitor.getPlatform() === 'android'
+  // 2. Capacitor.isNativePlatform() === true
+  // 3. window.location.protocol === 'capacitor:'
+  // 4. Running locally in phone WebView on localhost without port 3000 (Vite dev server)
+  const isAndroid = typeof window !== 'undefined' && (
+    Capacitor.getPlatform() === 'android' ||
+    Capacitor.isNativePlatform() ||
+    window.location.protocol === 'capacitor:' ||
+    (window.location.hostname === 'localhost' && window.location.port !== '3000') ||
+    (typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent) && window.location.hostname === 'localhost')
+  );
+
+  if (isAndroid) {
+    return `${DEFAULT_PRODUCTION_BILLING_URL}${cleanPath}`;
+  }
+
+  // Web in production on Cloud Run (same origin) or local dev server
   return cleanPath;
 }
 

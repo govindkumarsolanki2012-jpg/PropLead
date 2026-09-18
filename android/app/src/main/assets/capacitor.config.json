@@ -21,6 +21,10 @@
 				"apple": false,
 				"twitter": false
 			}
+		},
+		"LocalNotifications": {
+			"smallIcon": "ic_stat_proplead",
+			"iconColor": "#059669"
 		}
 	}
 }

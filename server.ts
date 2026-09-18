@@ -259,6 +259,7 @@ function parseServiceAccountCredentials(raw?: string): any | null {
 
   // If user provided a standard Google API key (starts with 'AIza'), this is NOT a service account JSON
   if (trimmed.startsWith('AIza')) {
+    console.warn('[Google Play Auth] GOOGLE_PLAY_SERVICE_ACCOUNT_KEY starts with "AIza" (Google API Key). Google Play Developer API requires a Google Cloud Service Account JSON credentials object with private_key.');
     return null;
   }
 
@@ -1077,10 +1078,19 @@ async function startServer() {
 
   // 1. Health check
   app.get('/api/health', (req, res) => {
+    const rawKey = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY || '';
+    const trimmed = rawKey.trim();
+    const isApiKey = trimmed.startsWith('AIza');
+    const saCredentials = parseServiceAccountCredentials(rawKey);
+
     res.json({
       status: 'ok',
       service: 'proplead-billing-server',
-      googlePlayApiConfigured: Boolean(parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY)),
+      googlePlayApiConfigured: Boolean(saCredentials),
+      serviceAccountEmail: saCredentials?.client_email || null,
+      serviceAccountStatus: isApiKey
+        ? 'INVALID_API_KEY_AIza (Service account JSON required, not API key)'
+        : (saCredentials ? 'CONFIGURED' : (trimmed ? 'INVALID_FORMAT' : 'NOT_CONFIGURED')),
       timestamp: new Date().toISOString(),
     });
   });

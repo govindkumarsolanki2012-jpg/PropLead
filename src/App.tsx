@@ -550,21 +550,59 @@ export function App() {
     leadsRef.current = leads;
   }, [leads]);
 
+  // Pending notification lead ID for cold-start deep linking
+  const [pendingNotificationLeadId, setPendingNotificationLeadId] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem('proplead_pending_lead_id') || null;
+    } catch {
+      return null;
+    }
+  });
+
   // Local Notifications initialization and tap deep-linking
   useEffect(() => {
     initLocalNotifications((extra) => {
-      if (extra.leadId) {
+      const targetId = extra.leadId || extra.visitId;
+      if (targetId) {
+        // 1. Try currently loaded in-memory leads
         const currentList = leadsRef.current || [];
-        const match = currentList.find((l) => l.id === extra.leadId);
-        if (match) {
-          setDetailLead(match);
+        const inMemoryMatch = currentList.find((l) => l.id === targetId);
+        if (inMemoryMatch) {
+          setIsQuickAddOpen(false);
+          setIsFeatureLockedOpen(false);
+          setDetailLead(inMemoryMatch);
           setCurrentTab('leads');
+          try {
+            sessionStorage.removeItem('proplead_pending_lead_id');
+          } catch {}
+          setPendingNotificationLeadId(null);
           return;
         }
-      }
-      if (extra.type === 'visit' || extra.type === 'daily_summary') {
+
+        // 2. Try cached stored leads from localStorage
+        const storedList = getStoredLeads();
+        const storedMatch = storedList.find((l) => l.id === targetId);
+        if (storedMatch) {
+          setIsQuickAddOpen(false);
+          setIsFeatureLockedOpen(false);
+          setDetailLead(storedMatch);
+          setCurrentTab('leads');
+          try {
+            sessionStorage.removeItem('proplead_pending_lead_id');
+          } catch {}
+          setPendingNotificationLeadId(null);
+          return;
+        }
+
+        // 3. Queue for cold start while Firestore sync completes
+        try {
+          sessionStorage.setItem('proplead_pending_lead_id', targetId);
+        } catch {}
+        setPendingNotificationLeadId(targetId);
+        setCurrentTab('leads');
+      } else if (extra.type === 'visit') {
         setCurrentTab('calendar');
-      } else {
+      } else if (extra.type === 'daily_summary') {
         setCurrentTab('leads');
       }
     });
@@ -577,6 +615,23 @@ export function App() {
       });
     }
   }, []);
+
+  // Deep-link: If cold-start was waiting for Firestore/state sync, open lead when leads update
+  useEffect(() => {
+    if (pendingNotificationLeadId && leads.length > 0) {
+      const match = leads.find((l) => l.id === pendingNotificationLeadId);
+      if (match) {
+        setIsQuickAddOpen(false);
+        setIsFeatureLockedOpen(false);
+        setDetailLead(match);
+        setCurrentTab('leads');
+        try {
+          sessionStorage.removeItem('proplead_pending_lead_id');
+        } catch {}
+        setPendingNotificationLeadId(null);
+      }
+    }
+  }, [leads, pendingNotificationLeadId]);
 
   // Initial synchronization for notifications once leads are ready
   const hasInitialNotificationSyncRef = useRef(false);

@@ -2,8 +2,19 @@ import { Capacitor } from '@capacitor/core';
 import { LocalNotifications, Channel, ActionPerformed } from '@capacitor/local-notifications';
 import { Lead, NotificationSettings } from '../types';
 
-export const NOTIFICATION_CHANNEL_ID = 'proplead_reminders';
-export const NOTIFICATION_CHANNEL_NAME = 'PropLead Reminders';
+export const FOLLOWUP_CHANNEL_ID = 'proplead_followups';
+export const FOLLOWUP_CHANNEL_NAME = 'PropLead Follow-ups';
+
+export const VISITS_CHANNEL_ID = 'proplead_visits';
+export const VISITS_CHANNEL_NAME = 'PropLead Property Visits';
+
+// Legacy compatibility alias
+export const NOTIFICATION_CHANNEL_ID = FOLLOWUP_CHANNEL_ID;
+export const NOTIFICATION_CHANNEL_NAME = FOLLOWUP_CHANNEL_NAME;
+
+export const NOTIFICATION_GROUP_KEY = 'proplead_reminders_group';
+export const NOTIFICATION_SMALL_ICON = 'ic_stat_proplead';
+export const NOTIFICATION_ICON_COLOR = '#059669';
 export const DAILY_SUMMARY_NOTIFICATION_ID = 888123456;
 
 const NOTIFICATION_SETTINGS_STORAGE_KEY = 'proplead_notification_settings_v1';
@@ -18,6 +29,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
 
 export interface NotificationPayloadExtra {
   leadId?: string;
+  visitId?: string;
   type?: 'followup' | 'visit' | 'daily_summary';
   reminderKind?: '30m' | 'exact' | 'overdue' | 'daily_summary';
 }
@@ -146,11 +158,96 @@ export function parseLocalDateTime(dateStr: string, timeStr?: string): Date | nu
 }
 
 export function formatTimeForDisplay(date: Date): string {
-  return date.toLocaleTimeString('en-IN', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
+  return date
+    .toLocaleTimeString('en-IN', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    })
+    .toUpperCase();
+}
+
+/**
+ * Sanitize a string to avoid null, undefined, or empty placeholder artifacts.
+ */
+export function sanitizeNotificationText(val?: string | null): string {
+  if (val === undefined || val === null) return '';
+  const str = String(val).trim();
+  if (
+    !str ||
+    str.toLowerCase() === 'null' ||
+    str.toLowerCase() === 'undefined' ||
+    str.toLowerCase() === 'nan' ||
+    str === '-' ||
+    str === '•'
+  ) {
+    return '';
+  }
+  return str;
+}
+
+/**
+ * Cleanly join non-empty primary and secondary parts with a bullet separator ' • '.
+ * Guarantees no empty separators, leading/trailing bullets, or null/undefined strings.
+ */
+export function formatNotificationBody(primary: string, secondary?: string): string {
+  const p = sanitizeNotificationText(primary);
+  const s = sanitizeNotificationText(secondary);
+  if (p && s) {
+    return `${p} • ${s}`;
+  }
+  return p || s || 'Scheduled reminder';
+}
+
+/**
+ * Extract requirement summary for a follow-up lead (e.g. '2BHK requirement', 'Villa requirement')
+ */
+export function getLeadRequirementSummary(lead: Lead): string {
+  // If lead has bhk specified (e.g. "2 BHK", "3 BHK", "1 BHK")
+  const bhk = sanitizeNotificationText(lead.bhk);
+  if (bhk && bhk.toLowerCase() !== 'any') {
+    // Format "2 BHK" -> "2BHK requirement"
+    const compactBhk = bhk.replace(/\s+/g, '');
+    return `${compactBhk} requirement`;
+  }
+
+  // If lead has propertyType specified (e.g. "flat", "villa", "plot")
+  const propertyType = sanitizeNotificationText(lead.propertyType);
+  if (propertyType) {
+    const formattedType = propertyType.charAt(0).toUpperCase() + propertyType.slice(1);
+    return `${formattedType} requirement`;
+  }
+
+  // If nextFollowUpNote is short and informative
+  const note = sanitizeNotificationText(lead.nextFollowUpNote);
+  if (note && note.length <= 35 && !/^(call|follow up|visit)$/i.test(note)) {
+    return note;
+  }
+
+  return 'Requirement details';
+}
+
+/**
+ * Extract location summary for a property visit (e.g. 'Madhurawada', 'Sector 57')
+ */
+export function getLeadLocationSummary(lead: Lead): string {
+  const locality = sanitizeNotificationText(lead.preferredLocality);
+  if (locality) return locality;
+
+  if (Array.isArray(lead.preferredLocations) && lead.preferredLocations.length > 0) {
+    const firstLoc = sanitizeNotificationText(lead.preferredLocations[0]);
+    if (firstLoc) return firstLoc;
+  }
+
+  const city = sanitizeNotificationText(lead.preferredCity);
+  if (city) return city;
+
+  const note = sanitizeNotificationText(lead.nextFollowUpNote);
+  if (note && note.length <= 35 && !/^(call|follow up|visit)$/i.test(note)) {
+    return note;
+  }
+
+  return 'Site visit location';
 }
 
 /**
@@ -167,15 +264,35 @@ export async function initLocalNotifications(onAction?: NotificationActionListen
 
   try {
     if (!isChannelInitialized) {
-      const channel: Channel = {
-        id: NOTIFICATION_CHANNEL_ID,
-        name: NOTIFICATION_CHANNEL_NAME,
-        description: 'Follow-ups and property visits',
-        importance: 4, // High importance (sound + alert)
+      // 1. Delete legacy generic channel if present
+      try {
+        await LocalNotifications.deleteChannel({ id: 'proplead_reminders' });
+      } catch {
+        // Ignore if channel does not exist
+      }
+
+      // 2. PropLead Follow-ups channel (High importance for alerts, clean sound/vibration)
+      const followUpChannel: Channel = {
+        id: FOLLOWUP_CHANNEL_ID,
+        name: FOLLOWUP_CHANNEL_NAME,
+        description: 'Client follow-up reminders and scheduled calls',
+        importance: 4, // High importance (heads-up banner where Android allows)
         visibility: 1, // Public visibility on lockscreen
         vibration: true,
       };
-      await LocalNotifications.createChannel(channel);
+
+      // 3. PropLead Property Visits channel (High importance for site visits)
+      const visitsChannel: Channel = {
+        id: VISITS_CHANNEL_ID,
+        name: VISITS_CHANNEL_NAME,
+        description: 'Site visit reminders and property tours',
+        importance: 4, // High importance (heads-up banner where Android allows)
+        visibility: 1, // Public visibility on lockscreen
+        vibration: true,
+      };
+
+      await LocalNotifications.createChannel(followUpChannel);
+      await LocalNotifications.createChannel(visitsChannel);
       isChannelInitialized = true;
     }
 
@@ -397,15 +514,15 @@ export async function scheduleFollowUpNotifications(
   const notificationsToSchedule: any[] = [];
   const scheduledIds: number[] = [];
   const displayTime = formatTimeForDisplay(scheduledDate);
-  const leadDisplayName = lead.name || 'Customer';
+  const leadDisplayName = sanitizeNotificationText(lead.name) || 'Client';
+  const targetChannelId = isVisit ? VISITS_CHANNEL_ID : FOLLOWUP_CHANNEL_ID;
 
   // 1. 30-minute reminder (only if at least 30 minutes in future)
+  // Priority: DEFAULT importance for advance notification
   if (thirtyMinBefore > now) {
     const id = isVisit ? getVisit30mId(lead.id) : getFollowUp30mId(lead.id);
-    const title = isVisit ? 'Property visit in 30 minutes' : 'Follow-up in 30 minutes';
-    const body = isVisit
-      ? `Visit with ${leadDisplayName} at ${displayTime}`
-      : `${leadDisplayName} needs a follow-up at ${displayTime}`;
+    const title = isVisit ? 'Property visit in 30 min' : 'Follow-up in 30 min';
+    const body = formatNotificationBody(leadDisplayName, displayTime);
 
     notificationsToSchedule.push({
       id,
@@ -415,9 +532,13 @@ export async function scheduleFollowUpNotifications(
         at: new Date(thirtyMinBefore),
         allowWhileIdle: true,
       },
-      channelId: NOTIFICATION_CHANNEL_ID,
+      channelId: targetChannelId,
+      smallIcon: NOTIFICATION_SMALL_ICON,
+      iconColor: NOTIFICATION_ICON_COLOR,
+      group: NOTIFICATION_GROUP_KEY,
       extra: {
         leadId: lead.id,
+        visitId: isVisit ? lead.id : undefined,
         type: isVisit ? 'visit' : 'followup',
         reminderKind: '30m',
       },
@@ -426,9 +547,11 @@ export async function scheduleFollowUpNotifications(
   }
 
   // 2. Exact-time reminder
+  // Priority: HIGH importance for immediate action
   const exactId = isVisit ? getVisitExactId(lead.id) : getFollowUpExactId(lead.id);
   const exactTitle = isVisit ? 'Property visit now' : 'Follow up now';
-  const exactBody = isVisit ? `Visit with ${leadDisplayName}` : `Call ${leadDisplayName}`;
+  const exactSecondary = isVisit ? getLeadLocationSummary(lead) : getLeadRequirementSummary(lead);
+  const exactBody = formatNotificationBody(leadDisplayName, exactSecondary);
 
   notificationsToSchedule.push({
     id: exactId,
@@ -438,9 +561,13 @@ export async function scheduleFollowUpNotifications(
       at: new Date(exactTime),
       allowWhileIdle: true,
     },
-    channelId: NOTIFICATION_CHANNEL_ID,
+    channelId: targetChannelId,
+    smallIcon: NOTIFICATION_SMALL_ICON,
+    iconColor: NOTIFICATION_ICON_COLOR,
+    group: NOTIFICATION_GROUP_KEY,
     extra: {
       leadId: lead.id,
+      visitId: isVisit ? lead.id : undefined,
       type: isVisit ? 'visit' : 'followup',
       reminderKind: 'exact',
     },
@@ -453,12 +580,15 @@ export async function scheduleFollowUpNotifications(
     notificationsToSchedule.push({
       id: overdueId,
       title: 'Follow-up overdue',
-      body: `${leadDisplayName}'s follow-up is overdue`,
+      body: formatNotificationBody(leadDisplayName, 'Follow-up overdue'),
       schedule: {
         at: new Date(overdueTime),
         allowWhileIdle: true,
       },
-      channelId: NOTIFICATION_CHANNEL_ID,
+      channelId: FOLLOWUP_CHANNEL_ID,
+      smallIcon: NOTIFICATION_SMALL_ICON,
+      iconColor: NOTIFICATION_ICON_COLOR,
+      group: NOTIFICATION_GROUP_KEY,
       extra: {
         leadId: lead.id,
         type: 'followup',
@@ -545,7 +675,10 @@ export async function scheduleDailySummaryNotification(leads: Lead[]): Promise<v
               at: targetDate,
               allowWhileIdle: true,
             },
-            channelId: NOTIFICATION_CHANNEL_ID,
+            channelId: FOLLOWUP_CHANNEL_ID,
+            smallIcon: NOTIFICATION_SMALL_ICON,
+            iconColor: NOTIFICATION_ICON_COLOR,
+            group: NOTIFICATION_GROUP_KEY,
             extra: {
               type: 'daily_summary',
               reminderKind: 'daily_summary',
