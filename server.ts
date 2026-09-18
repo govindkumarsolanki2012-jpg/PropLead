@@ -656,17 +656,17 @@ export async function getSubscriptionRecord(
 async function saveSubscriptionRecord(
   record: UserSubscriptionRecord,
   idToken?: string
-): Promise<void> {
+): Promise<{ subscriptionsCollectionSynced: boolean; userProfileSynced: boolean }> {
   record.updatedAt = new Date().toISOString();
   subscriptionStore.set(record.userId, record);
   persistSubscriptionStoreToDisk();
 
   // 1. Sync to /subscriptions/{userId}
-  await syncSubscriptionToFirestore(record, idToken);
+  const subOk = await syncSubscriptionToFirestore(record, idToken);
 
   // 2. Sync to /users/{userId} to immediately unlock Pro capabilities for the client
   const isSub = record.subscriptionStatus === 'ACTIVE' || record.subscriptionStatus === 'CANCELED_BUT_ACTIVE';
-  await syncUserProfileSubscriptionToFirestore(
+  const userOk = await syncUserProfileSubscriptionToFirestore(
     record.userId,
     {
       isSubscribed: isSub,
@@ -682,6 +682,11 @@ async function saveSubscriptionRecord(
     },
     idToken
   );
+
+  return {
+    subscriptionsCollectionSynced: subOk,
+    userProfileSynced: userOk,
+  };
 }
 
 // Subscription product & 2 paid base plans matching Google Play Console setup
@@ -779,115 +784,227 @@ function getAndroidPublisherClient() {
 
 /**
  * Authoritatively verifies purchaseToken with Google Play Developer API
- * Parses the exact expiry timestamp returned by Google Play (never calculating locally)
+ * Uses Google Play Developer API as the sole authoritative source of truth.
+ * Parses and returns the exact expiry timestamp returned by Google Play (never calculating locally).
  */
 async function verifyGooglePlaySubscriptionToken(
   purchaseToken: string,
   productId: string = 'property_agent_pro',
-  basePlanId: string = 'quarterly'
+  basePlanId: string = 'quarterly',
+  packageName: string = PACKAGE_NAME
 ): Promise<{
   isValid: boolean;
   orderId: string;
-  subscriptionStatus: 'ACTIVE' | 'CANCELED_BUT_ACTIVE' | 'PAYMENT_ISSUE' | 'EXPIRED' | 'ON_HOLD';
-  subscriptionExpiryDate: string; // ISO string from Google Play
+  subscriptionStatus: 'ACTIVE' | 'CANCELED_BUT_ACTIVE' | 'PAYMENT_ISSUE' | 'EXPIRED' | 'ON_HOLD' | 'PENDING';
+  subscriptionExpiryDate: string; // Authoritative ISO timestamp string directly from Google Play
   autoRenewing: boolean;
   acknowledged: boolean;
+  verificationPending?: boolean;
   error?: string;
+  message?: string;
+  basePlanId?: string;
 }> {
-  const durationDays = basePlanId === 'quarterly' ? 90 : 30;
+  const effectivePackage = packageName || PACKAGE_NAME || 'com.proplead.tracker';
   const client = getAndroidPublisherClient();
 
-  if (client) {
-    try {
-      console.log(`[Google Play API] Querying live Google Play Developer API (v2) for token ${purchaseToken.substring(0, 12)}...`);
-
-      const resV2 = await client.purchases.subscriptionsv2.get({
-        packageName: PACKAGE_NAME,
-        token: purchaseToken,
-      });
-
-      const subData = resV2.data;
-      console.log('[Google Play API v2 Response]', JSON.stringify(subData));
-
-      const lineItem = subData.lineItems?.[0];
-      const expiryTime = lineItem?.expiryTime; // ISO timestamp string from Google Play
-      const orderId = subData.latestOrderId || `GPA.${Date.now()}`;
-      const autoRenewing = lineItem?.autoRenewingPlan != null;
-      const subState = subData.subscriptionState; // 1: PENDING, 2: ACTIVE, 3: PAUSED, 4: IN_GRACE_PERIOD, 5: ON_HOLD, 6: CANCELED, 7: EXPIRED
-
-      let subscriptionStatus: 'ACTIVE' | 'CANCELED_BUT_ACTIVE' | 'PAYMENT_ISSUE' | 'EXPIRED' | 'ON_HOLD' = 'ACTIVE';
-
-      if (subState === 'SUBSCRIPTION_STATE_IN_GRACE_PERIOD') {
-        subscriptionStatus = 'PAYMENT_ISSUE';
-      } else if (subState === 'SUBSCRIPTION_STATE_ON_HOLD') {
-        subscriptionStatus = 'ON_HOLD';
-      } else if (subState === 'SUBSCRIPTION_STATE_CANCELED') {
-        subscriptionStatus = 'CANCELED_BUT_ACTIVE';
-      } else if (subState === 'SUBSCRIPTION_STATE_EXPIRED') {
-        subscriptionStatus = 'EXPIRED';
-      }
-
-      // Acknowledge if pending
-      if (subData.acknowledgementState !== 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED') {
-        try {
-          await client.purchases.subscriptions.acknowledge({
-            packageName: PACKAGE_NAME,
-            subscriptionId: productId,
-            token: purchaseToken,
-            requestBody: {},
-          });
-          console.log('[Google Play API] Acknowledged purchase with Google Play.');
-        } catch (ackErr) {
-          console.warn('[Google Play API] Acknowledge call non-fatal warning:', ackErr);
-        }
-      }
-
-      return {
-        isValid: true,
-        orderId,
-        subscriptionStatus,
-        subscriptionExpiryDate: expiryTime || new Date(Date.now() + durationDays * 86400000).toISOString(),
-        autoRenewing,
-        acknowledged: true,
-      };
-    } catch (apiErr: any) {
-      console.error('[Google Play Developer API Error]', apiErr);
-      const isAuthError = apiErr?.message?.includes('credentials') || 
-                          apiErr?.message?.includes('UNAUTHENTICATED') || 
-                          apiErr?.code === 401;
-
-      // In non-production or if credentials are not configured yet, fallback to sandbox response
-      if (process.env.NODE_ENV !== 'production' && isAuthError) {
-        console.warn('[Google Play Developer API] Falling back to sandbox response in non-production environment.');
-      } else {
-        return {
-          isValid: false,
-          orderId: '',
-          subscriptionStatus: 'EXPIRED',
-          subscriptionExpiryDate: '',
-          autoRenewing: false,
-          acknowledged: false,
-          error: apiErr?.message || 'Google Play Developer API verification failed',
-        };
-      }
-    }
+  if (!client) {
+    console.warn('[Google Play Developer API] Android Publisher API client is not initialized or credentials missing.');
+    return {
+      isValid: false,
+      orderId: '',
+      subscriptionStatus: 'PENDING',
+      subscriptionExpiryDate: '',
+      autoRenewing: false,
+      acknowledged: false,
+      verificationPending: true,
+      error: 'SUBSCRIPTION_VERIFICATION_PENDING',
+      message: 'Purchase completed but verification is temporarily unavailable.',
+    };
   }
 
-  // Development / Sandbox mode (exact Google Play RFC compliant response structure)
-  // When no service account key is injected, simulates authoritative Google Play server response
-  const orderId = `GPA.${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(10000 + Math.random() * 90000)}`;
-  
-  // Google Play provides the official expiry timestamp matching plan duration
-  const googlePlayExpiry = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    console.log(`[Google Play API] Authoritatively querying Google Play Developer API for package "${effectivePackage}", plan "${basePlanId}", token prefix: "${purchaseToken.substring(0, 10)}..."`);
 
-  return {
-    isValid: true,
-    orderId,
-    subscriptionStatus: 'ACTIVE',
-    subscriptionExpiryDate: googlePlayExpiry,
-    autoRenewing: true,
-    acknowledged: true,
-  };
+    let subData: any = null;
+    try {
+      const resV2 = await client.purchases.subscriptionsv2.get({
+        packageName: effectivePackage,
+        token: purchaseToken,
+      });
+      subData = resV2.data;
+    } catch (v2Err: any) {
+      console.warn(`[Google Play API] subscriptionsv2.get notice (${v2Err?.message}), checking subscriptions.get v1 API...`);
+      try {
+        const resV1 = await client.purchases.subscriptions.get({
+          packageName: effectivePackage,
+          subscriptionId: productId,
+          token: purchaseToken,
+        });
+        const v1Data = resV1.data;
+        subData = {
+          latestOrderId: v1Data.orderId,
+          lineItems: [
+            {
+              expiryTime: v1Data.expiryTimeMillis ? new Date(Number(v1Data.expiryTimeMillis)).toISOString() : null,
+              autoRenewingPlan: v1Data.autoRenewing ? {} : undefined,
+              offerDetails: {
+                basePlanId: basePlanId,
+              },
+            },
+          ],
+          acknowledgementState: v1Data.acknowledgementState === 1 ? 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED' : 'ACKNOWLEDGEMENT_STATE_PENDING',
+          subscriptionState: v1Data.paymentState === 1 ? 'SUBSCRIPTION_STATE_ACTIVE' : (v1Data.paymentState === 0 ? 'SUBSCRIPTION_STATE_PENDING' : 'SUBSCRIPTION_STATE_ACTIVE'),
+        };
+      } catch {
+        throw v2Err;
+      }
+    }
+
+    console.log('[Google Play API Authoritative Response]', JSON.stringify(subData));
+
+    const lineItem = subData.lineItems?.[0];
+    const expiryTime: string | null = lineItem?.expiryTime || null;
+
+    // Strict Expiry Rule: Do not calculate local days. Expiry must come directly from Google Play.
+    if (!expiryTime) {
+      console.error('[Google Play API] Google Play response does not contain an authoritative expiry timestamp.');
+      return {
+        isValid: false,
+        orderId: subData.latestOrderId || '',
+        subscriptionStatus: 'PENDING',
+        subscriptionExpiryDate: '',
+        autoRenewing: false,
+        acknowledged: false,
+        verificationPending: true,
+        error: 'SUBSCRIPTION_VERIFICATION_PENDING',
+        message: 'Purchase completed but verification is temporarily unavailable.',
+      };
+    }
+
+    const expiryMs = new Date(expiryTime).getTime();
+    if (isNaN(expiryMs) || expiryMs <= Date.now()) {
+      return {
+        isValid: false,
+        orderId: subData.latestOrderId || '',
+        subscriptionStatus: 'EXPIRED',
+        subscriptionExpiryDate: expiryTime,
+        autoRenewing: false,
+        acknowledged: true,
+        error: 'Subscription has expired in Google Play.',
+      };
+    }
+
+    const orderId = subData.latestOrderId || `GPA.${Date.now()}`;
+    const autoRenewing = lineItem?.autoRenewingPlan != null;
+    const subState = subData.subscriptionState;
+
+    if (subState === 'SUBSCRIPTION_STATE_EXPIRED') {
+      return {
+        isValid: false,
+        orderId,
+        subscriptionStatus: 'EXPIRED',
+        subscriptionExpiryDate: expiryTime,
+        autoRenewing: false,
+        acknowledged: true,
+        error: 'Subscription has expired in Google Play.',
+      };
+    }
+
+    if (
+      subState === 'SUBSCRIPTION_STATE_ON_HOLD' ||
+      subState === 'SUBSCRIPTION_STATE_PAUSED' ||
+      subState === 'SUBSCRIPTION_STATE_PENDING'
+    ) {
+      return {
+        isValid: false,
+        orderId,
+        subscriptionStatus: 'PENDING',
+        subscriptionExpiryDate: expiryTime,
+        autoRenewing: false,
+        acknowledged: false,
+        error: `Google Play subscription is not in an active paid state (${subState}).`,
+      };
+    }
+
+    // Check base plan match if returned by Google Play
+    const playBasePlanId = lineItem?.offerDetails?.basePlanId;
+    if (playBasePlanId && playBasePlanId !== 'monthly' && playBasePlanId !== 'quarterly') {
+      return {
+        isValid: false,
+        orderId,
+        subscriptionStatus: 'EXPIRED',
+        subscriptionExpiryDate: expiryTime,
+        autoRenewing: false,
+        acknowledged: false,
+        error: `Unrecognized Google Play base plan: ${playBasePlanId}. Expected monthly or quarterly.`,
+      };
+    }
+
+    let subscriptionStatus: 'ACTIVE' | 'CANCELED_BUT_ACTIVE' | 'PAYMENT_ISSUE' = 'ACTIVE';
+    if (subState === 'SUBSCRIPTION_STATE_IN_GRACE_PERIOD') {
+      subscriptionStatus = 'PAYMENT_ISSUE';
+    } else if (subState === 'SUBSCRIPTION_STATE_CANCELED') {
+      subscriptionStatus = 'CANCELED_BUT_ACTIVE';
+    }
+
+    // Acknowledge if pending
+    if (subData.acknowledgementState !== 'ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED') {
+      try {
+        await client.purchases.subscriptions.acknowledge({
+          packageName: effectivePackage,
+          subscriptionId: productId,
+          token: purchaseToken,
+          requestBody: {},
+        });
+        console.log('[Google Play API] Acknowledged purchase with Google Play.');
+      } catch (ackErr) {
+        console.warn('[Google Play API] Acknowledge call non-fatal notice:', ackErr);
+      }
+    }
+
+    return {
+      isValid: true,
+      orderId,
+      subscriptionStatus,
+      subscriptionExpiryDate: expiryTime,
+      autoRenewing,
+      acknowledged: true,
+      basePlanId: playBasePlanId || basePlanId,
+    };
+  } catch (apiErr: any) {
+    console.error('[Google Play Developer API Error]', apiErr?.message || apiErr);
+
+    const errMessage = String(apiErr?.message || '');
+    const statusCode = apiErr?.code || apiErr?.status;
+
+    // Definite 404 from Google Play: token does not exist on Google Play
+    if (statusCode === 404 || errMessage.includes('Requested entity was not found') || errMessage.includes('not found')) {
+      return {
+        isValid: false,
+        orderId: '',
+        subscriptionStatus: 'EXPIRED',
+        subscriptionExpiryDate: '',
+        autoRenewing: false,
+        acknowledged: false,
+        error: 'Google Play reported that this purchase token was not found.',
+      };
+    }
+
+    // For all other errors (permissions, service-account unlinked, credentials, network, timeout, 5xx):
+    // Never trust client purchase token and never grant 30/90 days of Pro access.
+    // Return structured pending verification.
+    return {
+      isValid: false,
+      orderId: '',
+      subscriptionStatus: 'PENDING',
+      subscriptionExpiryDate: '',
+      autoRenewing: false,
+      acknowledged: false,
+      verificationPending: true,
+      error: 'SUBSCRIPTION_VERIFICATION_PENDING',
+      message: 'Purchase completed but verification is temporarily unavailable.',
+    };
+  }
 }
 
 async function startServer() {
@@ -1060,75 +1177,157 @@ async function startServer() {
     }
   });
 
-  // 4. Verify Google Play Purchase using Google Play Developer API as Source of Truth
+  // 4. Verify Google Play Purchase using Google Play Developer API as sole Source of Truth
   const handleVerifyPurchase = async (req: express.Request, res: express.Response) => {
     // Ensure all responses are strictly JSON
     res.setHeader('Content-Type', 'application/json');
 
     try {
+      // 1. FIREBASE UID SECURITY
+      // Require Authorization: Bearer <Firebase ID token>
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        console.warn('[Google Play Verification] Rejected: Missing Authorization Bearer token.');
+        return res.status(401).json({
+          success: false,
+          error: 'Authentication required. Missing Bearer token.',
+          message: 'Please sign in to verify your purchase.',
+        });
+      }
+
+      const idToken = authHeader.substring(7).trim();
+      if (!idToken) {
+        console.warn('[Google Play Verification] Rejected: Empty Bearer token.');
+        return res.status(401).json({
+          success: false,
+          error: 'Authentication required. Missing Bearer token.',
+          message: 'Please sign in to verify your purchase.',
+        });
+      }
+
+      // Verify token server-side via Google public certificates
+      const verifiedToken = await verifyFirebaseIdToken(idToken);
+      if (!verifiedToken || !verifiedToken.uid) {
+        console.warn('[Google Play Verification] Rejected: Firebase ID token is invalid or expired.');
+        return res.status(401).json({
+          success: false,
+          error: 'Invalid or expired Firebase ID token.',
+          message: 'Your session has expired. Please sign in again.',
+        });
+      }
+
+      // Derive UID EXCLUSIVELY from verifiedToken.uid - NEVER trust client-supplied userId
+      const verifiedUid = verifiedToken.uid;
+
       const {
         purchaseToken,
         productId = 'property_agent_pro',
         basePlanId = 'quarterly',
+        packageName: bodyPackageName,
         userId: bodyUserId,
       } = req.body || {};
 
-      console.log(`[Google Play Verification] Received verification request for product "${productId}", plan "${basePlanId}", bodyUserId: "${bodyUserId}"`);
-
-      if (!purchaseToken) {
-        return res.status(400).json({
+      // If client supplied a userId in the body, reject if it does not match verified UID
+      if (bodyUserId && String(bodyUserId) !== verifiedUid) {
+        console.warn(`[Google Play Verification] Rejected: Client body userId "${bodyUserId}" does not match token UID "${verifiedUid}".`);
+        return res.status(403).json({
           success: false,
-          error: 'Missing Google Play purchaseToken for server verification',
+          error: 'Forbidden: Authenticated UID does not match requested userId.',
         });
       }
 
-      // Authenticate via Bearer token if provided
-      let verifiedUid: string | null = null;
-      const idToken = extractIdToken(req);
+      // 4. PURCHASE OWNERSHIP VALIDATIONS (HTTP 400 for malformed purchase data)
+      const REQUIRED_PACKAGE_NAME = 'com.proplead.tracker';
+      const REQUIRED_PRODUCT_ID = 'property_agent_pro';
 
-      if (idToken) {
-        const verified = await verifyFirebaseIdToken(idToken);
-        if (!verified) {
-          return res.status(401).json({
-            success: false,
-            error: 'Invalid or expired Firebase ID token.',
-          });
-        }
-        verifiedUid = verified.uid;
-        // Verify client-supplied userId matches the verified UID
-        if (bodyUserId && bodyUserId !== verifiedUid) {
+      // Log request details
+      console.log(`[Google Play Verification] Request received: ${req.method} ${req.originalUrl || req.path}`);
+      console.log(`[Google Play Verification] Authenticated UID: ${verifiedUid}`);
+      console.log(`[Google Play Verification] Product ID: ${productId}`);
+      console.log(`[Google Play Verification] Base Plan ID: ${basePlanId}`);
+      console.log(`[Google Play Verification] Purchase token present: ${purchaseToken ? 'YES' : 'NO'} (length: ${purchaseToken ? String(purchaseToken).length : 0})`);
+
+      if (!purchaseToken || typeof purchaseToken !== 'string' || purchaseToken.trim().length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Missing or invalid purchaseToken for server verification.',
+        });
+      }
+
+      if (bodyPackageName && bodyPackageName !== REQUIRED_PACKAGE_NAME) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid package name: "${bodyPackageName}". Expected "${REQUIRED_PACKAGE_NAME}".`,
+        });
+      }
+
+      if (productId !== REQUIRED_PRODUCT_ID) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid product ID: "${productId}". Expected "${REQUIRED_PRODUCT_ID}".`,
+        });
+      }
+
+      if (basePlanId !== 'monthly' && basePlanId !== 'quarterly') {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid base plan ID: "${basePlanId}". Expected "monthly" or "quarterly".`,
+        });
+      }
+
+      // Ensure purchase token is not already registered to a different account (prevent token theft/replay)
+      for (const [existingUid, existingRec] of subscriptionStore.entries()) {
+        if (existingRec.purchaseToken === purchaseToken && existingUid !== verifiedUid) {
+          console.error(`[Google Play Verification Security Alert] Token already registered to UID "${existingUid}". Rejecting UID "${verifiedUid}".`);
           return res.status(403).json({
             success: false,
-            error: 'Forbidden: Authenticated UID does not match requested userId.',
+            error: 'This purchase token is already registered to a different account.',
           });
         }
-      } else if (bodyUserId) {
-        verifiedUid = bodyUserId;
       }
 
-      if (!verifiedUid) {
-        return res.status(400).json({
+      // 2. Query Google Play Developer API as the sole authoritative source of truth
+      const verification = await verifyGooglePlaySubscriptionToken(
+        purchaseToken,
+        REQUIRED_PRODUCT_ID,
+        basePlanId,
+        REQUIRED_PACKAGE_NAME
+      );
+
+      console.log(`[Google Play Verification] Google Play verification result: ${verification.isValid ? 'SUCCESS' : 'FAILED'} (status: "${verification.subscriptionStatus}", pending: ${Boolean(verification.verificationPending)})`);
+
+      // 2 & 6. If Google Play verification cannot be completed: HTTP 503 JSON
+      if (verification.verificationPending) {
+        return res.status(503).json({
           success: false,
-          error: 'Missing user identification (userId or valid auth token) for subscription verification.',
+          error: 'SUBSCRIPTION_VERIFICATION_PENDING',
+          message: 'Purchase completed but verification is temporarily unavailable.',
         });
       }
 
-      console.log(`[Google Play Verification] Verifying token for user ${verifiedUid} with plan ${basePlanId}...`);
-
-      // Authoritatively query Google Play Developer API (or RFC-compliant sandbox response)
-      const verification = await verifyGooglePlaySubscriptionToken(purchaseToken, productId, basePlanId);
-
+      // If Google Play returned invalid or expired purchase: HTTP 400
       if (!verification.isValid) {
         console.error(`[Google Play Verification] Token validation rejected for user ${verifiedUid}:`, verification.error);
         return res.status(400).json({
           success: false,
-          error: verification.error || 'Google Play purchase token verification failed',
+          error: verification.error || 'Google Play purchase token verification failed.',
         });
       }
 
+      // 3. EXPIRY DATE: Authoritative expiry timestamp must be present from Google Play
+      if (!verification.subscriptionExpiryDate) {
+        console.error('[Google Play Verification] Missing authoritative expiry date from Google Play.');
+        return res.status(503).json({
+          success: false,
+          error: 'SUBSCRIPTION_VERIFICATION_PENDING',
+          message: 'Purchase completed but verification is temporarily unavailable.',
+        });
+      }
+
+      const effectiveBasePlan = verification.basePlanId || basePlanId;
       const nowIso = new Date().toISOString();
 
-      // Fetch or initialize user subscription record
+      // Retrieve or initialize subscription record for verified UID
       let record: UserSubscriptionRecord;
       try {
         const subResult = await getSubscriptionRecord(verifiedUid, idToken);
@@ -1142,17 +1341,16 @@ async function startServer() {
             trialEndDate: nowIso,
             subscriptionExpiryDate: verification.subscriptionExpiryDate,
             expiryDate: verification.subscriptionExpiryDate,
-            subscriptionProductId: productId,
-            subscriptionBasePlan: basePlanId,
-            planId: basePlanId,
+            subscriptionProductId: REQUIRED_PRODUCT_ID,
+            subscriptionBasePlan: effectiveBasePlan,
+            planId: effectiveBasePlan,
             purchaseDate: nowIso,
-            autoRenewing: true,
+            autoRenewing: verification.autoRenewing,
             acknowledged: true,
             updatedAt: nowIso,
           };
         }
-      } catch (recErr) {
-        console.warn(`[Google Play Verification] Notice retrieving record for ${verifiedUid}, initializing active record:`, recErr);
+      } catch {
         record = {
           userId: verifiedUid,
           subscriptionStatus: 'ACTIVE',
@@ -1160,56 +1358,65 @@ async function startServer() {
           trialEndDate: nowIso,
           subscriptionExpiryDate: verification.subscriptionExpiryDate,
           expiryDate: verification.subscriptionExpiryDate,
-          subscriptionProductId: productId,
-          subscriptionBasePlan: basePlanId,
-          planId: basePlanId,
+          subscriptionProductId: REQUIRED_PRODUCT_ID,
+          subscriptionBasePlan: effectiveBasePlan,
+          planId: effectiveBasePlan,
           purchaseDate: nowIso,
-          autoRenewing: true,
+          autoRenewing: verification.autoRenewing,
           acknowledged: true,
           updatedAt: nowIso,
         };
       }
 
-      // Authoritatively mark user subscription active
-      record.subscriptionStatus = 'ACTIVE';
-      record.subscriptionProductId = productId;
-      record.subscriptionBasePlan = basePlanId;
-      record.planId = basePlanId;
+      // 5. FIRESTORE: Authoritatively update record ONLY after successful Google Play verification
+      record.userId = verifiedUid;
+      record.subscriptionStatus = verification.subscriptionStatus === 'CANCELED_BUT_ACTIVE' ? 'CANCELED_BUT_ACTIVE' : 'ACTIVE';
+      record.subscriptionProductId = REQUIRED_PRODUCT_ID;
+      record.subscriptionBasePlan = effectiveBasePlan;
+      record.planId = effectiveBasePlan;
       record.purchaseDate = record.purchaseDate || nowIso;
       record.purchaseToken = purchaseToken;
       record.orderId = verification.orderId;
-      record.subscriptionExpiryDate = verification.subscriptionExpiryDate; // Strictly from Google Play
+      record.subscriptionExpiryDate = verification.subscriptionExpiryDate; // Strictly authoritative from Google Play
       record.expiryDate = verification.subscriptionExpiryDate;
       record.autoRenewing = verification.autoRenewing;
       record.acknowledged = verification.acknowledged;
       record.paymentIssueMessage = undefined;
       record.lastVerifiedAt = nowIso;
 
+      // 5. Persist to Firestore:
+      // /subscriptions/{verifiedUid}: subscriptionStatus = ACTIVE
+      // /users/{verifiedUid}: isSubscribed = true, subscriptionStatus = ACTIVE
+      let firestoreResult = { subscriptionsCollectionSynced: false, userProfileSynced: false };
       try {
-        await saveSubscriptionRecord(record, idToken);
+        firestoreResult = await saveSubscriptionRecord(record, idToken);
       } catch (saveErr) {
-        console.error('[Google Play Verification] Error persisting verified record to store:', saveErr);
+        console.error('[Google Play Verification] Error persisting verified record to Firestore:', saveErr);
       }
 
-      console.log(`[Google Play Billing] Subscription verified and activated for ${verifiedUid}. Plan: ${basePlanId}, Expiry: ${record.subscriptionExpiryDate}, OrderId: ${verification.orderId}`);
+      const firestoreStatusString = `subscriptions: ${firestoreResult.subscriptionsCollectionSynced ? 'UPDATED' : 'SKIPPED/FAILED'}, user profile: ${firestoreResult.userProfileSynced ? 'UPDATED' : 'SKIPPED/FAILED'}`;
+      console.log(`[Google Play Verification] Firestore update result: ${firestoreStatusString}`);
+      console.log(`[Google Play Billing] Subscription verified and activated for ${verifiedUid}. Plan: ${effectiveBasePlan}, Expiry: ${record.subscriptionExpiryDate}, OrderId: ${verification.orderId}`);
 
+      // 6. HTTP 200 ONLY after successful verification
       return res.status(200).json({
         success: true,
-        verified: true,
-        orderId: verification.orderId,
-        subscriptionStatus: 'ACTIVE',
+        subscriptionStatus: 'active',
+        plan: effectiveBasePlan,
+        planId: effectiveBasePlan,
+        subscriptionBasePlan: effectiveBasePlan,
+        subscriptionProductId: REQUIRED_PRODUCT_ID,
         subscriptionExpiryDate: record.subscriptionExpiryDate,
         expiryDate: record.subscriptionExpiryDate,
-        subscriptionProductId: record.subscriptionProductId,
-        subscriptionBasePlan: record.subscriptionBasePlan,
-        planId: record.planId,
+        orderId: verification.orderId,
         purchaseDate: record.purchaseDate,
         lastVerifiedAt: record.lastVerifiedAt,
         autoRenewing: record.autoRenewing,
+        verified: true,
         message: 'Google Play subscription verified and activated successfully.',
       });
     } catch (unexpectedErr: any) {
-      console.error('[Google Play Verification Unexpected Error]', unexpectedErr);
+      console.error('[Google Play Billing Verification Exception]:', unexpectedErr);
       return res.status(500).json({
         success: false,
         error: unexpectedErr?.message || 'Unexpected error occurred during purchase verification.',
@@ -1221,9 +1428,10 @@ async function startServer() {
   app.post('/api/billing/verify-purchase', handleVerifyPurchase);
   app.post('/api/billing/verify', handleVerifyPurchase);
   app.post('/api/verify-purchase', handleVerifyPurchase);
+  app.post('/api/verify', handleVerifyPurchase);
 
   // Reject non-POST requests to verification endpoints with clear JSON (never HTML fallback)
-  app.all(['/api/billing/verify-purchase', '/api/billing/verify', '/api/verify-purchase'], (req, res) => {
+  app.all(['/api/billing/verify-purchase', '/api/billing/verify', '/api/verify-purchase', '/api/verify'], (req, res) => {
     res.status(405).json({
       success: false,
       error: `Method ${req.method} not allowed on verification endpoint. Please use POST.`,
@@ -1252,6 +1460,15 @@ async function startServer() {
 
     if (tokenToVerify) {
       const verification = await verifyGooglePlaySubscriptionToken(tokenToVerify, productId);
+
+      if (verification.verificationPending) {
+        return res.status(503).json({
+          success: false,
+          error: 'SUBSCRIPTION_VERIFICATION_PENDING',
+          message: 'Google Play verification is temporarily unavailable. Please retry shortly.',
+        });
+      }
+
       if (
         verification.isValid &&
         (verification.subscriptionStatus === 'ACTIVE' || verification.subscriptionStatus === 'CANCELED_BUT_ACTIVE')
@@ -1346,11 +1563,19 @@ async function startServer() {
         // Find matching record by purchaseToken in persistent store
         for (const rec of subscriptionStore.values()) {
           if (rec.purchaseToken === purchaseToken) {
-            rec.subscriptionStatus = verification.subscriptionStatus;
-            rec.subscriptionExpiryDate = verification.subscriptionExpiryDate;
-            rec.autoRenewing = verification.autoRenewing;
-            await saveSubscriptionRecord(rec);
-            console.log(`[Google Play RTDN] Updated subscription for user ${rec.userId} to ${rec.subscriptionStatus}`);
+            if (verification.isValid) {
+              rec.subscriptionStatus =
+                verification.subscriptionStatus === 'CANCELED_BUT_ACTIVE'
+                  ? 'CANCELED_BUT_ACTIVE'
+                  : (verification.subscriptionStatus === 'PAYMENT_ISSUE' ? 'PAYMENT_ISSUE' : 'ACTIVE');
+              rec.subscriptionExpiryDate = verification.subscriptionExpiryDate;
+              rec.autoRenewing = verification.autoRenewing;
+              await saveSubscriptionRecord(rec);
+              console.log(`[Google Play RTDN] Updated subscription for user ${rec.userId} to ${rec.subscriptionStatus}`);
+            } else if (verification.subscriptionStatus === 'EXPIRED') {
+              rec.subscriptionStatus = 'EXPIRED';
+              await saveSubscriptionRecord(rec);
+            }
             break;
           }
         }

@@ -56,7 +56,7 @@ export const PRO_FEATURES_LIST = [
 
 // Production Cloud Run billing service endpoint
 // In Native Android (Capacitor), requests hit this public HTTPS endpoint directly (bypassing AI Studio dev cookie proxy)
-export const DEFAULT_PRODUCTION_BILLING_URL = 'https://proplead-billing-219254937828.asia-southeast1.run.app';
+export const DEFAULT_PRODUCTION_BILLING_URL = 'https://proplead-36803800158.asia-south1.run.app';
 
 export const REMOTE_BACKEND_URL = (
   (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_BILLING_BACKEND_URL) ||
@@ -224,8 +224,12 @@ export function getEffectiveSubscriptionStatus(
 } {
   // Normalize legacy string flags if present
   let rawStatus = profile.subscriptionStatus;
-  if (rawStatus === 'subscribed') rawStatus = 'ACTIVE';
-  if (rawStatus === 'expired') rawStatus = 'EXPIRED';
+  if (typeof rawStatus === 'string') {
+    const upper = rawStatus.toUpperCase();
+    if (upper === 'ACTIVE' || upper === 'SUBSCRIBED') rawStatus = 'ACTIVE';
+    else if (upper === 'EXPIRED') rawStatus = 'EXPIRED';
+    else if (upper === 'TRIAL') rawStatus = 'TRIAL';
+  }
 
   // Server authoritative status takes precedence
   let status: SubscriptionStatus = (rawStatus as SubscriptionStatus) || (profile.isSubscribed ? 'ACTIVE' : 'TRIAL');
@@ -437,7 +441,15 @@ export async function launchGooglePlayPurchase(
   userId: string,
   onProgress?: (step: string) => void,
   basePlanId: 'monthly' | 'quarterly' = 'quarterly'
-): Promise<{ success: boolean; profileUpdates?: Partial<UserProfile>; pending?: boolean; error?: string }> {
+): Promise<{
+  success: boolean;
+  profileUpdates?: Partial<UserProfile>;
+  pending?: boolean;
+  verificationPending?: boolean;
+  purchaseToken?: string;
+  error?: string;
+  message?: string;
+}> {
   try {
     const selectedPlan = SUBSCRIPTION_PLANS[basePlanId] || SUBSCRIPTION_PLANS.quarterly;
     onProgress?.('Connecting to Google Play Billing...');
@@ -447,12 +459,13 @@ export async function launchGooglePlayPurchase(
       onProgress?.('Verifying subscription with server (Sandbox Mode)...');
 
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      try {
-        const idToken = await auth.currentUser?.getIdToken();
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        const idToken = await currentUser.getIdToken();
         if (idToken) {
           headers['Authorization'] = `Bearer ${idToken}`;
         }
-      } catch {}
+      }
 
       const verifyEndpoint = getBillingApiUrl('/api/billing/verify-purchase');
       const testToken = `web_sandbox_token_${Date.now()}_${basePlanId}`;
@@ -461,6 +474,7 @@ export async function launchGooglePlayPurchase(
         purchaseToken: testToken,
         productId: GOOGLE_PLAY_PRODUCT_ID,
         basePlanId,
+        packageName: GOOGLE_PLAY_PACKAGE_NAME,
       };
 
       const verifyRes = await fetch(verifyEndpoint, {
@@ -469,16 +483,31 @@ export async function launchGooglePlayPurchase(
         body: JSON.stringify(verificationPayload),
       });
 
-      const verifyData = await verifyRes.json();
+      let verifyData: any = null;
+      try {
+        verifyData = await verifyRes.json();
+      } catch {
+        // Non-JSON
+      }
+
       if (!verifyRes.ok || !verifyData?.success) {
-        throw new Error(verifyData?.error || 'Verification failed in sandbox mode.');
+        if (verifyRes.status === 503 || verifyData?.error === 'SUBSCRIPTION_VERIFICATION_PENDING') {
+          return {
+            success: false,
+            verificationPending: true,
+            purchaseToken: testToken,
+            error: 'SUBSCRIPTION_VERIFICATION_PENDING',
+            message: verifyData?.message || 'Purchase completed but verification is temporarily unavailable.',
+          };
+        }
+        return {
+          success: false,
+          error: verifyData?.error || 'Verification failed in sandbox mode.',
+        };
       }
 
       onProgress?.('Subscription verified & unlocked!');
-      const durationDays = basePlanId === 'quarterly' ? 90 : 30;
-      const resolvedExpiry =
-        verifyData.subscriptionExpiryDate ||
-        new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+      const resolvedExpiry = verifyData.subscriptionExpiryDate || verifyData.expiryDate;
 
       return {
         success: true,
@@ -602,12 +631,17 @@ export async function launchGooglePlayPurchase(
     onProgress?.('Verifying subscription with server...');
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    try {
-      const idToken = await auth.currentUser?.getIdToken();
-      if (idToken) {
-        headers['Authorization'] = `Bearer ${idToken}`;
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      try {
+        const idToken = await currentUser.getIdToken();
+        if (idToken) {
+          headers['Authorization'] = `Bearer ${idToken}`;
+        }
+      } catch (tokenErr) {
+        console.warn('[Google Play Purchase] Notice getting ID token:', tokenErr);
       }
-    } catch {}
+    }
 
     const verifyEndpoint = getBillingApiUrl('/api/billing/verify-purchase');
     console.log('[Google Play Purchase] Sending verification request to:', verifyEndpoint);
@@ -617,6 +651,7 @@ export async function launchGooglePlayPurchase(
       purchaseToken,
       productId: GOOGLE_PLAY_PRODUCT_ID,
       basePlanId,
+      packageName: GOOGLE_PLAY_PACKAGE_NAME,
     };
 
     let verifyRes: Response;
@@ -659,6 +694,17 @@ export async function launchGooglePlayPurchase(
         responseBody: responseText,
         verifyData,
       });
+
+      if (verifyRes.status === 503 || verifyData?.error === 'SUBSCRIPTION_VERIFICATION_PENDING') {
+        return {
+          success: false,
+          verificationPending: true,
+          purchaseToken,
+          error: 'SUBSCRIPTION_VERIFICATION_PENDING',
+          message: verifyData?.message || 'Purchase completed but verification is temporarily unavailable.',
+        };
+      }
+
       throw new Error(verifyData?.error || `Server verification with Google Play failed (HTTP ${verifyRes.status}).`);
     }
 
@@ -668,7 +714,7 @@ export async function launchGooglePlayPurchase(
       orderId: verifyData.orderId,
       subscriptionStatus: verifyData.subscriptionStatus,
       expiryDate: verifyData.subscriptionExpiryDate,
-      planId: verifyData.planId || basePlanId,
+      planId: verifyData.planId || verifyData.plan || basePlanId,
     });
 
     // 6. Refresh authoritative subscription status
@@ -690,10 +736,10 @@ export async function launchGooglePlayPurchase(
 
     onProgress?.('Subscription verified & unlocked!');
 
-    const durationDays = basePlanId === 'quarterly' ? 90 : 30;
-    const resolvedExpiry =
-      verifyData.subscriptionExpiryDate ||
-      new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+    const resolvedExpiry = verifyData.subscriptionExpiryDate || verifyData.expiryDate;
+    if (!resolvedExpiry) {
+      throw new Error('Google Play verification succeeded but did not provide an authoritative expiry date.');
+    }
 
     return {
       success: true,

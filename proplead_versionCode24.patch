@@ -1,0 +1,14 @@
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -10,2 +10,2 @@
+-        versionCode 23
+-        versionName "1.2.22.1"
++        versionCode 24
++        versionName "1.2.24"
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -4,1 +4,1 @@
+-  "version": "1.0.22.1",
++  "version": "1.0.24",
