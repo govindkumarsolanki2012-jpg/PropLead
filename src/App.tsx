@@ -68,6 +68,15 @@ import {
 } from './services/firebaseService';
 import { syncLocalDataToFirestore } from './utils/migration';
 import { FirebaseUser } from './lib/firebase';
+import {
+  initLocalNotifications,
+  scheduleFollowUpNotifications,
+  cancelNotificationsForLead,
+  scheduleDailySummaryNotification,
+  syncAllLeadNotifications,
+  requestNotificationPermission,
+  wasNotificationPermissionPrompted,
+} from './utils/notifications';
 
 const checkHasActiveSession = (): boolean => {
   try {
@@ -535,6 +544,49 @@ export function App() {
     }
   }, []);
 
+  // Stable reference to current leads for notification callbacks
+  const leadsRef = useRef<Lead[]>(leads);
+  useEffect(() => {
+    leadsRef.current = leads;
+  }, [leads]);
+
+  // Local Notifications initialization and tap deep-linking
+  useEffect(() => {
+    initLocalNotifications((extra) => {
+      if (extra.leadId) {
+        const currentList = leadsRef.current || [];
+        const match = currentList.find((l) => l.id === extra.leadId);
+        if (match) {
+          setDetailLead(match);
+          setCurrentTab('leads');
+          return;
+        }
+      }
+      if (extra.type === 'visit' || extra.type === 'daily_summary') {
+        setCurrentTab('calendar');
+      } else {
+        setCurrentTab('leads');
+      }
+    });
+
+    if (Capacitor.isNativePlatform() && !wasNotificationPermissionPrompted()) {
+      requestNotificationPermission().then((res) => {
+        if (res.granted) {
+          syncAllLeadNotifications(leadsRef.current || []);
+        }
+      });
+    }
+  }, []);
+
+  // Initial synchronization for notifications once leads are ready
+  const hasInitialNotificationSyncRef = useRef(false);
+  useEffect(() => {
+    if (!hasInitialNotificationSyncRef.current && leads.length > 0) {
+      hasInitialNotificationSyncRef.current = true;
+      syncAllLeadNotifications(leads);
+    }
+  }, [leads]);
+
   // Guarded actions for locked state
   const guardLockedFeature = useCallback(
     (featureName: string, action: () => void) => {
@@ -556,6 +608,10 @@ export function App() {
     if (currentUser?.uid) {
       addLeadToFirestore(currentUser.uid, newLead).catch((e) => console.warn('Firestore add lead error:', e));
     }
+    if (newLead.nextFollowUpDate && newLead.nextFollowUpTime) {
+      scheduleFollowUpNotifications(newLead);
+    }
+    scheduleDailySummaryNotification(updated);
     showToast(`Lead "${newLead.name}" added successfully! 🚀`);
   };
 
@@ -569,16 +625,26 @@ export function App() {
     if (detailLead && detailLead.id === updatedLead.id) {
       setDetailLead(updatedLead);
     }
+
+    if (updatedLead.nextFollowUpDate && updatedLead.nextFollowUpTime) {
+      scheduleFollowUpNotifications(updatedLead);
+    } else {
+      cancelNotificationsForLead(updatedLead.id);
+    }
+    scheduleDailySummaryNotification(updated);
+
     showToast('Lead details updated.');
   };
 
   const handleDeleteLead = async (leadId: string): Promise<void> => {
+    cancelNotificationsForLead(leadId);
     if (currentUser?.uid) {
       await deleteLeadFromFirestore(currentUser.uid, leadId);
     }
     const updated = leads.filter((l) => l.id !== leadId);
     setLeads(updated);
     saveStoredLeads(updated);
+    scheduleDailySummaryNotification(updated);
     if (detailLead && detailLead.id === leadId) {
       setDetailLead(null);
     }
@@ -587,6 +653,9 @@ export function App() {
 
   const handleDeleteBulkLeads = async (leadIds: string[]): Promise<void> => {
     if (!leadIds || leadIds.length === 0) return;
+    for (const id of leadIds) {
+      cancelNotificationsForLead(id);
+    }
     if (currentUser?.uid) {
       await batchDeleteLeadsFromFirestore(currentUser.uid, leadIds);
     }
@@ -594,6 +663,7 @@ export function App() {
     const updated = leads.filter((l) => !idSet.has(l.id));
     setLeads(updated);
     saveStoredLeads(updated);
+    scheduleDailySummaryNotification(updated);
     if (detailLead && idSet.has(detailLead.id)) {
       setDetailLead(null);
     }
@@ -780,6 +850,7 @@ export function App() {
     };
 
     handleUpdateLead(updatedLead);
+    scheduleFollowUpNotifications(updatedLead, type === 'site_visit');
     showToast(`Reminder set for ${target.name} on ${date}! ⏰`);
   };
 

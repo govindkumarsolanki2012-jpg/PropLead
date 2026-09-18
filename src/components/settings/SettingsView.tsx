@@ -22,8 +22,9 @@ import {
   AlertTriangle,
   Cloud,
   LogOut,
+  Bell,
 } from 'lucide-react';
-import { UserProfile, Lead, WhatsAppTemplate } from '../../types';
+import { UserProfile, Lead, WhatsAppTemplate, NotificationSettings } from '../../types';
 import { exportLeadsToCSV } from '../../utils/storage';
 import { openWhatsAppDirect } from '../../utils/whatsapp';
 import {
@@ -31,6 +32,16 @@ import {
   openGooglePlayManageSubscriptions,
   restoreGooglePlayPurchases,
 } from '../../utils/billing';
+import {
+  getStoredNotificationSettings,
+  saveStoredNotificationSettings,
+  checkNotificationPermission,
+  requestNotificationPermission,
+  cancelAllFollowUpNotifications,
+  cancelAllPropertyVisitNotifications,
+  cancelDailySummaryNotification,
+  syncAllLeadNotifications,
+} from '../../utils/notifications';
 import { useLanguage } from '../../context/LanguageContext';
 
 interface SettingsViewProps {
@@ -70,6 +81,59 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     type: 'success' | 'info' | 'error';
     message: string;
   } | null>(null);
+
+  // Notification Settings State
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(() => {
+    return profile?.notificationSettings || getStoredNotificationSettings();
+  });
+  const [permissionState, setPermissionState] = useState<{ granted: boolean; display: string }>({
+    granted: true,
+    display: 'granted',
+  });
+  const [isRequestingPerm, setIsRequestingPerm] = useState<boolean>(false);
+
+  React.useEffect(() => {
+    checkNotificationPermission().then((res) => {
+      setPermissionState(res);
+    });
+  }, []);
+
+  const handleToggleNotification = async (key: keyof NotificationSettings) => {
+    const nextValue = !notificationSettings[key];
+    const updated: NotificationSettings = {
+      ...notificationSettings,
+      [key]: nextValue,
+    };
+    setNotificationSettings(updated);
+    saveStoredNotificationSettings(updated);
+    onUpdateProfile({
+      ...profile,
+      notificationSettings: updated,
+    });
+
+    if (key === 'followUpReminders' && !nextValue) {
+      await cancelAllFollowUpNotifications(leads);
+    } else if (key === 'propertyVisitReminders' && !nextValue) {
+      await cancelAllPropertyVisitNotifications(leads);
+    } else if (key === 'dailySummary' && !nextValue) {
+      await cancelDailySummaryNotification();
+    } else {
+      await syncAllLeadNotifications(leads);
+    }
+  };
+
+  const handleRequestPermission = async () => {
+    setIsRequestingPerm(true);
+    try {
+      const res = await requestNotificationPermission();
+      setPermissionState(res);
+      if (res.granted) {
+        await syncAllLeadNotifications(leads);
+      }
+    } finally {
+      setIsRequestingPerm(false);
+    }
+  };
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -267,11 +331,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl space-y-1.5 border border-slate-100 dark:border-slate-800 text-xs">
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 dark:text-slate-400">Current Plan:</span>
-                <span className="font-bold text-slate-800 dark:text-slate-200">Property Agent Pro</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200">
+                  {profile.planId === 'monthly' ? 'PropLead Pro Monthly' : 'PropLead Pro 3 Months'}
+                </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 dark:text-slate-400">Price:</span>
-                <span className="font-bold text-emerald-600 dark:text-emerald-400">₹49/month</span>
+                <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                  {profile.planId === 'monthly' ? '₹79/month' : '₹199 / 3 months'}
+                </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 dark:text-slate-400">
@@ -280,7 +348,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <span className="font-medium text-slate-700 dark:text-slate-300">
                   {status === 'TRIAL'
                     ? `${daysRemaining} days remaining`
-                    : expiryFormatted || 'Auto-renews monthly'}
+                    : expiryFormatted || (profile.planId === 'monthly' ? 'Auto-renews monthly' : 'Auto-renews every 3 months')}
                 </span>
               </div>
             </div>
@@ -346,13 +414,155 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>
-                  {status === 'TRIAL' ? 'View Pro Benefits (₹49/mo)' : 'Subscribe to Pro (₹49/mo)'}
+                  {status === 'TRIAL' ? 'View Pro Plans (Save ₹38)' : 'Subscribe to Pro'}
                 </span>
               </button>
             )}
           </div>
         );
       })()}
+
+      {/* Local Notifications & Reminders */}
+      <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3.5 shadow-2xs">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+              <Bell className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-slate-900 dark:text-white">
+                Notifications & Reminders
+              </h3>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                Android local alerts for follow-ups
+              </span>
+            </div>
+          </div>
+          {permissionState.granted ? (
+            <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3" />
+              <span>Active</span>
+            </span>
+          ) : (
+            <span className="text-[11px] font-extrabold px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 flex items-center gap-1">
+              <AlertCircle className="w-3 h-3" />
+              <span>Off</span>
+            </span>
+          )}
+        </div>
+
+        {!permissionState.granted && (
+          <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <p className="text-[11px] text-amber-800 dark:text-amber-200 leading-tight">
+                Notification permission is required to receive follow-up & visit alerts.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={isRequestingPerm}
+              onClick={handleRequestPermission}
+              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg text-xs shrink-0 shadow-2xs transition-colors"
+            >
+              {isRequestingPerm ? 'Enabling...' : 'Enable'}
+            </button>
+          </div>
+        )}
+
+        <div className="space-y-3 pt-1">
+          {/* Toggle 1: Follow-up reminders */}
+          <div className="flex items-center justify-between py-1">
+            <div className="pr-4">
+              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                Follow-up Reminders
+              </h4>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Alerts 30 mins before and at scheduled follow-up time
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={notificationSettings.followUpReminders}
+              onClick={() => handleToggleNotification('followUpReminders')}
+              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 ease-in-out shrink-0 ${
+                notificationSettings.followUpReminders
+                  ? 'bg-emerald-600'
+                  : 'bg-slate-300 dark:bg-slate-600'
+              }`}
+            >
+              <div
+                className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${
+                  notificationSettings.followUpReminders ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="border-t border-slate-100 dark:border-slate-800" />
+
+          {/* Toggle 2: Property visit reminders */}
+          <div className="flex items-center justify-between py-1">
+            <div className="pr-4">
+              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                Property Visit Reminders
+              </h4>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Alerts 30 mins before and at scheduled visit time
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={notificationSettings.propertyVisitReminders}
+              onClick={() => handleToggleNotification('propertyVisitReminders')}
+              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 ease-in-out shrink-0 ${
+                notificationSettings.propertyVisitReminders
+                  ? 'bg-emerald-600'
+                  : 'bg-slate-300 dark:bg-slate-600'
+              }`}
+            >
+              <div
+                className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${
+                  notificationSettings.propertyVisitReminders ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="border-t border-slate-100 dark:border-slate-800" />
+
+          {/* Toggle 3: Daily summary */}
+          <div className="flex items-center justify-between py-1">
+            <div className="pr-4">
+              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                Daily Summary
+              </h4>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Morning reminder at 9:00 AM of today's scheduled follow-ups
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={notificationSettings.dailySummary}
+              onClick={() => handleToggleNotification('dailySummary')}
+              className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 ease-in-out shrink-0 ${
+                notificationSettings.dailySummary
+                  ? 'bg-emerald-600'
+                  : 'bg-slate-300 dark:bg-slate-600'
+              }`}
+            >
+              <div
+                className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ease-in-out ${
+                  notificationSettings.dailySummary ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Firebase Cloud Sync & Security */}
       <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3 shadow-2xs">

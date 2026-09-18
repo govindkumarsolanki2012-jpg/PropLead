@@ -144,6 +144,25 @@ export interface GooglePlayOffer {
   }[];
 }
 
+export type SubscriptionPlanId = 'monthly' | 'quarterly';
+
+export interface SubscriptionPlanDetails {
+  id: SubscriptionPlanId;
+  basePlanId: 'monthly' | 'quarterly';
+  name: string;
+  durationLabel: string;
+  price: number;
+  priceFormatted: string;
+  billingText: string;
+  perMonthText?: string;
+  savingsText?: string;
+  badge?: string;
+  shortText: string;
+  ctaText: string;
+  billingPeriod: string;
+  durationMonths: number;
+}
+
 export interface GooglePlaySubscriptionProduct {
   productId: string;
   basePlanId: string;
@@ -157,6 +176,13 @@ export interface GooglePlaySubscriptionProduct {
   freeTrialDays: number;
   offers: GooglePlayOffer[];
   features: string[];
+  plans?: Record<SubscriptionPlanId, Partial<SubscriptionPlanDetails>>;
+}
+
+export interface NotificationSettings {
+  followUpReminders: boolean;
+  propertyVisitReminders: boolean;
+  dailySummary: boolean;
 }
 
 export interface UserProfile {
@@ -178,6 +204,10 @@ export interface UserProfile {
   subscriptionExpiryDate?: string | null;
   subscriptionProductId?: string;
   subscriptionBasePlan?: string;
+  planId?: SubscriptionPlanId | string;
+  purchaseDate?: string;
+  expiryDate?: string | null;
+  lastVerifiedAt?: string;
   autoRenewing?: boolean;
   purchaseToken?: string;
   paymentIssueMessage?: string;
@@ -185,6 +215,7 @@ export interface UserProfile {
   language?: 'en' | 'hi' | 'hinglish';
   darkMode?: boolean;
   notificationsEnabled: boolean;
+  notificationSettings?: NotificationSettings;
   hasCompletedOnboarding?: boolean;
   isOnboarded?: boolean;
 }

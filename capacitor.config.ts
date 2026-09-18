@@ -24,6 +24,10 @@ const config: CapacitorConfig = {
         twitter: false,
       },
     },
+    LocalNotifications: {
+      smallIcon: 'ic_launcher',
+      iconColor: '#059669',
+    },
   },
 };
 

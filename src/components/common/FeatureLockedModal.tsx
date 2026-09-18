@@ -36,10 +36,10 @@ export const FeatureLockedModal: React.FC<FeatureLockedModalProps> = ({
           {/* Pricing Highlight */}
           <div className="py-3 px-4 bg-emerald-50 dark:bg-emerald-950/40 rounded-2xl border border-emerald-500/30">
             <div className="text-2xl font-black text-emerald-700 dark:text-emerald-300">
-              ₹49<span className="text-sm font-semibold text-slate-500 dark:text-slate-400">/month</span>
+              ₹199<span className="text-sm font-semibold text-slate-500 dark:text-slate-400"> / 3 months</span>
             </div>
             <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">
-              Keep full unlimited access to your leads & inventory
+              Just ₹66.33/mo (Save ₹38) • Or ₹79 Monthly
             </p>
           </div>
 

@@ -28,6 +28,9 @@ export interface UserSubscriptionRecord {
   subscriptionExpiryDate: string | null;
   subscriptionProductId: string;
   subscriptionBasePlan: string;
+  planId?: string;
+  purchaseDate?: string;
+  expiryDate?: string | null;
   purchaseToken?: string;
   orderId?: string;
   autoRenewing: boolean;
@@ -100,24 +103,33 @@ function persistSubscriptionStoreToDisk(): void {
 
 // Firestore Field Format Converters
 function toFirestoreFields(record: UserSubscriptionRecord): Record<string, any> {
+  const effectiveBasePlan = record.subscriptionBasePlan || record.planId || 'quarterly';
+  const effectivePlanId = record.planId || record.subscriptionBasePlan || 'quarterly';
+
   const fields: Record<string, any> = {
     userId: { stringValue: record.userId },
     subscriptionStatus: { stringValue: record.subscriptionStatus },
     trialStartDate: { stringValue: record.trialStartDate },
     trialEndDate: { stringValue: record.trialEndDate },
     subscriptionProductId: { stringValue: record.subscriptionProductId || 'property_agent_pro' },
-    subscriptionBasePlan: { stringValue: record.subscriptionBasePlan || 'monthly' },
+    subscriptionBasePlan: { stringValue: effectiveBasePlan },
+    planId: { stringValue: effectivePlanId },
     autoRenewing: { booleanValue: Boolean(record.autoRenewing) },
     acknowledged: { booleanValue: Boolean(record.acknowledged) },
     updatedAt: { stringValue: record.updatedAt || new Date().toISOString() },
   };
 
-  if (record.subscriptionExpiryDate) {
-    fields.subscriptionExpiryDate = { stringValue: record.subscriptionExpiryDate };
+  const resolvedExpiry = record.subscriptionExpiryDate || record.expiryDate;
+  if (resolvedExpiry) {
+    fields.subscriptionExpiryDate = { stringValue: resolvedExpiry };
+    fields.expiryDate = { stringValue: resolvedExpiry };
   } else {
     fields.subscriptionExpiryDate = { nullValue: null };
   }
 
+  if (record.purchaseDate) {
+    fields.purchaseDate = { stringValue: record.purchaseDate };
+  }
   if (record.purchaseToken) {
     fields.purchaseToken = { stringValue: record.purchaseToken };
   }
@@ -137,14 +149,21 @@ function toFirestoreFields(record: UserSubscriptionRecord): Record<string, any> 
 function fromFirestoreFields(fields: Record<string, any>): UserSubscriptionRecord | null {
   if (!fields || !fields.userId) return null;
 
+  const resolvedExpiry = fields.subscriptionExpiryDate?.stringValue || fields.expiryDate?.stringValue || null;
+  const basePlan = fields.subscriptionBasePlan?.stringValue || fields.planId?.stringValue || 'quarterly';
+  const planId = fields.planId?.stringValue || fields.subscriptionBasePlan?.stringValue || 'quarterly';
+
   return {
     userId: fields.userId.stringValue || '',
     subscriptionStatus: (fields.subscriptionStatus?.stringValue || 'TRIAL') as any,
     trialStartDate: fields.trialStartDate?.stringValue || new Date().toISOString(),
     trialEndDate: fields.trialEndDate?.stringValue || new Date().toISOString(),
-    subscriptionExpiryDate: fields.subscriptionExpiryDate?.stringValue || null,
+    subscriptionExpiryDate: resolvedExpiry,
+    expiryDate: resolvedExpiry,
     subscriptionProductId: fields.subscriptionProductId?.stringValue || 'property_agent_pro',
-    subscriptionBasePlan: fields.subscriptionBasePlan?.stringValue || 'monthly',
+    subscriptionBasePlan: basePlan,
+    planId,
+    purchaseDate: fields.purchaseDate?.stringValue,
     purchaseToken: fields.purchaseToken?.stringValue,
     orderId: fields.orderId?.stringValue,
     autoRenewing: fields.autoRenewing?.booleanValue ?? false,
@@ -389,6 +408,10 @@ async function syncUserProfileSubscriptionToFirestore(
     subscriptionExpiryDate: string | null;
     subscriptionProductId: string;
     subscriptionBasePlan: string;
+    planId?: string;
+    purchaseDate?: string;
+    expiryDate?: string | null;
+    lastVerifiedAt?: string;
     autoRenewing: boolean;
   },
   idToken?: string
@@ -405,22 +428,40 @@ async function syncUserProfileSubscriptionToFirestore(
       'updateMask.fieldPaths=subscriptionStatus',
       'updateMask.fieldPaths=subscriptionProductId',
       'updateMask.fieldPaths=subscriptionBasePlan',
+      'updateMask.fieldPaths=planId',
       'updateMask.fieldPaths=autoRenewing',
       'updateMask.fieldPaths=updatedAt',
     ];
+
+    const effectiveBasePlan = record.subscriptionBasePlan || record.planId || 'quarterly';
+    const effectivePlanId = record.planId || record.subscriptionBasePlan || 'quarterly';
 
     const fields: Record<string, any> = {
       isSubscribed: { booleanValue: record.isSubscribed },
       subscriptionStatus: { stringValue: record.subscriptionStatus },
       subscriptionProductId: { stringValue: record.subscriptionProductId },
-      subscriptionBasePlan: { stringValue: record.subscriptionBasePlan },
+      subscriptionBasePlan: { stringValue: effectiveBasePlan },
+      planId: { stringValue: effectivePlanId },
       autoRenewing: { booleanValue: record.autoRenewing },
       updatedAt: { stringValue: new Date().toISOString() },
     };
 
-    if (record.subscriptionExpiryDate) {
+    const resolvedExpiry = record.subscriptionExpiryDate || record.expiryDate;
+    if (resolvedExpiry) {
       fieldMasks.push('updateMask.fieldPaths=subscriptionExpiryDate');
-      fields.subscriptionExpiryDate = { stringValue: record.subscriptionExpiryDate };
+      fields.subscriptionExpiryDate = { stringValue: resolvedExpiry };
+      fieldMasks.push('updateMask.fieldPaths=expiryDate');
+      fields.expiryDate = { stringValue: resolvedExpiry };
+    }
+
+    if (record.purchaseDate) {
+      fieldMasks.push('updateMask.fieldPaths=purchaseDate');
+      fields.purchaseDate = { stringValue: record.purchaseDate };
+    }
+
+    if (record.lastVerifiedAt) {
+      fieldMasks.push('updateMask.fieldPaths=lastVerifiedAt');
+      fields.lastVerifiedAt = { stringValue: record.lastVerifiedAt };
     }
 
     const docUrl = `${FIRESTORE_REST_BASE}/users/${encodeURIComponent(userId)}?${fieldMasks.join('&')}`;
@@ -632,56 +673,66 @@ async function saveSubscriptionRecord(
       subscriptionStatus: record.subscriptionStatus,
       subscriptionExpiryDate: record.subscriptionExpiryDate,
       subscriptionProductId: record.subscriptionProductId || 'property_agent_pro',
-      subscriptionBasePlan: record.subscriptionBasePlan || 'monthly',
+      subscriptionBasePlan: record.subscriptionBasePlan || record.planId || 'quarterly',
+      planId: record.planId || record.subscriptionBasePlan || 'quarterly',
+      purchaseDate: record.purchaseDate,
+      expiryDate: record.expiryDate || record.subscriptionExpiryDate,
+      lastVerifiedAt: record.lastVerifiedAt,
       autoRenewing: Boolean(record.autoRenewing),
     },
     idToken
   );
 }
 
-// Default subscription product catalog matching Google Play Console setup
+// Subscription product & 2 paid base plans matching Google Play Console setup
 const GOOGLE_PLAY_PRODUCT = {
   productId: 'property_agent_pro',
-  basePlanId: 'monthly',
-  title: 'Property Agent Pro (Monthly)',
+  title: 'Choose Your Plan',
+  subtitle: 'Unlock all PropLead features',
   description: 'Keep your property leads, customers, follow-ups and property matching organized.',
-  priceFormatted: '₹49/month',
-  priceMicros: 49000000,
-  currencyCode: 'INR',
-  billingPeriod: 'P1M',
-  freeTrialPeriod: 'P7D',
-  freeTrialDays: 7,
-  offers: [
-    {
-      offerId: '7-day-free-trial',
-      offerToken: 'offer_token_7d_trial_monthly',
-      pricingPhases: [
-        {
-          priceFormatted: '₹0 for 7 days',
-          priceMicros: 0,
-          billingPeriod: 'P7D',
-          recurrenceMode: 2, // FINITE_RECURRING (trial)
-          billingCycleCount: 1,
-        },
-        {
-          priceFormatted: '₹49/month',
-          priceMicros: 49000000,
-          billingPeriod: 'P1M',
-          recurrenceMode: 1, // INFINITE_RECURRING
-          billingCycleCount: 0,
-        },
-      ],
+  plans: {
+    monthly: {
+      id: 'monthly',
+      basePlanId: 'monthly',
+      name: 'Monthly',
+      durationLabel: '1 Month',
+      price: 79,
+      priceFormatted: '₹79',
+      billingPeriod: 'P1M',
+      billingText: '₹79 every month',
+      shortText: 'Flexible monthly plan',
+      ctaText: 'Continue with ₹79 Monthly',
+      durationMonths: 1,
     },
-  ],
+    quarterly: {
+      id: 'quarterly',
+      basePlanId: 'quarterly',
+      name: '3 Months',
+      durationLabel: '3 Months',
+      price: 199,
+      priceFormatted: '₹199',
+      billingPeriod: 'P3M',
+      billingText: '₹199 every 3 months',
+      perMonthText: '₹66.33/month',
+      badge: 'BEST VALUE',
+      savingsText: 'Save ₹38',
+      shortText: 'Best value for active agents',
+      ctaText: 'Continue with ₹199 / 3 Months',
+      durationMonths: 3,
+    },
+  },
   features: [
-    'Lead management',
-    'Customer profiles',
+    'Unlimited leads',
+    'Property management',
     'Follow-up reminders',
+    'Property visit reminders',
+    'Calendar',
+    'Analytics',
+    'WhatsApp and call shortcuts',
     'Property matching',
-    'WhatsApp sharing',
-    'Property database',
-    'Activity history',
-    'Cloud data',
+    'Cloud backup',
+    'Multi-device access',
+    'All future Pro improvements',
   ],
 };
 
@@ -732,7 +783,8 @@ function getAndroidPublisherClient() {
  */
 async function verifyGooglePlaySubscriptionToken(
   purchaseToken: string,
-  productId: string = 'property_agent_pro'
+  productId: string = 'property_agent_pro',
+  basePlanId: string = 'quarterly'
 ): Promise<{
   isValid: boolean;
   orderId: string;
@@ -742,6 +794,7 @@ async function verifyGooglePlaySubscriptionToken(
   acknowledged: boolean;
   error?: string;
 }> {
+  const durationDays = basePlanId === 'quarterly' ? 90 : 30;
   const client = getAndroidPublisherClient();
 
   if (client) {
@@ -793,7 +846,7 @@ async function verifyGooglePlaySubscriptionToken(
         isValid: true,
         orderId,
         subscriptionStatus,
-        subscriptionExpiryDate: expiryTime || new Date(Date.now() + 30 * 86400000).toISOString(),
+        subscriptionExpiryDate: expiryTime || new Date(Date.now() + durationDays * 86400000).toISOString(),
         autoRenewing,
         acknowledged: true,
       };
@@ -824,8 +877,8 @@ async function verifyGooglePlaySubscriptionToken(
   // When no service account key is injected, simulates authoritative Google Play server response
   const orderId = `GPA.${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(10000 + Math.random() * 90000)}`;
   
-  // Google Play provides the official expiry timestamp (e.g. 30 days subscription cycle from Play Store)
-  const googlePlayExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  // Google Play provides the official expiry timestamp matching plan duration
+  const googlePlayExpiry = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
 
   return {
     isValid: true,
@@ -990,8 +1043,12 @@ async function startServer() {
         currentServerTimestamp: serverTimestamp,
         trialDaysRemaining,
         subscriptionExpiryDate: record.subscriptionExpiryDate,
+        expiryDate: record.expiryDate || record.subscriptionExpiryDate,
         subscriptionProductId: record.subscriptionProductId,
         subscriptionBasePlan: record.subscriptionBasePlan,
+        planId: record.planId || record.subscriptionBasePlan || 'quarterly',
+        purchaseDate: record.purchaseDate,
+        lastVerifiedAt: record.lastVerifiedAt,
         autoRenewing: record.autoRenewing,
         paymentIssueMessage: record.paymentIssueMessage,
         isSubscribed: currentStatus === 'ACTIVE' || currentStatus === 'CANCELED_BUT_ACTIVE',
@@ -1012,11 +1069,11 @@ async function startServer() {
       const {
         purchaseToken,
         productId = 'property_agent_pro',
-        basePlanId = 'monthly',
+        basePlanId = 'quarterly',
         userId: bodyUserId,
       } = req.body || {};
 
-      console.log(`[Google Play Verification] Received verification request for product "${productId}", bodyUserId: "${bodyUserId}"`);
+      console.log(`[Google Play Verification] Received verification request for product "${productId}", plan "${basePlanId}", bodyUserId: "${bodyUserId}"`);
 
       if (!purchaseToken) {
         return res.status(400).json({
@@ -1056,10 +1113,10 @@ async function startServer() {
         });
       }
 
-      console.log(`[Google Play Verification] Verifying token for user ${verifiedUid}...`);
+      console.log(`[Google Play Verification] Verifying token for user ${verifiedUid} with plan ${basePlanId}...`);
 
       // Authoritatively query Google Play Developer API (or RFC-compliant sandbox response)
-      const verification = await verifyGooglePlaySubscriptionToken(purchaseToken, productId);
+      const verification = await verifyGooglePlaySubscriptionToken(purchaseToken, productId, basePlanId);
 
       if (!verification.isValid) {
         console.error(`[Google Play Verification] Token validation rejected for user ${verifiedUid}:`, verification.error);
@@ -1069,6 +1126,8 @@ async function startServer() {
         });
       }
 
+      const nowIso = new Date().toISOString();
+
       // Fetch or initialize user subscription record
       let record: UserSubscriptionRecord;
       try {
@@ -1076,15 +1135,17 @@ async function startServer() {
         if (subResult.record) {
           record = subResult.record;
         } else {
-          const nowIso = new Date().toISOString();
           record = {
             userId: verifiedUid,
             subscriptionStatus: 'ACTIVE',
             trialStartDate: nowIso,
             trialEndDate: nowIso,
             subscriptionExpiryDate: verification.subscriptionExpiryDate,
+            expiryDate: verification.subscriptionExpiryDate,
             subscriptionProductId: productId,
             subscriptionBasePlan: basePlanId,
+            planId: basePlanId,
+            purchaseDate: nowIso,
             autoRenewing: true,
             acknowledged: true,
             updatedAt: nowIso,
@@ -1092,15 +1153,17 @@ async function startServer() {
         }
       } catch (recErr) {
         console.warn(`[Google Play Verification] Notice retrieving record for ${verifiedUid}, initializing active record:`, recErr);
-        const nowIso = new Date().toISOString();
         record = {
           userId: verifiedUid,
           subscriptionStatus: 'ACTIVE',
           trialStartDate: nowIso,
           trialEndDate: nowIso,
           subscriptionExpiryDate: verification.subscriptionExpiryDate,
+          expiryDate: verification.subscriptionExpiryDate,
           subscriptionProductId: productId,
           subscriptionBasePlan: basePlanId,
+          planId: basePlanId,
+          purchaseDate: nowIso,
           autoRenewing: true,
           acknowledged: true,
           updatedAt: nowIso,
@@ -1111,13 +1174,16 @@ async function startServer() {
       record.subscriptionStatus = 'ACTIVE';
       record.subscriptionProductId = productId;
       record.subscriptionBasePlan = basePlanId;
+      record.planId = basePlanId;
+      record.purchaseDate = record.purchaseDate || nowIso;
       record.purchaseToken = purchaseToken;
       record.orderId = verification.orderId;
       record.subscriptionExpiryDate = verification.subscriptionExpiryDate; // Strictly from Google Play
+      record.expiryDate = verification.subscriptionExpiryDate;
       record.autoRenewing = verification.autoRenewing;
       record.acknowledged = verification.acknowledged;
       record.paymentIssueMessage = undefined;
-      record.lastVerifiedAt = new Date().toISOString();
+      record.lastVerifiedAt = nowIso;
 
       try {
         await saveSubscriptionRecord(record, idToken);
@@ -1125,7 +1191,7 @@ async function startServer() {
         console.error('[Google Play Verification] Error persisting verified record to store:', saveErr);
       }
 
-      console.log(`[Google Play Billing] Subscription verified and activated for ${verifiedUid}. Expiry: ${record.subscriptionExpiryDate}, OrderId: ${verification.orderId}`);
+      console.log(`[Google Play Billing] Subscription verified and activated for ${verifiedUid}. Plan: ${basePlanId}, Expiry: ${record.subscriptionExpiryDate}, OrderId: ${verification.orderId}`);
 
       return res.status(200).json({
         success: true,
@@ -1133,8 +1199,12 @@ async function startServer() {
         orderId: verification.orderId,
         subscriptionStatus: 'ACTIVE',
         subscriptionExpiryDate: record.subscriptionExpiryDate,
+        expiryDate: record.subscriptionExpiryDate,
         subscriptionProductId: record.subscriptionProductId,
         subscriptionBasePlan: record.subscriptionBasePlan,
+        planId: record.planId,
+        purchaseDate: record.purchaseDate,
+        lastVerifiedAt: record.lastVerifiedAt,
         autoRenewing: record.autoRenewing,
         message: 'Google Play subscription verified and activated successfully.',
       });

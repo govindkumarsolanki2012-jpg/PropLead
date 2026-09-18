@@ -13,7 +13,7 @@ import {
   AlertTriangle,
   RotateCcw,
 } from 'lucide-react';
-import { UserProfile, GooglePlaySubscriptionProduct } from '../../types';
+import { UserProfile, GooglePlaySubscriptionProduct, SubscriptionPlanId } from '../../types';
 import {
   fetchGooglePlayProduct,
   GooglePlayProductResult,
@@ -22,6 +22,8 @@ import {
   getEffectiveSubscriptionStatus,
   openGooglePlayManageSubscriptions,
   openGooglePlayFixPayment,
+  SUBSCRIPTION_PLANS,
+  PRO_FEATURES_LIST,
 } from '../../utils/billing';
 import confetti from 'canvas-confetti';
 
@@ -40,6 +42,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   onUpdateProfile,
   onSubscribe,
 }) => {
+  const [selectedPlanId, setSelectedPlanId] = useState<SubscriptionPlanId>('quarterly');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [processingStatus, setProcessingStatus] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -51,7 +54,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     error: string | null;
   }>({
     isLoading: true,
-    isAvailable: false,
+    isAvailable: true,
     product: null,
     error: null,
   });
@@ -60,7 +63,6 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     status,
     daysRemaining,
     expiryFormatted,
-    isSubscribed,
     isLocked,
     isTrialEndDateMissingOrInvalid,
   } = getEffectiveSubscriptionStatus(profile);
@@ -85,25 +87,24 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   if (!isOpen) return null;
 
   const handleStartPurchase = async () => {
-    if (!productState.isAvailable || !productState.product) {
-      setErrorMessage('Subscription currently unavailable. Google Play product could not be loaded.');
-      return;
-    }
-
     setIsProcessing(true);
     setErrorMessage(null);
     setSuccessMessage(null);
     setProcessingStatus('Starting Google Play Billing flow...');
 
     try {
-      const result = await launchGooglePlayPurchase(profile.id, (step) => {
-        setProcessingStatus(step);
-      });
+      const result = await launchGooglePlayPurchase(
+        profile.id,
+        (step) => {
+          setProcessingStatus(step);
+        },
+        selectedPlanId
+      );
 
       if (result.success && result.profileUpdates) {
         onUpdateProfile(result.profileUpdates);
         onSubscribe?.('property_agent_pro');
-        setSuccessMessage('🎉 Subscription activated successfully via Google Play!');
+        setSuccessMessage('🎉 Subscription activated successfully!');
 
         try {
           confetti({
@@ -152,32 +153,36 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     }
   };
 
+  const selectedPlan = SUBSCRIPTION_PLANS[selectedPlanId] || SUBSCRIPTION_PLANS.quarterly;
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
+      <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[94vh] animate-in fade-in zoom-in-95 duration-150">
         {/* Top Header */}
-        <div className="relative p-6 bg-gradient-to-b from-emerald-600 to-emerald-700 text-white text-center pb-7">
+        <div className="relative p-6 bg-gradient-to-b from-emerald-600 to-emerald-700 text-white text-center pb-6">
           <button
+            id="btn_close_subscription_modal"
             onClick={onClose}
             className="absolute top-4 right-4 w-8 h-8 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center text-white transition-colors"
+            aria-label="Close"
           >
             <X className="w-4 h-4" />
           </button>
 
-          <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center mx-auto mb-3 text-white border border-white/30 shadow-xs">
-            <Sparkles className="w-6 h-6" />
+          <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center mx-auto mb-2.5 text-white border border-white/30 shadow-xs">
+            <Sparkles className="w-5 h-5" />
           </div>
 
           <h2 className="text-xl font-extrabold tracking-tight text-white">
-            Never Miss Another Property Lead
+            Choose Your Plan
           </h2>
           <p className="text-xs text-emerald-100 mt-1 max-w-xs mx-auto leading-relaxed">
-            Keep your property leads, customers, follow-ups and property matching organized.
+            Unlock all PropLead features
           </p>
         </div>
 
         {/* Content Body */}
-        <div className="p-6 overflow-y-auto space-y-5 flex-1">
+        <div className="p-5 overflow-y-auto space-y-4 flex-1">
           {/* Status Message Banners */}
           {errorMessage && (
             <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
@@ -203,7 +208,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                 </span>
               </div>
               <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium">
-                Auto-renews at ₹49/mo
+                {profile.planId === 'monthly' ? '₹79/month' : '₹199 / 3 months'}
               </span>
             </div>
           )}
@@ -227,7 +232,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                 <span>Payment Issue with Google Play</span>
               </div>
               <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                {profile.paymentIssueMessage || 'Google Play could not renew your ₹49/month subscription. Please update your payment method.'}
+                {profile.paymentIssueMessage || 'Google Play could not renew your subscription. Please update your payment method.'}
               </p>
               <div className="flex items-center gap-2 pt-1">
                 <button
@@ -250,7 +255,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           {/* Dynamic Real Trial Countdown Indicator */}
           {status === 'TRIAL' && (
             <div
-              className={`p-3.5 rounded-2xl border text-xs flex items-center justify-between transition-all ${
+              className={`p-3 rounded-2xl border text-xs flex items-center justify-between transition-all ${
                 daysRemaining <= 2
                   ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700'
                   : daysRemaining <= 4
@@ -260,18 +265,18 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
             >
               <div className="flex items-center gap-2.5 min-w-0">
                 <div
-                  className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 text-white shadow-2xs ${
+                  className={`w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 text-white shadow-2xs ${
                     daysRemaining <= 2 ? 'bg-amber-500' : 'bg-emerald-600'
                   }`}
                 >
-                  <Clock className="w-4 h-4" />
+                  <Clock className="w-3.5 h-3.5" />
                 </div>
                 <div className="min-w-0">
                   <div className="font-bold text-slate-900 dark:text-white text-xs truncate">
                     Free Trial Active
                   </div>
                   <div
-                    className={`text-[12px] font-bold mt-0.5 ${
+                    className={`text-[11px] font-bold mt-0.5 ${
                       daysRemaining <= 2
                         ? 'text-amber-700 dark:text-amber-300'
                         : 'text-emerald-700 dark:text-emerald-400'
@@ -291,9 +296,9 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
 
           {/* Trial Expired / Unverified State */}
           {status === 'EXPIRED' && (
-            <div className="p-3.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-700 rounded-2xl text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-rose-600 text-white flex items-center justify-center flex-shrink-0 mt-0.5 shadow-2xs">
-                <AlertCircle className="w-4 h-4" />
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-700 rounded-2xl text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2.5">
+              <div className="w-7 h-7 rounded-xl bg-rose-600 text-white flex items-center justify-center flex-shrink-0 mt-0.5 shadow-2xs">
+                <AlertCircle className="w-3.5 h-3.5" />
               </div>
               <div>
                 <div className="font-bold text-rose-900 dark:text-rose-100 text-xs">
@@ -301,130 +306,174 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                 </div>
                 <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 leading-relaxed">
                   {isTrialEndDateMissingOrInvalid
-                    ? 'Authoritative trial end date could not be verified from Firestore. Subscribe now for ₹49/month to activate full access.'
-                    : 'Your free trial period has ended. Subscribe now for ₹49/month to continue adding leads, properties, and follow-ups.'}
+                    ? 'Authoritative trial end date could not be verified. Select a plan below to activate full access.'
+                    : 'Your free trial period has ended. Select a plan below to continue adding leads, properties, and follow-ups.'}
                 </p>
               </div>
             </div>
           )}
 
-          {/* Pricing Box / Availability Box */}
-          {productState.isLoading ? (
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 flex items-center justify-center gap-2.5 text-slate-500 dark:text-slate-400 py-6">
-              <RefreshCw className="w-4 h-4 animate-spin text-emerald-600" />
-              <span className="text-xs font-medium">Checking Google Play Store availability...</span>
-            </div>
-          ) : !productState.isAvailable ? (
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-amber-100 dark:bg-amber-950/60 flex items-center justify-center text-amber-600 dark:text-amber-400">
-                    <AlertTriangle className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-bold text-slate-800 dark:text-slate-100">
-                      Subscription currently unavailable
-                    </div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Google Play Store package could not be reached
-                    </div>
-                  </div>
-                </div>
-                <span className="px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-700 text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
-                  Unavailable
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed pt-1 border-t border-slate-200/70 dark:border-slate-700/60">
-                Google Play could not load the subscription package for this app. Purchases cannot be processed at this time.
-              </p>
-            </div>
-          ) : (
-            <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-500/40 flex items-center justify-between shadow-2xs">
-              <div>
-                <div className="text-2xl font-black text-slate-900 dark:text-white">
-                  {productState.product?.priceFormatted || '₹49/month'}
-                </div>
-                <div className="text-xs font-bold text-emerald-700 dark:text-emerald-400 mt-0.5">
-                  {status === 'TRIAL'
-                    ? `${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} trial remaining`
-                    : status === 'ACTIVE'
-                    ? 'Active Pro Subscription'
-                    : status === 'CANCELED_BUT_ACTIVE'
-                    ? 'Access until period end'
-                    : 'Monthly Subscription'}
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                  Auto-renewing monthly subscription • Cancel anytime
-                </p>
-              </div>
-              <div className="px-2.5 py-1 rounded-full bg-emerald-600 text-white text-[11px] font-bold shadow-xs">
-                Google Play
-              </div>
-            </div>
-          )}
-
-          {/* Feature Checklist (Exact User Request) */}
-          <div className="space-y-2">
-            <div className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              Included with Pro
+          {/* 2 PRICING CARDS (Selection: Default 3 Months) */}
+          <div className="space-y-1.5">
+            <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider px-0.5">
+              Select Billing Duration
             </div>
 
-            {[
-              'Lead management',
-              'Customer profiles',
-              'Follow-up reminders',
-              'Property matching',
-              'WhatsApp sharing',
-              'Property database',
-              'Activity history',
-              'Cloud data',
-            ].map((feature, i) => (
-              <div key={i} className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300">
-                <div className="w-4 h-4 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center flex-shrink-0">
-                  <Check className="w-3 h-3 stroke-[3]" />
+            <div className="grid grid-cols-2 gap-2.5">
+              {/* MONTHLY CARD */}
+              <button
+                type="button"
+                id="btn_plan_monthly"
+                onClick={() => setSelectedPlanId('monthly')}
+                className={`relative text-left p-3.5 rounded-2xl transition-all flex flex-col justify-between cursor-pointer border-2 ${
+                  selectedPlanId === 'monthly'
+                    ? 'border-emerald-600 bg-emerald-50/80 dark:bg-emerald-950/40 shadow-xs ring-2 ring-emerald-600/20'
+                    : 'border-slate-200 dark:border-slate-700/80 bg-slate-50/50 dark:bg-slate-800/40 hover:border-slate-300 dark:hover:border-slate-600'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-1 mb-2">
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      1 Month
+                    </span>
+                    <div
+                      className={`w-4 h-4 rounded-full flex items-center justify-center border transition-colors ${
+                        selectedPlanId === 'monthly'
+                          ? 'border-emerald-600 bg-emerald-600 text-white'
+                          : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900'
+                      }`}
+                    >
+                      {selectedPlanId === 'monthly' && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                    </div>
+                  </div>
+
+                  <div className="mt-1">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                        ₹79
+                      </span>
+                      <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                        / month
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <span className="font-medium">{feature}</span>
-              </div>
-            ))}
+
+                <div className="mt-3 pt-2.5 border-t border-slate-200/60 dark:border-slate-700/60">
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 font-medium leading-tight">
+                    Flexible monthly plan
+                  </p>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
+                    ₹79 every month
+                  </p>
+                </div>
+              </button>
+
+              {/* 3-MONTH CARD (Prominent / Recommended / Best Value) */}
+              <button
+                type="button"
+                id="btn_plan_quarterly"
+                onClick={() => setSelectedPlanId('quarterly')}
+                className={`relative text-left p-3.5 rounded-2xl transition-all flex flex-col justify-between cursor-pointer border-2 ${
+                  selectedPlanId === 'quarterly'
+                    ? 'border-emerald-600 bg-emerald-50/90 dark:bg-emerald-950/50 shadow-sm ring-2 ring-emerald-600/20'
+                    : 'border-emerald-300/70 dark:border-emerald-700/50 bg-white dark:bg-slate-800/60 hover:border-emerald-400'
+                }`}
+              >
+                {/* Top Badge: BEST VALUE */}
+                <div className="absolute -top-2.5 right-3">
+                  <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-600 text-white px-2 py-0.5 rounded-full shadow-xs">
+                    BEST VALUE
+                  </span>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between gap-1 mb-2">
+                    <span className="text-xs font-bold text-slate-900 dark:text-white">
+                      3 Months
+                    </span>
+                    <div
+                      className={`w-4 h-4 rounded-full flex items-center justify-center border transition-colors ${
+                        selectedPlanId === 'quarterly'
+                          ? 'border-emerald-600 bg-emerald-600 text-white'
+                          : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900'
+                      }`}
+                    >
+                      {selectedPlanId === 'quarterly' && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                    </div>
+                  </div>
+
+                  <div className="mt-1">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                        ₹199
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                      ₹66.33/month
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-2.5 pt-2.5 border-t border-slate-200/60 dark:border-slate-700/60 space-y-1">
+                  <div className="inline-block">
+                    <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-200 bg-emerald-100 dark:bg-emerald-900/60 px-1.5 py-0.5 rounded-md">
+                      Save ₹38
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 leading-tight">
+                    ₹199 every 3 months
+                  </p>
+                </div>
+              </button>
+            </div>
           </div>
 
-          {/* Google Play Billing Assurance */}
-          <div className="flex items-center gap-2.5 text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+          {/* FEATURE LIST (Exact User Request) */}
+          <div className="pt-2 space-y-2">
+            <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
+              Included with Pro:
+            </div>
+
+            <div className="grid grid-cols-1 gap-1.5">
+              {PRO_FEATURES_LIST.map((feature, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+                  <div className="w-4 h-4 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center flex-shrink-0">
+                    <Check className="w-2.5 h-2.5 stroke-[3]" />
+                  </div>
+                  <span className="font-medium text-[11px] leading-tight">{feature}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* FOOTER NOTE (Exact User Request) */}
+          <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
             <ShieldCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-            <span>
-              {!productState.isAvailable
-                ? 'Google Play Billing is currently unavailable for this product. You cannot be billed at this time.'
-                : status === 'TRIAL' && daysRemaining > 0
-                ? `Secure Google Play Billing. You will be billed ${productState.product?.priceFormatted || '₹49/month'} after your trial ends (${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'} remaining). Cancel anytime.`
-                : `Secure Google Play Billing. Auto-renews at ${productState.product?.priceFormatted || '₹49/month'}. Cancel anytime in Google Play Store.`}
+            <span className="leading-tight">
+              Secure checkout via Google Play. Auto-renews. Cancel anytime.
             </span>
           </div>
         </div>
 
         {/* Bottom Actions */}
-        <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 space-y-2.5">
+        <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 space-y-2">
           {/* Main Action Button */}
           {status === 'ACTIVE' ? (
             <button
+              id="btn_manage_subscription"
               onClick={openGooglePlayManageSubscriptions}
               className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold rounded-xl shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 text-sm transition-all"
             >
               <ExternalLink className="w-4 h-4" />
               <span>Manage Google Play Subscription</span>
             </button>
-          ) : !productState.isAvailable ? (
-            <button
-              disabled={true}
-              className="w-full py-3.5 bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed font-bold rounded-xl flex items-center justify-center gap-2 text-sm border border-slate-300 dark:border-slate-700/60"
-            >
-              <AlertCircle className="w-4 h-4" />
-              <span>Subscription currently unavailable</span>
-            </button>
           ) : (
             <button
+              id="btn_subscribe_cta"
               disabled={isProcessing || productState.isLoading}
               onClick={handleStartPurchase}
-              className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60 text-white font-bold rounded-xl shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 text-sm transition-all"
+              className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60 text-white font-bold rounded-xl shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 text-sm transition-all cursor-pointer"
             >
               {isProcessing ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
@@ -434,26 +483,26 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
               <span>
                 {isProcessing
                   ? processingStatus || 'Processing...'
-                  : status === 'TRIAL' && daysRemaining > 0
-                  ? `Subscribe for ${productState.product?.priceFormatted || '₹49/month'} (${daysRemaining}d trial left)`
-                  : `Subscribe for ${productState.product?.priceFormatted || '₹49/month'}`}
+                  : selectedPlan.ctaText}
               </span>
             </button>
           )}
 
           {/* Secondary Actions */}
-          <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-1">
+          <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-0.5">
             <button
+              id="btn_restore_purchase"
               disabled={isProcessing}
               onClick={handleRestore}
-              className="hover:text-emerald-600 dark:hover:text-emerald-400 underline font-medium flex items-center gap-1"
+              className="hover:text-emerald-600 dark:hover:text-emerald-400 underline font-medium flex items-center gap-1 cursor-pointer"
             >
               <RotateCcw className="w-3 h-3" />
               <span>Restore Purchase</span>
             </button>
             <button
+              id="btn_close_modal_bottom"
               onClick={onClose}
-              className="hover:text-slate-800 dark:hover:text-slate-200 font-medium"
+              className="hover:text-slate-800 dark:hover:text-slate-200 font-medium cursor-pointer"
             >
               {isLocked ? 'View-Only Mode' : 'Close'}
             </button>
