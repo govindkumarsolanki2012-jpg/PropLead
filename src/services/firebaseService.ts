@@ -440,9 +440,28 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
 
 export async function saveUserProfile(userId: string, profile: Partial<UserProfile>): Promise<void> {
   try {
+    const {
+      isSubscribed: _isSubscribed,
+      subscriptionStatus: _subscriptionStatus,
+      subscriptionExpiryDate: _subscriptionExpiryDate,
+      subscriptionExpiryTime: _subscriptionExpiryTime,
+      expiryDate: _expiryDate,
+      subscriptionProductId: _subscriptionProductId,
+      subscriptionBasePlan: _subscriptionBasePlan,
+      subscriptionBasePlanId: _subscriptionBasePlanId,
+      planId: _planId,
+      autoRenewing: _autoRenewing,
+      purchaseToken: _purchaseToken,
+      orderId: _orderId,
+      acknowledged: _acknowledged,
+      lastVerifiedAt: _lastVerifiedAt,
+      purchaseDate: _purchaseDate,
+      ...clientWritableProfile
+    } = profile as Partial<UserProfile> & Record<string, unknown>;
+
     const userRef = doc(db, 'users', userId);
     await setDoc(userRef, {
-      ...profile,
+      ...clientWritableProfile,
       id: userId,
       updatedAt: new Date().toISOString(),
     }, { merge: true });
@@ -490,26 +509,6 @@ export interface FirestoreSubscriptionData {
   acknowledged?: boolean;
   lastVerifiedAt?: string;
   updatedAt?: string;
-}
-
-export async function saveSubscriptionRecordToFirestore(
-  userId: string,
-  data: Partial<FirestoreSubscriptionData>
-): Promise<void> {
-  try {
-    const subRef = doc(db, 'subscriptions', userId);
-    await setDoc(
-      subRef,
-      {
-        ...data,
-        userId,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
-  } catch (err) {
-    console.warn('[Firestore] Error saving subscription record:', err);
-  }
 }
 
 export async function getSubscriptionRecordFromFirestore(

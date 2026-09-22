@@ -341,11 +341,11 @@ async function getFirestoreServiceAccountToken(): Promise<string | null> {
     return cachedDatastoreToken.token;
   }
 
-  const credentials = parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY);
+  const credentials = parseServiceAccountCredentials(process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_KEY);
 
   try {
-    // 1. Prefer explicit Service Account JSON credentials if configured
-    // 2. Otherwise use Application Default Credentials (ADC) natively available on Google Cloud Run
+    // Prefer a dedicated Firebase admin credential when explicitly configured.
+    // Otherwise use the Cloud Run runtime service account through ADC.
     const authOptions: any = {
       scopes: ['https://www.googleapis.com/auth/datastore'],
     };
@@ -377,7 +377,7 @@ async function getFirebaseAdminAccessToken(): Promise<string | null> {
     return cachedFirebaseAdminToken.token;
   }
 
-  const credentials = parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY);
+  const credentials = parseServiceAccountCredentials(process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_KEY);
   const authOptions: any = {
     scopes: ['https://www.googleapis.com/auth/cloud-platform'],
   };
@@ -535,13 +535,10 @@ async function deleteFirebaseAuthUser(uid: string, accessToken: string): Promise
   }
 }
 
-async function getFirestoreWriteToken(idToken?: string): Promise<string | null> {
-  // 1. Prefer Service Account or ADC token which has admin privileges
-  const saToken = await getFirestoreServiceAccountToken();
-  if (saToken) return saToken;
-  // 2. Fall back to user's Firebase ID token (authorized by Firestore rules to update their own /users/{userId})
-  if (idToken) return idToken;
-  return null;
+async function getFirestoreWriteToken(_idToken?: string): Promise<string | null> {
+  // Authoritative writes must always use a trusted backend identity.
+  // Never fall back to an end-user Firebase ID token.
+  return getFirestoreServiceAccountToken();
 }
 
 async function getFirestoreReadToken(idToken?: string): Promise<string | null> {

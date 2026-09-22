@@ -14,8 +14,46 @@ service cloud.firestore {
 
     // Root user document
     match /users/{userId} {
-      // Agents can read and write their own profile
-      allow read, write: if isOwner(userId);
+      // Agents can read their own profile. Subscription entitlement fields are
+      // authoritative backend data and cannot be created or changed by clients.
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && !request.resource.data.keys().hasAny([
+          'isSubscribed',
+          'subscriptionStatus',
+          'subscriptionExpiryDate',
+          'subscriptionExpiryTime',
+          'expiryDate',
+          'subscriptionProductId',
+          'subscriptionBasePlan',
+          'subscriptionBasePlanId',
+          'planId',
+          'autoRenewing',
+          'purchaseToken',
+          'orderId',
+          'acknowledged',
+          'lastVerifiedAt',
+          'purchaseDate'
+        ]);
+      allow update: if isOwner(userId)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'isSubscribed',
+          'subscriptionStatus',
+          'subscriptionExpiryDate',
+          'subscriptionExpiryTime',
+          'expiryDate',
+          'subscriptionProductId',
+          'subscriptionBasePlan',
+          'subscriptionBasePlanId',
+          'planId',
+          'autoRenewing',
+          'purchaseToken',
+          'orderId',
+          'acknowledged',
+          'lastVerifiedAt',
+          'purchaseDate'
+        ]);
+      allow delete: if isOwner(userId);
 
       // Leads subcollection - strictly isolated to the authenticated agent
       // Contains customer details, BHK, requirements, budget, follow-ups, and activity history
@@ -35,9 +73,11 @@ service cloud.firestore {
       }
     }
 
-    // Subscriptions collection - isolated to the owning agent / authenticated user
+    // Clients may read their own entitlement but only the trusted backend may
+    // create, update, or delete subscription records.
     match /subscriptions/{userId} {
-      allow read, write: if isOwner(userId);
+      allow read: if isOwner(userId);
+      allow write: if false;
     }
 
     // Fallback: deny all other paths
