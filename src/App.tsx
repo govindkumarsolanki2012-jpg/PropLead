@@ -67,7 +67,6 @@ import {
   deletePropertyFromFirestore,
   batchDeletePropertiesFromFirestore,
   saveUserProfile,
-  saveSubscriptionRecordToFirestore,
 } from './services/firebaseService';
 import { syncLocalDataToFirestore } from './utils/migration';
 import { FirebaseUser } from './lib/firebase';
@@ -1081,36 +1080,6 @@ export function App() {
     saveStoredProfile(updated);
     if (currentUser?.uid) {
       saveUserProfile(currentUser.uid, updated).catch((e) => console.warn('Firestore update profile error:', e));
-
-      const rawStat = (updates.subscriptionStatus || '').toLowerCase();
-      if (updates.isSubscribed || rawStat === 'active' || rawStat === 'canceled_but_active') {
-        const resolvedExpiry =
-          updates.subscriptionExpiryTime ||
-          updates.subscriptionExpiryDate ||
-          profile.subscriptionExpiryTime ||
-          profile.subscriptionExpiryDate;
-        const resolvedBasePlan =
-          updates.subscriptionBasePlanId ||
-          updates.subscriptionBasePlan ||
-          profile.subscriptionBasePlanId ||
-          profile.subscriptionBasePlan ||
-          'quarterly';
-
-        saveSubscriptionRecordToFirestore(currentUser.uid, {
-          userId: currentUser.uid,
-          subscriptionStatus: rawStat === 'canceled_but_active' ? 'canceled_but_active' : 'active',
-          subscriptionProductId: updates.subscriptionProductId || profile.subscriptionProductId || 'property_agent_pro',
-          subscriptionBasePlanId: resolvedBasePlan,
-          subscriptionBasePlan: resolvedBasePlan,
-          planId: updates.planId || resolvedBasePlan,
-          subscriptionExpiryDate: resolvedExpiry,
-          subscriptionExpiryTime: resolvedExpiry,
-          expiryDate: resolvedExpiry,
-          autoRenewing: updates.autoRenewing !== undefined ? updates.autoRenewing : (profile.autoRenewing ?? true),
-          purchaseToken: updates.purchaseToken || profile.purchaseToken,
-          lastVerifiedAt: updates.lastVerifiedAt || new Date().toISOString(),
-        }).catch((e) => console.warn('Firestore update subscription record error:', e));
-      }
     }
   };
 
