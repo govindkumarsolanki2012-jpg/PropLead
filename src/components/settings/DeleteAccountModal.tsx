@@ -103,15 +103,15 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex min-h-[100dvh] items-start justify-center overflow-y-auto bg-black/70 p-4 pb-[calc(2rem+env(safe-area-inset-bottom))] backdrop-blur-xs animate-in fade-in duration-200 sm:items-center"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-rose-200 dark:border-rose-900/60 overflow-hidden"
+        className="relative flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-rose-200 bg-white shadow-2xl dark:border-rose-900/60 dark:bg-slate-900"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 bg-rose-50 dark:bg-rose-950/40 border-b border-rose-100 dark:border-rose-900/40">
+        <div className="flex shrink-0 items-center justify-between px-5 py-4 bg-rose-50 dark:bg-rose-950/40 border-b border-rose-100 dark:border-rose-900/40">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-rose-100 dark:bg-rose-900/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
               <AlertTriangle className="w-5 h-5" />
@@ -136,7 +136,7 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
         </div>
 
         {/* Body */}
-        <div className="p-5 sm:p-6 space-y-4 text-xs text-slate-600 dark:text-slate-300">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:p-6 sm:pb-8 space-y-4 text-xs text-slate-600 dark:text-slate-300">
           <p className="text-sm font-semibold text-slate-900 dark:text-white">
             Are you sure you want to delete your PropLead account?
           </p>
@@ -181,6 +181,12 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
               type="text"
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
+              onFocus={(e) => {
+                const input = e.currentTarget;
+                window.setTimeout(() => {
+                  input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 250);
+              }}
               placeholder="DELETE"
               disabled={isDeleting}
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
@@ -195,7 +201,7 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 bg-slate-50 dark:bg-slate-850 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-5 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] dark:border-slate-800 dark:bg-slate-850">
           <button
             type="button"
             disabled={isDeleting}
