@@ -494,6 +494,13 @@ async function deleteUserStorageObjects(uid: string, accessToken: string): Promi
       `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(FIREBASE_STORAGE_BUCKET)}/o?${query.toString()}`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
+    if (listRes.status === 404) {
+      // Storage has not been provisioned for this Firebase project, so this
+      // configured bucket cannot contain user files. Continue deleting the
+      // user's Firestore and Authentication data.
+      console.warn('[Account Deletion] Firebase Storage bucket not found; skipping storage cleanup.');
+      return;
+    }
     if (!listRes.ok) {
       throw new Error(`Could not enumerate Firebase Storage user files: ${await readDeletionApiError(listRes)}`);
     }
