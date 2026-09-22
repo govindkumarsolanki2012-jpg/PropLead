@@ -2,7 +2,6 @@ import { Capacitor } from '@capacitor/core';
 import { NativePurchases, PURCHASE_TYPE } from '@capgo/native-purchases';
 import { UserProfile, SubscriptionStatus, GooglePlaySubscriptionProduct, SubscriptionPlanId, SubscriptionPlanDetails } from '../types';
 import { auth } from '../lib/firebase';
-import { saveSubscriptionRecordToFirestore, saveUserProfile } from '../services/firebaseService';
 
 export const GOOGLE_PLAY_PRODUCT_ID = 'property_agent_pro';
 export const GOOGLE_PLAY_BASE_PLAN_ID = 'quarterly';
@@ -557,25 +556,6 @@ export async function launchGooglePlayPurchase(
         paymentIssueMessage: undefined,
       };
 
-      // Ensure dual persistence to Firestore
-      saveSubscriptionRecordToFirestore(userId, {
-        userId,
-        subscriptionStatus: 'active',
-        subscriptionProductId: GOOGLE_PLAY_PRODUCT_ID,
-        subscriptionBasePlanId: basePlanId,
-        subscriptionBasePlan: basePlanId,
-        planId: basePlanId,
-        subscriptionExpiryDate: resolvedExpiry,
-        subscriptionExpiryTime: resolvedExpiry,
-        expiryDate: resolvedExpiry,
-        autoRenewing: true,
-        purchaseToken: testToken,
-        acknowledged: true,
-        lastVerifiedAt: profileUpdates.lastVerifiedAt,
-      }).catch((e) => console.warn('[Firestore] sub record save error:', e));
-
-      saveUserProfile(userId, profileUpdates).catch((e) => console.warn('[Firestore] user profile save error:', e));
-
       return {
         success: true,
         profileUpdates,
@@ -812,25 +792,6 @@ export async function launchGooglePlayPurchase(
       paymentIssueMessage: undefined,
     };
 
-    // Dual persistence to Firestore
-    saveSubscriptionRecordToFirestore(userId, {
-      userId,
-      subscriptionStatus: 'active',
-      subscriptionProductId: GOOGLE_PLAY_PRODUCT_ID,
-      subscriptionBasePlanId: basePlanId,
-      subscriptionBasePlan: basePlanId,
-      planId: basePlanId,
-      subscriptionExpiryDate: resolvedExpiry,
-      subscriptionExpiryTime: resolvedExpiry,
-      expiryDate: resolvedExpiry,
-      autoRenewing: profileUpdates.autoRenewing,
-      purchaseToken,
-      acknowledged: true,
-      lastVerifiedAt: profileUpdates.lastVerifiedAt,
-    }).catch((e) => console.warn('[Firestore] native sub save error:', e));
-
-    saveUserProfile(userId, profileUpdates).catch((e) => console.warn('[Firestore] user profile save error:', e));
-
     return {
       success: true,
       profileUpdates,
@@ -982,25 +943,6 @@ export async function restoreGooglePlayPurchases(
         purchaseToken: data.purchaseToken || purchaseToken,
         paymentIssueMessage: undefined,
       };
-
-      // Dual persistence to Firestore
-      saveSubscriptionRecordToFirestore(userId, {
-        userId,
-        subscriptionStatus: 'active',
-        subscriptionProductId: data.subscriptionProductId || GOOGLE_PLAY_PRODUCT_ID,
-        subscriptionBasePlanId: effectiveBasePlan,
-        subscriptionBasePlan: effectiveBasePlan,
-        planId: effectiveBasePlan,
-        subscriptionExpiryDate: resolvedExpiry,
-        subscriptionExpiryTime: resolvedExpiry,
-        expiryDate: resolvedExpiry,
-        autoRenewing: profileUpdates.autoRenewing,
-        purchaseToken: profileUpdates.purchaseToken,
-        acknowledged: true,
-        lastVerifiedAt: profileUpdates.lastVerifiedAt,
-      }).catch((e) => console.warn('[Firestore] restore sub record save error:', e));
-
-      saveUserProfile(userId, profileUpdates).catch((e) => console.warn('[Firestore] restore user profile save error:', e));
 
       return {
         success: true,
