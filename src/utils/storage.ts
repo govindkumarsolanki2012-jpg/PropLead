@@ -120,6 +120,7 @@ export function clearAllData(): void {
     localStorage.removeItem(STORAGE_KEYS.LEADS);
     localStorage.removeItem(STORAGE_KEYS.PROPERTIES);
     localStorage.removeItem(STORAGE_KEYS.PROFILE);
+    localStorage.removeItem(STORAGE_KEYS.TEMPLATES);
     localStorage.removeItem(STORAGE_KEYS.IS_LOGGED_IN);
   } catch (err) {
     console.error('Error clearing local storage:', err);

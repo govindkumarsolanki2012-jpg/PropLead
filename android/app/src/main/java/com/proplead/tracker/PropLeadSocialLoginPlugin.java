@@ -21,7 +21,7 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
-import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption;
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
 
 import java.util.concurrent.Executor;
@@ -98,15 +98,18 @@ public class PropLeadSocialLoginPlugin extends Plugin {
             return;
         }
 
-        final GetSignInWithGoogleOption googleOption =
-            new GetSignInWithGoogleOption.Builder(webClientId).build();
+        final GetGoogleIdOption googleOption = new GetGoogleIdOption.Builder()
+            .setServerClientId(webClientId)
+            .setFilterByAuthorizedAccounts(false)
+            .setAutoSelectEnabled(false)
+            .build();
         final GetCredentialRequest request = new GetCredentialRequest.Builder()
             .addCredentialOption(googleOption)
             .build();
         final CredentialManager credentialManager = CredentialManager.create(activity);
         final Executor mainExecutor = ContextCompat.getMainExecutor(activity);
 
-        requestGoogleCredential(call, activity, credentialManager, request, mainExecutor, false);
+        requestGoogleCredential(call, activity, credentialManager, request, mainExecutor, false, null);
     }
 
     private void requestGoogleCredential(
@@ -115,13 +118,22 @@ public class PropLeadSocialLoginPlugin extends Plugin {
         CredentialManager credentialManager,
         GetCredentialRequest request,
         Executor mainExecutor,
-        boolean isReauthRetry
+        boolean isReauthRetry,
+        String initialAttemptFailure
     ) {
         String requestStage = isReauthRetry
             ? "RETRY_CREDENTIAL_REQUEST_STARTED"
             : "INITIAL_CREDENTIAL_REQUEST_STARTED";
+        String attempt = isReauthRetry ? "ATTEMPT_2" : "ATTEMPT_1";
         Log.i(LOG_TAG, requestStage);
         diagnostic(3, "pending", requestStage, null, null);
+        diagnostic(
+            3,
+            "info",
+            attempt + " option=GetGoogleIdOption; activityValid=" + isActivityValid(activity),
+            null,
+            null
+        );
 
         // Pass the foreground Activity, not the application Context: Credential
         // Manager may need to present account-selection or reauthentication UI.
@@ -144,6 +156,20 @@ public class PropLeadSocialLoginPlugin extends Plugin {
                 @Override
                 public void onError(@NonNull GetCredentialException error) {
                     Log.i(LOG_TAG, "credential_error_callback: " + error.getClass().getSimpleName());
+                    String attemptFailure = (isReauthRetry ? "A2" : "A1") + " cls="
+                        + error.getClass().getSimpleName()
+                        + ",[16]=" + containsStatus16(error)
+                        + ",act=" + (isActivityValid(activity) ? "valid" : "invalid");
+                    String diagnosticDetail = initialAttemptFailure == null
+                        ? "opt=GetGoogleIdOption; " + attemptFailure
+                        : initialAttemptFailure + "; " + attemptFailure;
+                    diagnostic(
+                        3,
+                        "info",
+                        diagnosticDetail,
+                        null,
+                        null
+                    );
                     if (isAccountReauthFailed(error)) {
                         handleAccountReauthFailure(
                             call,
@@ -152,6 +178,7 @@ public class PropLeadSocialLoginPlugin extends Plugin {
                             request,
                             mainExecutor,
                             isReauthRetry,
+                            diagnosticDetail,
                             error
                         );
                         return;
@@ -184,6 +211,15 @@ public class PropLeadSocialLoginPlugin extends Plugin {
             .contains("account reauth failed");
     }
 
+    private boolean containsStatus16(GetCredentialException error) {
+        String message = error.getMessage();
+        return message != null && message.contains("[16]");
+    }
+
+    private boolean isActivityValid(Activity activity) {
+        return activity != null && !activity.isFinishing() && !activity.isDestroyed();
+    }
+
     private void handleAccountReauthFailure(
         PluginCall call,
         Activity activity,
@@ -191,11 +227,13 @@ public class PropLeadSocialLoginPlugin extends Plugin {
         GetCredentialRequest request,
         Executor mainExecutor,
         boolean isReauthRetry,
+        String attemptDiagnostics,
         GetCredentialException error
     ) {
         if (isReauthRetry) {
-            diagnostic(3, "failed", "RETRY_ACCOUNT_REAUTH_FAILED", "ACCOUNT_REAUTH_FAILED",
-                "Google account re-authentication failed after one retry.");
+            diagnostic(3, "failed", attemptDiagnostics,
+                "ACCOUNT_REAUTH_FAILED",
+                "RETRY_ACCOUNT_REAUTH_FAILED: Google account re-authentication failed after one retry.");
             diagnostic(7, "failed", "Native Capacitor call rejected", "ACCOUNT_REAUTH_FAILED",
                 "Google account re-authentication failed after one retry.");
             call.reject(
@@ -206,8 +244,9 @@ public class PropLeadSocialLoginPlugin extends Plugin {
             return;
         }
 
-        diagnostic(3, "failed", "INITIAL_ACCOUNT_REAUTH_FAILED", "ACCOUNT_REAUTH_FAILED",
-            "Google account re-authentication failed on the initial request.");
+        diagnostic(3, "failed", attemptDiagnostics,
+            "ACCOUNT_REAUTH_FAILED",
+            "INITIAL_ACCOUNT_REAUTH_FAILED: Google account re-authentication failed on the initial request.");
         diagnostic(3, "pending", "CREDENTIAL_STATE_CLEAR_STARTED", null, null);
         Log.i(LOG_TAG, "CREDENTIAL_STATE_CLEAR_STARTED");
 
@@ -226,7 +265,8 @@ public class PropLeadSocialLoginPlugin extends Plugin {
                         credentialManager,
                         request,
                         mainExecutor,
-                        true
+                        true,
+                        attemptDiagnostics
                     );
                 }
 

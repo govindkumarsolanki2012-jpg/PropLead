@@ -45,6 +45,7 @@ const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
 
 let FIRESTORE_PROJECT_ID = 'proplead-e5c6a';
 let FIRESTORE_DATABASE_ID = 'ai-studio-proplead-10ea62d1-3291-4f7b-9549-788cd49f881d';
+let FIREBASE_STORAGE_BUCKET = 'proplead-e5c6a.firebasestorage.app';
 
 try {
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
@@ -52,6 +53,7 @@ try {
     const rawCfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     if (rawCfg.projectId) FIRESTORE_PROJECT_ID = rawCfg.projectId;
     if (rawCfg.firestoreDatabaseId) FIRESTORE_DATABASE_ID = rawCfg.firestoreDatabaseId;
+    if (rawCfg.storageBucket) FIREBASE_STORAGE_BUCKET = rawCfg.storageBucket;
   }
 } catch (e) {
   console.warn('Could not read firebase-applet-config.json in server.ts:', e);
@@ -320,6 +322,157 @@ async function getFirestoreServiceAccountToken(): Promise<string | null> {
   }
 
   return null;
+}
+
+let cachedFirebaseAdminToken: { token: string; expiresAt: number } | null = null;
+
+async function getFirebaseAdminAccessToken(): Promise<string | null> {
+  const credentials = parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY);
+  if (!credentials) return null;
+
+  const now = Date.now();
+  if (cachedFirebaseAdminToken && now < cachedFirebaseAdminToken.expiresAt) {
+    return cachedFirebaseAdminToken.token;
+  }
+
+  const auth = new google.auth.GoogleAuth({
+    credentials,
+    scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+  });
+  const client = await auth.getClient();
+  const tokenResponse = await client.getAccessToken();
+  if (!tokenResponse?.token) return null;
+
+  cachedFirebaseAdminToken = {
+    token: tokenResponse.token,
+    expiresAt: now + 50 * 60 * 1000,
+  };
+  return tokenResponse.token;
+}
+
+function encodeFirestorePath(documentPath: string): string {
+  return documentPath.split('/').map(encodeURIComponent).join('/');
+}
+
+async function readApiError(res: Response): Promise<string> {
+  const text = await res.text();
+  if (!text) return `HTTP ${res.status}`;
+  try {
+    const parsed = JSON.parse(text);
+    return parsed?.error?.message || parsed?.error || parsed?.message || `HTTP ${res.status}`;
+  } catch {
+    return `HTTP ${res.status}`;
+  }
+}
+
+async function listFirestoreChildCollections(documentPath: string, accessToken: string): Promise<string[]> {
+  const collectionIds: string[] = [];
+  let pageToken = '';
+  do {
+    const url = `${FIRESTORE_REST_BASE}/${encodeFirestorePath(documentPath)}:listCollectionIds`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ pageSize: 100, ...(pageToken ? { pageToken } : {}) }),
+    });
+    if (!res.ok) {
+      throw new Error(`Could not enumerate Firestore user data: ${await readApiError(res)}`);
+    }
+    const payload = await res.json() as { collectionIds?: string[]; nextPageToken?: string };
+    collectionIds.push(...(payload.collectionIds || []));
+    pageToken = payload.nextPageToken || '';
+  } while (pageToken);
+  return collectionIds;
+}
+
+async function listFirestoreDocuments(collectionPath: string, accessToken: string): Promise<string[]> {
+  const documentPaths: string[] = [];
+  let pageToken = '';
+  do {
+    const query = new URLSearchParams({ pageSize: '100' });
+    if (pageToken) query.set('pageToken', pageToken);
+    const url = `${FIRESTORE_REST_BASE}/${encodeFirestorePath(collectionPath)}?${query.toString()}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) {
+      throw new Error(`Could not enumerate Firestore user data: ${await readApiError(res)}`);
+    }
+    const payload = await res.json() as {
+      documents?: Array<{ name?: string }>;
+      nextPageToken?: string;
+    };
+    const marker = '/documents/';
+    for (const document of payload.documents || []) {
+      const markerIndex = document.name?.indexOf(marker) ?? -1;
+      if (document.name && markerIndex >= 0) {
+        documentPaths.push(document.name.slice(markerIndex + marker.length));
+      }
+    }
+    pageToken = payload.nextPageToken || '';
+  } while (pageToken);
+  return documentPaths;
+}
+
+async function deleteFirestoreDocumentTree(documentPath: string, accessToken: string): Promise<void> {
+  const childCollectionIds = await listFirestoreChildCollections(documentPath, accessToken);
+  for (const collectionId of childCollectionIds) {
+    const childDocuments = await listFirestoreDocuments(`${documentPath}/${collectionId}`, accessToken);
+    for (const childDocumentPath of childDocuments) {
+      await deleteFirestoreDocumentTree(childDocumentPath, accessToken);
+    }
+  }
+
+  const res = await fetch(`${FIRESTORE_REST_BASE}/${encodeFirestorePath(documentPath)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`Could not delete Firestore user data: ${await readApiError(res)}`);
+  }
+}
+
+async function deleteUserStorageObjects(uid: string, accessToken: string): Promise<void> {
+  const prefix = `users/${uid}/`;
+  let pageToken = '';
+  do {
+    const query = new URLSearchParams({ prefix });
+    if (pageToken) query.set('pageToken', pageToken);
+    const listUrl = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(FIREBASE_STORAGE_BUCKET)}/o?${query.toString()}`;
+    const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!listRes.ok) {
+      throw new Error(`Could not enumerate Firebase Storage user files: ${await readApiError(listRes)}`);
+    }
+    const payload = await listRes.json() as { items?: Array<{ name?: string }>; nextPageToken?: string };
+    for (const item of payload.items || []) {
+      if (!item.name || !item.name.startsWith(prefix)) continue;
+      const deleteUrl = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(FIREBASE_STORAGE_BUCKET)}/o/${encodeURIComponent(item.name)}`;
+      const deleteRes = await fetch(deleteUrl, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!deleteRes.ok && deleteRes.status !== 404) {
+        throw new Error(`Could not delete a Firebase Storage user file: ${await readApiError(deleteRes)}`);
+      }
+    }
+    pageToken = payload.nextPageToken || '';
+  } while (pageToken);
+}
+
+async function deleteFirebaseAuthUser(uid: string, accessToken: string): Promise<void> {
+  const url = `https://identitytoolkit.googleapis.com/v1/projects/${encodeURIComponent(FIRESTORE_PROJECT_ID)}/accounts:delete`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ localId: uid }),
+  });
+  if (!res.ok) {
+    throw new Error(`Could not delete Firebase Authentication user: ${await readApiError(res)}`);
+  }
 }
 
 async function getFirestoreReadToken(idToken?: string): Promise<string | null> {
@@ -778,6 +931,80 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Public legal pages must be registered before every API route and before
+  // Vite/static SPA middleware so they can never fall through to index.html.
+  const legalPage = (title: string, content: string) => `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${title} | PropLead</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f8fafc; color: #1e293b; line-height: 1.65; }
+    main { width: min(760px, calc(100% - 32px)); margin: 32px auto; padding: clamp(24px, 5vw, 48px); background: #fff; border: 1px solid #e2e8f0; border-radius: 20px; box-shadow: 0 12px 30px rgba(15, 23, 42, .06); }
+    h1 { margin: 0 0 8px; color: #047857; font-size: clamp(1.8rem, 6vw, 2.5rem); line-height: 1.2; }
+    h2 { margin-top: 28px; color: #0f172a; font-size: 1.2rem; }
+    p, li { font-size: 1rem; }
+    ul, ol { padding-left: 1.4rem; }
+    .meta { margin: 0 0 28px; color: #64748b; font-size: .9rem; }
+    .brand { margin-bottom: 18px; font-weight: 800; color: #059669; letter-spacing: .04em; }
+    @media (max-width: 480px) { main { width: 100%; min-height: 100vh; margin: 0; border: 0; border-radius: 0; padding: 24px 20px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">PropLead</div>
+    <h1>${title}</h1>
+    <p class="meta">Last updated: 22 September 2026</p>
+    ${content}
+  </main>
+</body>
+</html>`;
+
+  const privacyPolicyHtml = legalPage('Privacy Policy', `
+    <p>PropLead is a property lead and follow-up management application. This policy explains the information used to provide the service.</p>
+    <h2>Information we process</h2>
+    <ul>
+      <li>Account and authentication information required to sign you in.</li>
+      <li>Lead, property, follow-up, and profile information that you choose to enter.</li>
+      <li>Subscription and purchase status needed to provide paid features.</li>
+      <li>Technical information required for security, reliability, and troubleshooting.</li>
+    </ul>
+    <h2>How information is used</h2>
+    <p>Information is used to operate PropLead, synchronize your data, authenticate access, provide requested features, process subscription status, and protect the service from misuse.</p>
+    <h2>Sharing and retention</h2>
+    <p>PropLead does not sell personal information. Information is shared only with service providers required to operate the application, such as authentication, cloud storage, and payment providers. Data is retained while your account is active or as required for security, legal, and accounting obligations.</p>
+    <h2>Your choices</h2>
+    <p>You may request deletion of your PropLead account and associated application data using the instructions on the <a href="/account-deletion">Account Deletion</a> page.</p>
+  `);
+
+  const accountDeletionHtml = legalPage('Account Deletion', `
+    <p>You may request deletion of your PropLead account and the application data associated with it.</p>
+    <h2>How to request deletion</h2>
+    <ol>
+      <li>Open PropLead and sign in to the account you want deleted.</li>
+      <li>Open the account or settings area and choose the account-deletion option.</li>
+      <li>Confirm the deletion request when prompted.</li>
+    </ol>
+    <h2>What is deleted</h2>
+    <p>Account profile data and user-created PropLead records, including leads and properties associated with the account, are scheduled for deletion after the request is verified.</p>
+    <h2>What may be retained</h2>
+    <p>Limited transaction, security, or compliance records may be retained where required by law, fraud-prevention requirements, or accounting obligations. Google Play subscription cancellation is managed separately through Google Play.</p>
+  `);
+
+  app.get('/privacy-policy', (_req, res) => {
+    res.status(200).type('html').send(privacyPolicyHtml);
+  });
+
+  const sendAccountDeletionPage = (_req: express.Request, res: express.Response) => {
+    res.status(200).type('html').send(accountDeletionHtml);
+  };
+
+  app.get('/account-deletion', sendAccountDeletionPage);
+  app.get('/delete-account', sendAccountDeletionPage);
 
   // CORS middleware for API endpoints (critical for Android Capacitor requests)
   app.use('/api', (req, res, next) => {
@@ -1260,96 +1487,45 @@ async function startServer() {
     });
   });
 
-  // 8. Testing & Sandbox simulation endpoint for testing states
-  app.post('/api/billing/simulate', async (req, res) => {
-    // In production, this endpoint must NOT exist or work
-    if (process.env.NODE_ENV === 'production') {
-      return res.status(404).json({ error: 'Not found' });
+  // Delete the authenticated PropLead account and its user-owned data.
+  // Google Play billing is intentionally not cancelled by this endpoint.
+  app.post('/api/account/delete', async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+
+    try {
+      // The verified token UID is the sole deletion authority. Request-body UIDs
+      // are neither required nor used to choose the account being deleted.
+      const verifiedUid = await authenticateRequest(req, res);
+      if (!verifiedUid) return;
+
+      const adminAccessToken = await getFirebaseAdminAccessToken();
+      if (!adminAccessToken) {
+        return res.status(503).json({
+          success: false,
+          error: 'Account deletion service is not configured. Please contact PropLead support.',
+        });
+      }
+
+      // Recursion removes leads, properties, templates, and any other present
+      // subcollections beneath this authenticated user's document.
+      await deleteFirestoreDocumentTree(`users/${verifiedUid}`, adminAccessToken);
+      await deleteFirestoreDocumentTree(`subscriptions/${verifiedUid}`, adminAccessToken);
+      await deleteUserStorageObjects(verifiedUid, adminAccessToken);
+
+      subscriptionStore.delete(verifiedUid);
+      persistSubscriptionStoreToDisk();
+
+      // Authentication is removed last so a cleanup failure remains retryable.
+      await deleteFirebaseAuthUser(verifiedUid, adminAccessToken);
+
+      return res.status(200).json({ success: true });
+    } catch (err: any) {
+      console.error('[Account Deletion] Failed:', err);
+      return res.status(500).json({
+        success: false,
+        error: err?.message || 'Account deletion failed. Please try again.',
+      });
     }
-
-    const { userId = 'usr_001', targetState, customDaysRemaining } = req.body;
-    const idToken = extractIdToken(req);
-    const subResult = await getSubscriptionRecord(userId, idToken);
-    const record: UserSubscriptionRecord = subResult.record || {
-      userId,
-      subscriptionStatus: 'TRIAL',
-      trialStartDate: new Date().toISOString(),
-      trialEndDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      subscriptionExpiryDate: null,
-      subscriptionProductId: 'property_agent_pro',
-      subscriptionBasePlan: 'monthly',
-      autoRenewing: false,
-      acknowledged: false,
-      paymentIssueMessage: undefined,
-      updatedAt: new Date().toISOString(),
-    };
-
-    const now = new Date();
-
-    if (targetState === 'TRIAL') {
-      const days = typeof customDaysRemaining === 'number' ? customDaysRemaining : 7;
-      const trialEnd = new Date(now);
-      trialEnd.setDate(trialEnd.getDate() + days);
-
-      record.subscriptionStatus = 'TRIAL';
-      record.trialEndDate = trialEnd.toISOString();
-      record.subscriptionExpiryDate = null;
-      record.autoRenewing = false;
-      record.paymentIssueMessage = undefined;
-    } else if (targetState === 'ACTIVE') {
-      const expiry = new Date(now);
-      expiry.setDate(expiry.getDate() + 30);
-
-      record.subscriptionStatus = 'ACTIVE';
-      record.subscriptionExpiryDate = expiry.toISOString();
-      record.autoRenewing = true;
-      record.paymentIssueMessage = undefined;
-    } else if (targetState === 'CANCELED_BUT_ACTIVE') {
-      const expiry = new Date(now);
-      expiry.setDate(expiry.getDate() + 14); // 14 days remaining in cycle
-
-      record.subscriptionStatus = 'CANCELED_BUT_ACTIVE';
-      record.subscriptionExpiryDate = expiry.toISOString();
-      record.autoRenewing = false;
-      record.paymentIssueMessage = undefined;
-    } else if (targetState === 'PAYMENT_ISSUE') {
-      record.subscriptionStatus = 'PAYMENT_ISSUE';
-      record.paymentIssueMessage = 'Google Play could not renew your ₹49/month subscription. Please update your payment method.';
-      record.autoRenewing = true;
-    } else if (targetState === 'EXPIRED') {
-      const pastEnd = new Date(now);
-      pastEnd.setDate(pastEnd.getDate() - 1);
-
-      record.subscriptionStatus = 'EXPIRED';
-      record.trialEndDate = pastEnd.toISOString();
-      record.subscriptionExpiryDate = pastEnd.toISOString();
-      record.autoRenewing = false;
-    }
-
-    await saveSubscriptionRecord(record, idToken);
-
-    const trialDaysRemaining = Math.max(
-      0,
-      Math.ceil((new Date(record.trialEndDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-    );
-
-    const simNow = new Date().toISOString();
-
-    res.json({
-      success: true,
-      userId: record.userId,
-      subscriptionStatus: record.subscriptionStatus,
-      trialStartDate: record.trialStartDate,
-      trialEndDate: record.trialEndDate,
-      serverTimestamp: simNow,
-      serverNow: simNow,
-      trialDaysRemaining,
-      subscriptionExpiryDate: record.subscriptionExpiryDate,
-      autoRenewing: record.autoRenewing,
-      paymentIssueMessage: record.paymentIssueMessage,
-      isSubscribed: record.subscriptionStatus === 'ACTIVE' || record.subscriptionStatus === 'CANCELED_BUT_ACTIVE',
-      isFeatureLocked: record.subscriptionStatus === 'EXPIRED',
-    });
   });
 
   // 404 handler for any unhandled /api/* routes to prevent falling through to Vite or index.html

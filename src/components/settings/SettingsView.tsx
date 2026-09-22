@@ -22,6 +22,8 @@ import {
   AlertTriangle,
   Cloud,
   LogOut,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 import { UserProfile, Lead, WhatsAppTemplate } from '../../types';
 import { exportLeadsToCSV } from '../../utils/storage';
@@ -41,6 +43,7 @@ interface SettingsViewProps {
   isCloudSynced?: boolean;
   onGoogleSignIn?: () => void;
   onSignOut?: () => void;
+  onDeleteAccount?: () => Promise<void>;
   onUpdateProfile: (profile: UserProfile) => void;
   onUpdateTemplates: (templates: WhatsAppTemplate[]) => void;
   onOpenSubscription: () => void;
@@ -54,6 +57,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   isCloudSynced,
   onGoogleSignIn,
   onSignOut,
+  onDeleteAccount,
   onUpdateProfile,
   onUpdateTemplates,
   onOpenSubscription,
@@ -70,6 +74,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     type: 'success' | 'info' | 'error';
     message: string;
   } | null>(null);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDeleteAccount = async () => {
+    if (!onDeleteAccount || isDeletingAccount) return;
+    setIsDeletingAccount(true);
+    setDeleteError(null);
+    try {
+      await onDeleteAccount();
+    } catch (err: any) {
+      setDeleteError(err?.message || 'Account deletion failed. Please try again.');
+      setIsDeletingAccount(false);
+    }
+  };
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -447,6 +466,61 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <span>{t('settings_download_csv')} ({leads.length})</span>
         </button>
       </div>
+
+      {/* Account deletion: Google Play subscriptions remain managed by Google Play. */}
+      {onDeleteAccount && (
+        <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-rose-200 dark:border-rose-900 space-y-3 shadow-2xs">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-400 flex items-center justify-center">
+              <Trash2 className="w-4 h-4" />
+            </div>
+            <h3 className="text-xs font-bold text-slate-900 dark:text-white">Delete Account &amp; All Data</h3>
+          </div>
+
+          <p className="text-[11px] text-slate-600 dark:text-slate-300">
+            Permanently deletes your PropLead profile, leads, properties, templates, and uploaded files.
+          </p>
+          <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+            Deleting your PropLead account does not automatically cancel Google Play billing.
+          </p>
+
+          {!showDeleteConfirmation ? (
+            <button
+              type="button"
+              onClick={() => { setShowDeleteConfirmation(true); setDeleteError(null); }}
+              className="w-full py-2.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-950 text-rose-700 dark:text-rose-300 font-bold rounded-xl text-xs border border-rose-200 dark:border-rose-800 transition-colors"
+            >
+              Delete Account &amp; All Data
+            </button>
+          ) : (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 space-y-2.5">
+              <p className="text-xs font-bold text-rose-800 dark:text-rose-200">
+                This cannot be undone. Confirm permanent account deletion?
+              </p>
+              {deleteError && <p className="text-[11px] text-rose-700 dark:text-rose-300">{deleteError}</p>}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={isDeletingAccount}
+                  onClick={() => { setShowDeleteConfirmation(false); setDeleteError(null); }}
+                  className="py-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-200 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingAccount}
+                  onClick={handleDeleteAccount}
+                  className="py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
+                >
+                  {isDeletingAccount && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {isDeletingAccount ? 'Deleting...' : 'Confirm Delete'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Direct Agent Help & WhatsApp Support */}
       <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 rounded-2xl border border-emerald-200 dark:border-emerald-800 space-y-2">

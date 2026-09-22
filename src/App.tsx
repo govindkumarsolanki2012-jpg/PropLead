@@ -834,6 +834,38 @@ export function App() {
     }
   };
 
+  const handleDeleteAccount = async () => {
+    const firebaseUser = getCurrentUser();
+    if (!firebaseUser) {
+      throw new Error('You must be signed in to delete your account.');
+    }
+
+    const idToken = await firebaseUser.getIdToken(true);
+    const response = await fetch(getBillingApiUrl('/api/account/delete'), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || payload?.success !== true) {
+      throw new Error(payload?.error || 'Account deletion failed. Please try again.');
+    }
+
+    clearAllData();
+    await signOutUser().catch(() => undefined);
+    setCurrentUser(null);
+    setIsCloudSynced(false);
+    setLeads([]);
+    setProperties([]);
+    setTemplates(getStoredTemplates());
+    setProfile(INITIAL_USER_PROFILE);
+    setCurrentTab('home');
+    setTabHistory(['home']);
+  };
+
   // Check today and overdue follow-up counts for bottom nav badge
   const todayCount = leads.filter((l) => formatRelativeDate(l.nextFollowUpDate).isToday).length;
 
@@ -977,6 +1009,7 @@ export function App() {
                 isCloudSynced={isCloudSynced}
                 onGoogleSignIn={handleGoogleSignIn}
                 onSignOut={handleSignOut}
+                onDeleteAccount={handleDeleteAccount}
                 onUpdateProfile={(p) => {
                   setProfile(p);
                   saveStoredProfile(p);
