@@ -50,6 +50,7 @@ const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
 
 let FIRESTORE_PROJECT_ID = 'proplead-e5c6a';
 let FIRESTORE_DATABASE_ID = 'ai-studio-proplead-10ea62d1-3291-4f7b-9549-788cd49f881d';
+let FIREBASE_STORAGE_BUCKET = 'proplead-e5c6a.firebasestorage.app';
 
 try {
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
@@ -57,6 +58,7 @@ try {
     const rawCfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     if (rawCfg.projectId) FIRESTORE_PROJECT_ID = rawCfg.projectId;
     if (rawCfg.firestoreDatabaseId) FIRESTORE_DATABASE_ID = rawCfg.firestoreDatabaseId;
+    if (rawCfg.storageBucket) FIREBASE_STORAGE_BUCKET = rawCfg.storageBucket;
   }
 } catch (e) {
   console.warn('Could not read firebase-applet-config.json in server.ts:', e);
@@ -365,6 +367,172 @@ async function getFirestoreServiceAccountToken(): Promise<string | null> {
   }
 
   return null;
+}
+
+let cachedFirebaseAdminToken: { token: string; expiresAt: number } | null = null;
+
+async function getFirebaseAdminAccessToken(): Promise<string | null> {
+  const now = Date.now();
+  if (cachedFirebaseAdminToken && now < cachedFirebaseAdminToken.expiresAt) {
+    return cachedFirebaseAdminToken.token;
+  }
+
+  const credentials = parseServiceAccountCredentials(process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY);
+  const authOptions: any = {
+    scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+  };
+  if (credentials) {
+    authOptions.credentials = credentials;
+  }
+
+  const auth = new google.auth.GoogleAuth(authOptions);
+  const client = await auth.getClient();
+  const tokenResponse = await client.getAccessToken();
+  if (!tokenResponse?.token) return null;
+
+  cachedFirebaseAdminToken = {
+    token: tokenResponse.token,
+    expiresAt: now + 50 * 60 * 1000,
+  };
+  return tokenResponse.token;
+}
+
+function encodeFirestorePath(documentPath: string): string {
+  return documentPath.split('/').map(encodeURIComponent).join('/');
+}
+
+async function readDeletionApiError(res: Response): Promise<string> {
+  const text = await res.text();
+  if (!text) return `HTTP ${res.status}`;
+  try {
+    const parsed = JSON.parse(text);
+    return parsed?.error?.message || parsed?.error || parsed?.message || `HTTP ${res.status}`;
+  } catch {
+    return `HTTP ${res.status}`;
+  }
+}
+
+async function listFirestoreChildCollections(documentPath: string, accessToken: string): Promise<string[]> {
+  const collectionIds: string[] = [];
+  let pageToken = '';
+  do {
+    const res = await fetch(
+      `${FIRESTORE_REST_BASE}/${encodeFirestorePath(documentPath)}:listCollectionIds`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ pageSize: 100, ...(pageToken ? { pageToken } : {}) }),
+      }
+    );
+    if (!res.ok) {
+      throw new Error(`Could not enumerate Firestore user data: ${await readDeletionApiError(res)}`);
+    }
+    const payload = await res.json() as { collectionIds?: string[]; nextPageToken?: string };
+    collectionIds.push(...(payload.collectionIds || []));
+    pageToken = payload.nextPageToken || '';
+  } while (pageToken);
+  return collectionIds;
+}
+
+async function listFirestoreDocuments(collectionPath: string, accessToken: string): Promise<string[]> {
+  const documentPaths: string[] = [];
+  let pageToken = '';
+  do {
+    const query = new URLSearchParams({ pageSize: '100' });
+    if (pageToken) query.set('pageToken', pageToken);
+    const res = await fetch(
+      `${FIRESTORE_REST_BASE}/${encodeFirestorePath(collectionPath)}?${query.toString()}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!res.ok) {
+      throw new Error(`Could not enumerate Firestore user data: ${await readDeletionApiError(res)}`);
+    }
+    const payload = await res.json() as {
+      documents?: Array<{ name?: string }>;
+      nextPageToken?: string;
+    };
+    const marker = '/documents/';
+    for (const document of payload.documents || []) {
+      const markerIndex = document.name?.indexOf(marker) ?? -1;
+      if (document.name && markerIndex >= 0) {
+        documentPaths.push(document.name.slice(markerIndex + marker.length));
+      }
+    }
+    pageToken = payload.nextPageToken || '';
+  } while (pageToken);
+  return documentPaths;
+}
+
+async function deleteFirestoreDocumentTree(documentPath: string, accessToken: string): Promise<void> {
+  const collectionIds = await listFirestoreChildCollections(documentPath, accessToken);
+  for (const collectionId of collectionIds) {
+    const childDocuments = await listFirestoreDocuments(`${documentPath}/${collectionId}`, accessToken);
+    for (const childDocumentPath of childDocuments) {
+      await deleteFirestoreDocumentTree(childDocumentPath, accessToken);
+    }
+  }
+
+  const res = await fetch(`${FIRESTORE_REST_BASE}/${encodeFirestorePath(documentPath)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`Could not delete Firestore user data: ${await readDeletionApiError(res)}`);
+  }
+}
+
+async function deleteUserStorageObjects(uid: string, accessToken: string): Promise<void> {
+  const prefix = `users/${uid}/`;
+  let pageToken = '';
+  do {
+    const query = new URLSearchParams({ prefix });
+    if (pageToken) query.set('pageToken', pageToken);
+    const listRes = await fetch(
+      `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(FIREBASE_STORAGE_BUCKET)}/o?${query.toString()}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!listRes.ok) {
+      throw new Error(`Could not enumerate Firebase Storage user files: ${await readDeletionApiError(listRes)}`);
+    }
+    const payload = await listRes.json() as {
+      items?: Array<{ name?: string }>;
+      nextPageToken?: string;
+    };
+    for (const item of payload.items || []) {
+      if (!item.name || !item.name.startsWith(prefix)) continue;
+      const deleteRes = await fetch(
+        `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(FIREBASE_STORAGE_BUCKET)}/o/${encodeURIComponent(item.name)}`,
+        {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
+      if (!deleteRes.ok && deleteRes.status !== 404) {
+        throw new Error(`Could not delete a Firebase Storage user file: ${await readDeletionApiError(deleteRes)}`);
+      }
+    }
+    pageToken = payload.nextPageToken || '';
+  } while (pageToken);
+}
+
+async function deleteFirebaseAuthUser(uid: string, accessToken: string): Promise<void> {
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/projects/${encodeURIComponent(FIRESTORE_PROJECT_ID)}/accounts:delete`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ localId: uid }),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`Could not delete Firebase Authentication user: ${await readDeletionApiError(res)}`);
+  }
 }
 
 async function getFirestoreWriteToken(idToken?: string): Promise<string | null> {
@@ -1835,179 +2003,43 @@ async function startServer() {
     });
   });
 
-  // 8. Testing & Sandbox simulation endpoint for testing states
-  app.post('/api/billing/simulate', async (req, res) => {
-    // In production, this endpoint must NOT exist or work
-    if (process.env.NODE_ENV === 'production') {
-      return res.status(404).json({ error: 'Not found' });
-    }
-
-    const { userId = 'usr_001', targetState, customDaysRemaining } = req.body;
-    const idToken = extractIdToken(req);
-    const subResult = await getSubscriptionRecord(userId, idToken);
-    const record: UserSubscriptionRecord = subResult.record || {
-      userId,
-      subscriptionStatus: 'TRIAL',
-      trialStartDate: new Date().toISOString(),
-      trialEndDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      subscriptionExpiryDate: null,
-      subscriptionProductId: 'property_agent_pro',
-      subscriptionBasePlan: 'monthly',
-      autoRenewing: false,
-      acknowledged: false,
-      paymentIssueMessage: undefined,
-      updatedAt: new Date().toISOString(),
-    };
-
-    const now = new Date();
-
-    if (targetState === 'TRIAL') {
-      const days = typeof customDaysRemaining === 'number' ? customDaysRemaining : 7;
-      const trialEnd = new Date(now);
-      trialEnd.setDate(trialEnd.getDate() + days);
-
-      record.subscriptionStatus = 'TRIAL';
-      record.trialEndDate = trialEnd.toISOString();
-      record.subscriptionExpiryDate = null;
-      record.autoRenewing = false;
-      record.paymentIssueMessage = undefined;
-    } else if (targetState === 'ACTIVE') {
-      const expiry = new Date(now);
-      expiry.setDate(expiry.getDate() + 30);
-
-      record.subscriptionStatus = 'ACTIVE';
-      record.subscriptionExpiryDate = expiry.toISOString();
-      record.autoRenewing = true;
-      record.paymentIssueMessage = undefined;
-    } else if (targetState === 'CANCELED_BUT_ACTIVE') {
-      const expiry = new Date(now);
-      expiry.setDate(expiry.getDate() + 14); // 14 days remaining in cycle
-
-      record.subscriptionStatus = 'CANCELED_BUT_ACTIVE';
-      record.subscriptionExpiryDate = expiry.toISOString();
-      record.autoRenewing = false;
-      record.paymentIssueMessage = undefined;
-    } else if (targetState === 'PAYMENT_ISSUE') {
-      record.subscriptionStatus = 'PAYMENT_ISSUE';
-      record.paymentIssueMessage = 'Google Play could not renew your ₹49/month subscription. Please update your payment method.';
-      record.autoRenewing = true;
-    } else if (targetState === 'EXPIRED') {
-      const pastEnd = new Date(now);
-      pastEnd.setDate(pastEnd.getDate() - 1);
-
-      record.subscriptionStatus = 'EXPIRED';
-      record.trialEndDate = pastEnd.toISOString();
-      record.subscriptionExpiryDate = pastEnd.toISOString();
-      record.autoRenewing = false;
-    }
-
-    await saveSubscriptionRecord(record, idToken);
-
-    const trialDaysRemaining = Math.max(
-      0,
-      Math.ceil((new Date(record.trialEndDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-    );
-
-    const simNow = new Date().toISOString();
-
-    res.json({
-      success: true,
-      userId: record.userId,
-      subscriptionStatus: record.subscriptionStatus,
-      trialStartDate: record.trialStartDate,
-      trialEndDate: record.trialEndDate,
-      serverTimestamp: simNow,
-      serverNow: simNow,
-      trialDaysRemaining,
-      subscriptionExpiryDate: record.subscriptionExpiryDate,
-      autoRenewing: record.autoRenewing,
-      paymentIssueMessage: record.paymentIssueMessage,
-      isSubscribed: record.subscriptionStatus === 'ACTIVE' || record.subscriptionStatus === 'CANCELED_BUT_ACTIVE',
-      isFeatureLocked: record.subscriptionStatus === 'EXPIRED',
-    });
-  });
-
   // ==========================================
   // 9. SECURE ACCOUNT & DATA DELETION ENDPOINT
   // ==========================================
   app.post('/api/account/delete', async (req, res) => {
-    // Cryptographically authenticate Firebase ID token and verify UID ownership
-    const verifiedUid = await authenticateRequest(req, res);
-    if (!verifiedUid) return;
-
-    const idToken = extractIdToken(req);
-    console.log(`[Account Deletion] Initiating complete data deletion for user: ${verifiedUid}`);
+    res.setHeader('Content-Type', 'application/json');
 
     try {
-      const token = await getFirestoreWriteToken(idToken);
+      // The cryptographically verified token UID is the sole deletion authority.
+      // Client-supplied user IDs are never used to select an account.
+      const verifiedUid = await authenticateRequest(req, res);
+      if (!verifiedUid) return;
 
-      // Helper to delete all documents in a subcollection via Firestore REST API
-      const deleteCollectionDocs = async (subpath: string) => {
-        if (!token) return;
-        try {
-          const listUrl = `${FIRESTORE_REST_BASE}/${subpath}?pageSize=300`;
-          const listRes = await fetch(listUrl, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (!listRes.ok) return;
-          const listData = (await listRes.json()) as any;
-          if (listData.documents && Array.isArray(listData.documents)) {
-            for (const doc of listData.documents) {
-              const delUrl = `https://firestore.googleapis.com/v1/${doc.name}`;
-              await fetch(delUrl, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${token}` },
-              }).catch(() => {});
-            }
-          }
-        } catch (err) {
-          console.warn(`[Account Deletion] Error clearing collection ${subpath}:`, err);
-        }
-      };
+      const adminAccessToken = await getFirebaseAdminAccessToken();
+      if (!adminAccessToken) {
+        return res.status(503).json({
+          success: false,
+          error: 'Account deletion service is temporarily unavailable. Please contact PropLead support.',
+        });
+      }
 
-      // Helper to delete a specific Firestore document
-      const deleteSingleDoc = async (docPath: string) => {
-        if (!token) return;
-        try {
-          const docUrl = `${FIRESTORE_REST_BASE}/${docPath}`;
-          await fetch(docUrl, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${token}` },
-          }).catch(() => {});
-        } catch (err) {
-          console.warn(`[Account Deletion] Error deleting document ${docPath}:`, err);
-        }
-      };
+      // Recursively delete the profile plus every present user-owned subcollection.
+      await deleteFirestoreDocumentTree(`users/${verifiedUid}`, adminAccessToken);
+      await deleteFirestoreDocumentTree(`subscriptions/${verifiedUid}`, adminAccessToken);
+      await deleteUserStorageObjects(verifiedUid, adminAccessToken);
 
-      // 1. Delete user-owned subcollections: leads, properties, templates
-      await Promise.all([
-        deleteCollectionDocs(`users/${verifiedUid}/leads`),
-        deleteCollectionDocs(`users/${verifiedUid}/properties`),
-        deleteCollectionDocs(`users/${verifiedUid}/templates`),
-      ]);
-
-      // 2. Delete root user profile document
-      await deleteSingleDoc(`users/${verifiedUid}`);
-
-      // 3. Delete user subscription record from Firestore
-      await deleteSingleDoc(`subscriptions/${verifiedUid}`);
-
-      // 4. Remove user from server in-memory & local disk subscription cache
       subscriptionStore.delete(verifiedUid);
       persistSubscriptionStoreToDisk();
 
-      console.log(`[Account Deletion] Successfully deleted all data for user ${verifiedUid}`);
+      // Delete Authentication last so an earlier cleanup failure remains retryable.
+      await deleteFirebaseAuthUser(verifiedUid, adminAccessToken);
 
-      return res.status(200).json({
-        success: true,
-        message: 'Your PropLead account and all associated data have been permanently deleted.',
-        deletedUid: verifiedUid,
-      });
+      return res.status(200).json({ success: true });
     } catch (err: any) {
-      console.error(`[Account Deletion] Failed for user ${verifiedUid}:`, err);
+      console.error('[Account Deletion] Failed:', err);
       return res.status(500).json({
         success: false,
-        error: 'An unexpected error occurred while deleting your account. Please try again or contact jyothigehlot2025@gmail.com.',
+        error: err?.message || 'Account deletion failed. Please try again.',
       });
     }
   });
