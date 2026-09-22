@@ -47,10 +47,8 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
 
   const [selectedDate, setSelectedDate] = useState<string>(lead.nextFollowUpDate || tmrwStr);
   const [selectedTime, setSelectedTime] = useState<string>(lead.nextFollowUpTime || '11:00');
-  const [followUpType, setFollowUpType] = useState<FollowUpType>('call');
-  const [note, setNote] = useState<string>(
-    lead.nextFollowUpNote || `Follow-up regarding property requirements with ${lead.name}`
-  );
+  const [followUpType, setFollowUpType] = useState<FollowUpType>(lead.nextFollowUpType || 'call');
+  const [note, setNote] = useState<string>(lead.nextFollowUpNote || '');
 
   // If user does not have active trial or active subscription, close immediately and show paywall
   useEffect(() => {
@@ -65,7 +63,8 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
     if (isOpen && lead) {
       setSelectedDate(lead.nextFollowUpDate || tmrwStr);
       setSelectedTime(lead.nextFollowUpTime || '11:00');
-      setNote(lead.nextFollowUpNote || `Follow-up regarding property requirements with ${lead.name}`);
+      setFollowUpType(lead.nextFollowUpType || 'call');
+      setNote(lead.nextFollowUpNote || '');
     }
   }, [isOpen, lead, tmrwStr]);
 

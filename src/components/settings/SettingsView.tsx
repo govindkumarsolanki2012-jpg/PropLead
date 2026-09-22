@@ -24,6 +24,8 @@ import {
   LogOut,
   Bell,
   ChevronRight,
+  Trash2,
+  FileText,
 } from 'lucide-react';
 import { UserProfile, Lead, WhatsAppTemplate, NotificationSettings } from '../../types';
 import { exportLeadsToCSV } from '../../utils/storage';
@@ -46,6 +48,8 @@ import {
 import { useLanguage } from '../../context/LanguageContext';
 import { NotificationSettingsPage } from './NotificationSettingsPage';
 import { DeveloperNotificationTester } from './DeveloperNotificationTester';
+import { PrivacyPolicyModal } from './PrivacyPolicyModal';
+import { DeleteAccountModal } from './DeleteAccountModal';
 
 interface SettingsViewProps {
   profile: UserProfile;
@@ -55,6 +59,7 @@ interface SettingsViewProps {
   isCloudSynced?: boolean;
   onGoogleSignIn?: () => void;
   onSignOut?: () => void;
+  onAccountDeleted?: () => void;
   onUpdateProfile: (profile: UserProfile) => void;
   onUpdateTemplates: (templates: WhatsAppTemplate[]) => void;
   onOpenSubscription: () => void;
@@ -68,6 +73,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   isCloudSynced,
   onGoogleSignIn,
   onSignOut,
+  onAccountDeleted,
   onUpdateProfile,
   onUpdateTemplates,
   onOpenSubscription,
@@ -84,6 +90,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     type: 'success' | 'info' | 'error';
     message: string;
   } | null>(null);
+
+  // Modals
+  const [showPrivacyPolicyModal, setShowPrivacyPolicyModal] = useState<boolean>(false);
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState<boolean>(false);
 
   // Notification Settings State
   const [showNotificationsPage, setShowNotificationsPage] = useState<boolean>(false);
@@ -559,6 +569,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </button>
           )}
         </div>
+
+        {/* Delete Account & Data Option */}
+        <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+          <button
+            type="button"
+            onClick={() => setShowDeleteAccountModal(true)}
+            className="w-full py-2 px-3 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Delete Account &amp; Data</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Legal & Privacy Policy */}
+      <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3 shadow-2xs">
+        <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+          Legal &amp; Privacy
+        </h3>
+
+        <button
+          type="button"
+          onClick={() => setShowPrivacyPolicyModal(true)}
+          className="w-full py-2.5 px-3 bg-slate-50 hover:bg-slate-100 dark:bg-slate-700/60 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold rounded-xl text-xs flex items-center justify-between border border-slate-200 dark:border-slate-600 transition-all"
+        >
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-emerald-600" />
+            <span>Privacy Policy</span>
+          </div>
+          <div className="flex items-center gap-1 text-[11px] text-slate-500 font-normal">
+            <span>Read Policy</span>
+            <ChevronRight className="w-4 h-4 text-slate-400" />
+          </div>
+        </button>
       </div>
 
       {/* Data Backup & Export */}
@@ -595,6 +639,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <span>{t('settings_contact_whatsapp')}</span>
         </button>
       </div>
+
+      {/* Modals */}
+      <PrivacyPolicyModal
+        isOpen={showPrivacyPolicyModal}
+        onClose={() => setShowPrivacyPolicyModal(false)}
+      />
+
+      <DeleteAccountModal
+        isOpen={showDeleteAccountModal}
+        onClose={() => setShowDeleteAccountModal(false)}
+        onAccountDeleted={() => {
+          setShowDeleteAccountModal(false);
+          onAccountDeleted?.();
+        }}
+        currentUserEmail={currentUserEmail}
+      />
     </div>
   );
 };

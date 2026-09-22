@@ -29,6 +29,12 @@ import {
   UserProfile,
 } from '../../types';
 import { formatIndianCurrency } from '../../utils/formatters';
+import { auth } from '../../lib/firebase';
+import {
+  uploadPropertyPhotoToStorage,
+  compressImage,
+  validateAttachmentFile,
+} from '../../utils/attachmentStorage';
 
 interface AddPropertyModalProps {
   isOpen: boolean;
@@ -139,19 +145,61 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [isUploadingPhotos, setIsUploadingPhotos] = useState<boolean>(false);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    Array.from(files).forEach((file: File) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (reader.result) {
-          setPhotos((prev) => [...prev, reader.result as string]);
+    setIsUploadingPhotos(true);
+    setErrorMessage(null);
+
+    const currentUid = auth.currentUser?.uid;
+    const tempPropId = `prop_${Date.now()}`;
+
+    try {
+      const fileList: File[] = Array.from(files);
+      for (const file of fileList) {
+        const validation = validateAttachmentFile(file);
+        if (!validation.valid) {
+          setErrorMessage(validation.error || 'Invalid photo format');
+          continue;
         }
-      };
-      reader.readAsDataURL(file);
-    });
+
+        if (currentUid) {
+          try {
+            const { downloadUrl } = await uploadPropertyPhotoToStorage({
+              userId: currentUid,
+              propertyId: tempPropId,
+              file,
+            });
+            setPhotos((prev) => [...prev, downloadUrl]);
+          } catch (storageErr) {
+            console.warn('[Storage upload fallback to compressed]', storageErr);
+            const compressed = await compressImage(file);
+            const reader = new FileReader();
+            reader.onload = () => {
+              if (reader.result) {
+                setPhotos((prev) => [...prev, reader.result as string]);
+              }
+            };
+            reader.readAsDataURL(compressed);
+          }
+        } else {
+          const compressed = await compressImage(file);
+          const reader = new FileReader();
+          reader.onload = () => {
+            if (reader.result) {
+              setPhotos((prev) => [...prev, reader.result as string]);
+            }
+          };
+          reader.readAsDataURL(compressed);
+        }
+      }
+    } finally {
+      setIsUploadingPhotos(false);
+      e.target.value = '';
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -575,11 +623,21 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
               {/* Upload Box */}
               <button
                 type="button"
+                disabled={isUploadingPhotos}
                 onClick={() => fileInputRef.current?.click()}
-                className="rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 dark:hover:border-emerald-500 flex flex-col items-center justify-center p-3 text-slate-400 hover:text-emerald-600 transition-colors aspect-4/3"
+                className="rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 dark:hover:border-emerald-500 flex flex-col items-center justify-center p-3 text-slate-400 hover:text-emerald-600 transition-colors aspect-4/3 disabled:opacity-50"
               >
-                <Upload className="w-5 h-5 mb-1" />
-                <span className="text-[10px] font-bold">+ Add Photo</span>
+                {isUploadingPhotos ? (
+                  <>
+                    <RefreshCw className="w-5 h-5 mb-1 animate-spin text-emerald-600" />
+                    <span className="text-[10px] font-bold text-emerald-600">Uploading...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-5 h-5 mb-1" />
+                    <span className="text-[10px] font-bold">+ Add Photo</span>
+                  </>
+                )}
               </button>
             </div>
             <input

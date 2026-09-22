@@ -90,6 +90,7 @@ export interface Attachment {
   name: string;
   type: 'image' | 'document';
   url: string;
+  storagePath?: string;
   size?: string;
   createdAt: string;
 }
@@ -116,6 +117,7 @@ export interface Lead {
   notes: string;
   nextFollowUpDate?: string; // YYYY-MM-DD
   nextFollowUpTime?: string; // HH:MM
+  nextFollowUpType?: FollowUpType;
   nextFollowUpNote?: string;
   lastContactedAt?: string;
   createdAt: string;

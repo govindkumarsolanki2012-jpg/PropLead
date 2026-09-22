@@ -246,6 +246,7 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
       notes: notes.trim(),
       nextFollowUpDate: followUpDate,
       nextFollowUpTime: followUpDate ? followUpTime : undefined,
+      nextFollowUpType: followUpDate ? followUpType : undefined,
       nextFollowUpNote: followUpDate
         ? `${followUpType === 'site_visit' ? 'Site visit' : followUpType === 'whatsapp' ? 'WhatsApp discussion' : 'Follow-up call'} with ${name.trim()}`
         : undefined,

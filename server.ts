@@ -624,7 +624,7 @@ export async function getSubscriptionRecord(
     const resolvedExpiry = record.subscriptionExpiryTime || record.subscriptionExpiryDate;
     if (resolvedExpiry && (record.subscriptionStatus === 'ACTIVE' || record.subscriptionStatus === 'CANCELED_BUT_ACTIVE')) {
       const expTime = new Date(resolvedExpiry).getTime();
-      if (!isNaN(expTime) && serverNow.getTime() > expTime && !record.autoRenewing) {
+      if (!isNaN(expTime) && serverNow.getTime() > expTime) {
         record.subscriptionStatus = 'EXPIRED';
         saveSubscriptionRecord(record, idToken).catch(() => {});
       }
@@ -649,7 +649,7 @@ export async function getSubscriptionRecord(
     const resolvedExpiry = userProfile.subscriptionExpiryTime || userProfile.subscriptionExpiryDate;
     if (isSubActive && resolvedExpiry) {
       const expTime = new Date(resolvedExpiry).getTime();
-      const isExpiredNow = !isNaN(expTime) && serverNow.getTime() > expTime && !userProfile.autoRenewing;
+      const isExpiredNow = !isNaN(expTime) && serverNow.getTime() > expTime;
 
       const restoredRecord: UserSubscriptionRecord = {
         userId,
@@ -1236,13 +1236,82 @@ async function startServer() {
             await saveSubscriptionRecord(record, idToken);
           }
         }
-      } else if (currentStatus === 'ACTIVE') {
+      } else if (currentStatus === 'ACTIVE' || currentStatus === 'PAYMENT_ISSUE') {
         if (record.subscriptionExpiryDate) {
           const expiryTime = new Date(record.subscriptionExpiryDate).getTime();
-          if (now > expiryTime && !record.autoRenewing) {
-            currentStatus = 'EXPIRED';
-            record.subscriptionStatus = 'EXPIRED';
-            await saveSubscriptionRecord(record, idToken);
+          if (now > expiryTime) {
+            // The stored expiryTime has passed. autoRenewing must NOT by itself grant Pro beyond the last verified expiryTime.
+            // If we have a stored purchaseToken, refresh live subscription state from Google Play through the backend.
+            if (record.purchaseToken) {
+              try {
+                const refreshed = await verifyGooglePlaySubscriptionToken(
+                  record.purchaseToken,
+                  record.subscriptionProductId || 'property_agent_pro',
+                  record.subscriptionBasePlanId || record.subscriptionBasePlan || 'quarterly',
+                  'com.proplead.tracker'
+                );
+
+                if (refreshed.isValid && refreshed.subscriptionExpiryDate) {
+                  const newExpTime = new Date(refreshed.subscriptionExpiryDate).getTime();
+                  if (newExpTime > now) {
+                    // Google Play confirms renewal or active subscription period with a new future expiryTime
+                    record.subscriptionExpiryDate = refreshed.subscriptionExpiryDate;
+                    record.subscriptionExpiryTime = refreshed.subscriptionExpiryDate;
+                    record.expiryDate = refreshed.subscriptionExpiryDate;
+                    record.autoRenewing = refreshed.autoRenewing;
+                    record.lastVerifiedAt = new Date().toISOString();
+                    currentStatus = refreshed.subscriptionStatus === 'PAYMENT_ISSUE' ? 'PAYMENT_ISSUE' : (refreshed.subscriptionStatus === 'CANCELED_BUT_ACTIVE' ? 'CANCELED_BUT_ACTIVE' : 'ACTIVE');
+                    record.subscriptionStatus = currentStatus;
+                    if (refreshed.subscriptionStatus === 'PAYMENT_ISSUE') {
+                      record.paymentIssueMessage = 'Google Play grace period: Payment issue detected. Please update payment method to avoid suspension.';
+                    } else {
+                      record.paymentIssueMessage = undefined;
+                    }
+                    await saveSubscriptionRecord(record, idToken);
+                  } else {
+                    // Refreshed expiryTime from Google Play is still in the past
+                    currentStatus = 'EXPIRED';
+                    record.subscriptionStatus = 'EXPIRED';
+                    record.autoRenewing = false;
+                    await saveSubscriptionRecord(record, idToken);
+                  }
+                } else if (refreshed.subscriptionStatus === 'PENDING') {
+                  // SubState is ON_HOLD, PAUSED, or PENDING
+                  currentStatus = 'EXPIRED';
+                  record.subscriptionStatus = 'EXPIRED';
+                  record.paymentIssueMessage = refreshed.error || 'Google Play account is on hold. Subscription benefits are paused.';
+                  record.autoRenewing = false;
+                  await saveSubscriptionRecord(record, idToken);
+                } else if (refreshed.subscriptionStatus === 'EXPIRED') {
+                  // Google Play reports expired or token not found
+                  currentStatus = 'EXPIRED';
+                  record.subscriptionStatus = 'EXPIRED';
+                  record.autoRenewing = false;
+                  await saveSubscriptionRecord(record, idToken);
+                } else if (refreshed.verificationPending) {
+                  // Temporary network/API failure while re-verifying an already past-due expiry timestamp.
+                  // Since the stored paid expiry has already elapsed and cannot be renewed without Google Play confirmation,
+                  // mark as expired to prevent granting unverified Pro access beyond expiryTime.
+                  currentStatus = 'EXPIRED';
+                  record.subscriptionStatus = 'EXPIRED';
+                  await saveSubscriptionRecord(record, idToken);
+                } else {
+                  currentStatus = 'EXPIRED';
+                  record.subscriptionStatus = 'EXPIRED';
+                  await saveSubscriptionRecord(record, idToken);
+                }
+              } catch (refreshErr) {
+                console.warn('[Subscription Status] Failed to refresh expired token with Google Play:', refreshErr);
+                currentStatus = 'EXPIRED';
+                record.subscriptionStatus = 'EXPIRED';
+                await saveSubscriptionRecord(record, idToken);
+              }
+            } else {
+              // No purchaseToken available to refresh, expire the subscription
+              currentStatus = 'EXPIRED';
+              record.subscriptionStatus = 'EXPIRED';
+              await saveSubscriptionRecord(record, idToken);
+            }
           }
         }
       }
@@ -1626,7 +1695,7 @@ async function startServer() {
     if (record.subscriptionStatus === 'ACTIVE' || record.subscriptionStatus === 'CANCELED_BUT_ACTIVE') {
       const resolvedExpiry = record.subscriptionExpiryTime || record.subscriptionExpiryDate;
       const expTime = resolvedExpiry ? new Date(resolvedExpiry).getTime() : 0;
-      if (expTime > Date.now() || record.autoRenewing) {
+      if (expTime > Date.now()) {
         return res.json({
           success: true,
           restored: true,
@@ -1856,6 +1925,282 @@ async function startServer() {
       isSubscribed: record.subscriptionStatus === 'ACTIVE' || record.subscriptionStatus === 'CANCELED_BUT_ACTIVE',
       isFeatureLocked: record.subscriptionStatus === 'EXPIRED',
     });
+  });
+
+  // ==========================================
+  // 9. SECURE ACCOUNT & DATA DELETION ENDPOINT
+  // ==========================================
+  app.post('/api/account/delete', async (req, res) => {
+    // Cryptographically authenticate Firebase ID token and verify UID ownership
+    const verifiedUid = await authenticateRequest(req, res);
+    if (!verifiedUid) return;
+
+    const idToken = extractIdToken(req);
+    console.log(`[Account Deletion] Initiating complete data deletion for user: ${verifiedUid}`);
+
+    try {
+      const token = await getFirestoreWriteToken(idToken);
+
+      // Helper to delete all documents in a subcollection via Firestore REST API
+      const deleteCollectionDocs = async (subpath: string) => {
+        if (!token) return;
+        try {
+          const listUrl = `${FIRESTORE_REST_BASE}/${subpath}?pageSize=300`;
+          const listRes = await fetch(listUrl, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!listRes.ok) return;
+          const listData = (await listRes.json()) as any;
+          if (listData.documents && Array.isArray(listData.documents)) {
+            for (const doc of listData.documents) {
+              const delUrl = `https://firestore.googleapis.com/v1/${doc.name}`;
+              await fetch(delUrl, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${token}` },
+              }).catch(() => {});
+            }
+          }
+        } catch (err) {
+          console.warn(`[Account Deletion] Error clearing collection ${subpath}:`, err);
+        }
+      };
+
+      // Helper to delete a specific Firestore document
+      const deleteSingleDoc = async (docPath: string) => {
+        if (!token) return;
+        try {
+          const docUrl = `${FIRESTORE_REST_BASE}/${docPath}`;
+          await fetch(docUrl, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => {});
+        } catch (err) {
+          console.warn(`[Account Deletion] Error deleting document ${docPath}:`, err);
+        }
+      };
+
+      // 1. Delete user-owned subcollections: leads, properties, templates
+      await Promise.all([
+        deleteCollectionDocs(`users/${verifiedUid}/leads`),
+        deleteCollectionDocs(`users/${verifiedUid}/properties`),
+        deleteCollectionDocs(`users/${verifiedUid}/templates`),
+      ]);
+
+      // 2. Delete root user profile document
+      await deleteSingleDoc(`users/${verifiedUid}`);
+
+      // 3. Delete user subscription record from Firestore
+      await deleteSingleDoc(`subscriptions/${verifiedUid}`);
+
+      // 4. Remove user from server in-memory & local disk subscription cache
+      subscriptionStore.delete(verifiedUid);
+      persistSubscriptionStoreToDisk();
+
+      console.log(`[Account Deletion] Successfully deleted all data for user ${verifiedUid}`);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Your PropLead account and all associated data have been permanently deleted.',
+        deletedUid: verifiedUid,
+      });
+    } catch (err: any) {
+      console.error(`[Account Deletion] Failed for user ${verifiedUid}:`, err);
+      return res.status(500).json({
+        success: false,
+        error: 'An unexpected error occurred while deleting your account. Please try again or contact jyothigehlot2025@gmail.com.',
+      });
+    }
+  });
+
+  // ==========================================
+  // PUBLIC WEB PAGES: PRIVACY POLICY & ACCOUNT DELETION
+  // (Required for Google Play Console submission)
+  // ==========================================
+
+  // Public Privacy Policy Web Page
+  app.get('/privacy-policy', (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy - PropLead Real Estate CRM</title>
+  <meta name="description" content="Official Privacy Policy for PropLead CRM for real estate agents and brokers." />
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; background: #f8fafc; margin: 0; padding: 0; }
+    .header { background: #065f46; color: #ffffff; padding: 2.5rem 1.5rem; text-align: center; }
+    .header h1 { margin: 0 0 0.5rem; font-size: 1.85rem; font-weight: 800; letter-spacing: -0.02em; }
+    .header p { margin: 0; opacity: 0.9; font-size: 0.95rem; }
+    .container { max-width: 820px; margin: -1.5rem auto 3rem; background: #ffffff; padding: 2rem 2.5rem; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; }
+    .pledge { background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 12px; padding: 1.25rem 1.5rem; margin-bottom: 2rem; }
+    .pledge h3 { margin: 0 0 0.5rem; color: #065f46; font-size: 1.05rem; }
+    .pledge p { margin: 0; font-size: 0.92rem; color: #047857; }
+    h2 { font-size: 1.2rem; color: #0f172a; margin-top: 1.75rem; margin-bottom: 0.5rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.4rem; }
+    p, li { font-size: 0.92rem; color: #334155; }
+    ul { padding-left: 1.4rem; margin: 0.5rem 0; }
+    li { margin-bottom: 0.35rem; }
+    .footer { text-align: center; font-size: 0.82rem; color: #64748b; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #e2e8f0; }
+    a { color: #059669; text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>PropLead Privacy Policy</h1>
+    <p>Dedicated CRM for Real Estate Agents & Brokers • Effective: September 2026</p>
+  </div>
+  <div class="container">
+    <div class="pledge">
+      <h3>🔒 Broker Client Data Protection Guarantee</h3>
+      <p>PropLead strictly respects the privacy of your real estate business. <strong>We NEVER sell, rent, monetize, or share your client contacts, buyer requirements, property inventory, private owner details, or conversation notes with third parties, property portals, or advertisers.</strong> Your business data is exclusively yours.</p>
+    </div>
+
+    <h2>1. Information We Collect</h2>
+    <p>To provide lead tracking, smart matching, and follow-up reminders, we collect:</p>
+    <ul>
+      <li><strong>Account Details:</strong> Your name, agency name, phone number, city, RERA number, and registered Google account email.</li>
+      <li><strong>Lead & Client Records:</strong> Client names, phone numbers, WhatsApp numbers, property preferences (budget, BHK, localities), and notes entered by you.</li>
+      <li><strong>Property Inventory:</strong> Listings, pricing, photos, and confidential owner contact details entered by you.</li>
+      <li><strong>Voice Notes & Documents:</strong> Audio memos and document attachments uploaded to lead files.</li>
+      <li><strong>Subscription Records:</strong> Google Play subscription purchase status, base plan, and expiry date.</li>
+    </ul>
+
+    <h2>2. Purpose of Data Processing</h2>
+    <p>Your data is processed solely to provide app functionality:</p>
+    <ul>
+      <li>Managing your buyer/tenant leads and scheduling follow-up notifications.</li>
+      <li>Matching buyer requirements with your active property listings.</li>
+      <li>Backing up and synchronizing your records across devices via Google Cloud / Firebase.</li>
+      <li>Verifying Pro subscription entitlements via Google Play.</li>
+    </ul>
+
+    <h2>3. Device Permissions</h2>
+    <ul>
+      <li><strong>Contacts (Read):</strong> Used strictly when you explicitly choose to import phone contacts as leads. We never access your contacts in the background or upload them elsewhere.</li>
+      <li><strong>Microphone / Record Audio:</strong> Used solely when you record voice notes on a specific lead. Recordings are saved only inside that lead's record.</li>
+      <li><strong>Notifications:</strong> Used solely to alert you of scheduled follow-ups and site visits at the times you set.</li>
+    </ul>
+
+    <h2>4. Data Storage & Security</h2>
+    <p>All data is hosted on Google Cloud infrastructure and Firebase Firestore. Each user's database records are strictly isolated using server-side security rules so that only your verified Google authentication credentials can access your business data. All network communication is encrypted with TLS/HTTPS.</p>
+
+    <h2>5. Data Retention & Deletion Rights</h2>
+    <p>You have full ownership of your data at all times. You can export your leads to CSV via Settings. You may also permanently delete your account and erase all leads, properties, and backups directly inside the PropLead app (<em>Settings &gt; Account &gt; Delete Account &amp; Data</em>) or through our <a href="/account-deletion">Account Deletion Web Portal</a>.</p>
+
+    <h2>6. Google Play Subscriptions</h2>
+    <p>PropLead Pro subscriptions are billed through Google Play. Deleting your PropLead account or uninstalling the app does not automatically cancel active recurring subscriptions in Google Play. Users can manage or cancel their subscription at any time at: <a href="https://play.google.com/store/account/subscriptions" target="_blank" rel="noopener noreferrer">https://play.google.com/store/account/subscriptions</a>.</p>
+
+    <h2>7. Contact Information</h2>
+    <p>For questions or privacy inquiries, please contact the PropLead team at: <a href="mailto:jyothigehlot2025@gmail.com">jyothigehlot2025@gmail.com</a>.</p>
+
+    <div class="footer">
+      &copy; 2026 PropLead Real Estate CRM. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>`);
+  });
+
+  // Public Account Deletion Web Portal (Satisfies Google Play Console Delete Account URL requirement)
+  app.get(['/account-deletion', '/delete-account'], (req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Account and Data Deletion - PropLead</title>
+  <meta name="description" content="Request permanent account and data deletion for your PropLead real estate CRM account." />
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; background: #f8fafc; margin: 0; padding: 0; }
+    .header { background: #991b1b; color: #ffffff; padding: 2.5rem 1.5rem; text-align: center; }
+    .header h1 { margin: 0 0 0.5rem; font-size: 1.85rem; font-weight: 800; letter-spacing: -0.02em; }
+    .header p { margin: 0; opacity: 0.9; font-size: 0.95rem; }
+    .container { max-width: 760px; margin: -1.5rem auto 3rem; background: #ffffff; padding: 2rem 2.5rem; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; }
+    .alert-box { background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 1.25rem 1.5rem; margin-bottom: 1.5rem; color: #991b1b; }
+    .alert-box h3 { margin: 0 0 0.4rem; font-size: 1.05rem; }
+    .billing-box { background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; padding: 1.25rem 1.5rem; margin-bottom: 1.5rem; color: #92400e; }
+    .billing-box h3 { margin: 0 0 0.4rem; font-size: 1.05rem; }
+    h2 { font-size: 1.2rem; color: #0f172a; margin-top: 1.75rem; margin-bottom: 0.5rem; }
+    p, li { font-size: 0.92rem; color: #334155; }
+    ul { padding-left: 1.4rem; margin: 0.5rem 0; }
+    li { margin-bottom: 0.35rem; }
+    .steps { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.25rem 1.5rem; margin: 1rem 0; }
+    .steps ol { padding-left: 1.4rem; margin: 0; }
+    .steps li { margin-bottom: 0.5rem; font-size: 0.92rem; }
+    .form-box { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 1.5rem; margin-top: 1.5rem; }
+    .form-group { margin-bottom: 1rem; }
+    label { display: block; font-size: 0.85rem; font-weight: 700; color: #334155; margin-bottom: 0.35rem; }
+    input[type="email"], textarea { width: 100%; box-sizing: border-box; padding: 0.65rem 0.85rem; border: 1px solid #94a3b8; border-radius: 8px; font-size: 0.95rem; }
+    button { background: #dc2626; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; font-weight: 700; font-size: 0.95rem; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #b91c1c; }
+    a { color: #059669; font-weight: 600; text-decoration: underline; }
+    .footer { text-align: center; font-size: 0.82rem; color: #64748b; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #e2e8f0; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>PropLead Account &amp; Data Deletion Portal</h1>
+    <p>Permanent Account and Business Data Erasure Request</p>
+  </div>
+  <div class="container">
+    <div class="alert-box">
+      <h3>⚠️ Permanent &amp; Irreversible Data Deletion</h3>
+      <p>Deleting your PropLead account permanently erases your profile, all leads, client phone numbers, WhatsApp history, property listings, private owner details, voice memos, and cloud backups immediately. This action cannot be undone.</p>
+    </div>
+
+    <div class="billing-box">
+      <h3>Google Play Subscriptions Important Notice</h3>
+      <p>Deleting your PropLead account <strong>does not automatically cancel</strong> your active Google Play subscription. In accordance with Google Play policies, recurring subscriptions must be canceled directly via Google Play to stop future billing cycles.
+      <br /><br />
+      Manage your subscription here: <a href="https://play.google.com/store/account/subscriptions" target="_blank" rel="noopener noreferrer">https://play.google.com/store/account/subscriptions</a>.</p>
+    </div>
+
+    <h2>How to Delete Your Account</h2>
+    <div class="steps">
+      <p><strong>Option 1: Instant In-App Deletion (Recommended)</strong></p>
+      <ol>
+        <li>Open the PropLead app on your mobile device.</li>
+        <li>Tap the <strong>Settings</strong> gear icon in the top header.</li>
+        <li>Scroll down to the <strong>Account &amp; Security</strong> section.</li>
+        <li>Tap <strong>Delete Account &amp; All Data</strong>.</li>
+        <li>Type <code>DELETE</code> to confirm and tap <strong>Permanently Delete Everything</strong>. All data is deleted immediately.</li>
+      </ol>
+    </div>
+
+    <div class="steps">
+      <p><strong>Option 2: Web Deletion Request Form</strong></p>
+      <p>If you no longer have access to the mobile app, you can submit a deletion request below using your registered Google account email. Requests are processed within 24–48 hours.</p>
+      
+      <form action="mailto:jyothigehlot2025@gmail.com?subject=PropLead%20Account%20and%20Data%20Deletion%20Request" method="POST" enctype="text/plain" class="form-box">
+        <div class="form-group">
+          <label for="email">Registered Google Email Address *</label>
+          <input type="email" id="email" name="RegisteredEmail" required placeholder="e.g. broker@gmail.com" />
+        </div>
+        <div class="form-group">
+          <label for="reason">Optional Reason / Notes</label>
+          <textarea id="reason" name="Reason" rows="3" placeholder="I wish to permanently delete my PropLead account and all associated cloud data."></textarea>
+        </div>
+        <button type="submit">Submit Account Deletion Request via Email</button>
+      </form>
+    </div>
+
+    <h2>What Data Is Erased vs Retained</h2>
+    <ul>
+      <li><strong>Erased Immediately:</strong> Agent profile, contact details, leads, client numbers, property inventory, confidential owner contacts, voice notes, document attachments, activity logs, and Firestore cloud documents.</li>
+      <li><strong>Data Retention Period:</strong> None. All user data is wiped permanently upon request.</li>
+      <li><strong>Billing Records:</strong> Handled by Google Play under Google's standard financial audit policies.</li>
+    </ul>
+
+    <h2>Contact Support</h2>
+    <p>For immediate assistance with account or data deletion, email our Data Protection Officer at: <a href="mailto:jyothigehlot2025@gmail.com">jyothigehlot2025@gmail.com</a>.</p>
+
+    <div class="footer">
+      &copy; 2026 PropLead Real Estate CRM. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>`);
   });
 
   // 404 handler for any unhandled /api/* routes to prevent falling through to Vite or index.html

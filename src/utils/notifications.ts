@@ -1,6 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications, Channel, ActionPerformed } from '@capacitor/local-notifications';
-import { Lead, NotificationSettings } from '../types';
+import { Lead, NotificationSettings, FollowUpType } from '../types';
 
 export const FOLLOWUP_CHANNEL_ID = 'proplead_followups';
 export const FOLLOWUP_CHANNEL_NAME = 'PropLead Follow-ups';
@@ -251,6 +251,193 @@ export function getLeadLocationSummary(lead: Lead): string {
   return 'Site visit location';
 }
 
+export type NotificationActivityType =
+  | 'call'
+  | 'whatsapp'
+  | 'site_visit'
+  | 'meeting'
+  | 'document_collection'
+  | 'generic';
+
+/**
+ * Resolves the activity type for a lead follow-up.
+ * Determines type from:
+ * 1. Explicitly passed parameter (FollowUpType or boolean)
+ * 2. lead.nextFollowUpType if saved
+ * 3. Recent activities on lead (e.g. metadata.followUpType or type === 'site_visit')
+ * 4. lead.status === 'site_visit_scheduled'
+ * 5. Inspection of nextFollowUpNote keywords
+ * 6. Fallback: 'generic'
+ */
+export function resolveActivityType(
+  lead: Lead,
+  explicitType?: FollowUpType | boolean | string
+): NotificationActivityType {
+  // 1. Explicit type passed directly
+  if (typeof explicitType === 'string') {
+    const norm = explicitType.toLowerCase().trim();
+    if (norm === 'call' || norm === 'phone' || norm === 'phone_call') return 'call';
+    if (norm === 'whatsapp' || norm === 'wa' || norm === 'message') return 'whatsapp';
+    if (norm === 'site_visit' || norm === 'visit') return 'site_visit';
+    if (norm === 'meeting' || norm === 'client_meeting') return 'meeting';
+    if (norm === 'document_collection' || norm === 'docs_token' || norm === 'token' || norm === 'docs') return 'document_collection';
+  } else if (explicitType === true) {
+    return 'site_visit';
+  }
+
+  // 2. Saved nextFollowUpType on the lead record
+  if (lead.nextFollowUpType) {
+    const norm = lead.nextFollowUpType.toLowerCase().trim();
+    if (norm === 'call') return 'call';
+    if (norm === 'whatsapp') return 'whatsapp';
+    if (norm === 'site_visit') return 'site_visit';
+    if (norm === 'meeting') return 'meeting';
+    if (norm === 'document_collection') return 'document_collection';
+  }
+
+  // 3. Status check
+  if (lead.status === 'site_visit_scheduled') {
+    return 'site_visit';
+  }
+
+  // 4. Check recent activity logs for saved followUpType
+  if (lead.activities && lead.activities.length > 0) {
+    const recent = lead.activities.find(
+      (a) =>
+        a.type === 'site_visit' ||
+        a.type === 'followup_created' ||
+        (a.type as string) === 'followup_scheduled'
+    );
+    if (recent) {
+      if (recent.metadata?.followUpType) {
+        const norm = String(recent.metadata.followUpType).toLowerCase();
+        if (norm === 'call') return 'call';
+        if (norm === 'whatsapp') return 'whatsapp';
+        if (norm === 'site_visit') return 'site_visit';
+        if (norm === 'meeting') return 'meeting';
+        if (norm === 'document_collection') return 'document_collection';
+      }
+      if (recent.type === 'site_visit') {
+        return 'site_visit';
+      }
+      if (recent.description) {
+        const desc = recent.description.toLowerCase();
+        if (/\b(site visit|property visit|site)\b/i.test(desc)) return 'site_visit';
+        if (/\b(whatsapp|message|chat)\b/i.test(desc)) return 'whatsapp';
+        if (/\b(call|phone)\b/i.test(desc)) return 'call';
+        if (/\b(meeting|meet)\b/i.test(desc)) return 'meeting';
+        if (/\b(doc|token|docs|document)\b/i.test(desc)) return 'document_collection';
+      }
+    }
+  }
+
+  // 5. Note keyword heuristics
+  const note = (lead.nextFollowUpNote || '').toLowerCase();
+  if (note) {
+    if (/\b(site visit|property visit|site)\b/i.test(note)) return 'site_visit';
+    if (/\b(whatsapp|wa discussion|chat)\b/i.test(note)) return 'whatsapp';
+    if (/\b(call|phone)\b/i.test(note)) return 'call';
+    if (/\b(meeting|meet|client meeting)\b/i.test(note)) return 'meeting';
+    if (/\b(doc|token|docs|document|cheque)\b/i.test(note)) return 'document_collection';
+  }
+
+  // 6. Generic follow-up
+  return 'generic';
+}
+
+/**
+ * Title mapping for 30 minutes before exact time
+ */
+export function get30mNotificationTitle(activityType: NotificationActivityType): string {
+  switch (activityType) {
+    case 'call':
+      return 'Call in 30 min';
+    case 'whatsapp':
+      return 'WhatsApp in 30 min';
+    case 'site_visit':
+      return 'Property visit in 30 min';
+    case 'meeting':
+      return 'Meeting in 30 min';
+    case 'document_collection':
+      return 'Docs/Token in 30 min';
+    case 'generic':
+    default:
+      return 'Follow-up in 30 min';
+  }
+}
+
+/**
+ * Title mapping for exact time
+ * Note: The word "now" is used ONLY for Phone Call ("Call now") and WhatsApp ("WhatsApp now").
+ * Site visit, Meeting, Docs/Token, and Generic use "reminder".
+ */
+export function getExactNotificationTitle(activityType: NotificationActivityType): string {
+  switch (activityType) {
+    case 'call':
+      return 'Call now';
+    case 'whatsapp':
+      return 'WhatsApp now';
+    case 'site_visit':
+      return 'Property visit reminder';
+    case 'meeting':
+      return 'Meeting reminder';
+    case 'document_collection':
+      return 'Docs/Token reminder';
+    case 'generic':
+    default:
+      return 'Follow-up reminder';
+  }
+}
+
+/**
+ * Body fallback text when reminderNote is empty
+ */
+export function getBodyFallback(activityType: NotificationActivityType): string {
+  switch (activityType) {
+    case 'call':
+      return 'Call client';
+    case 'whatsapp':
+      return 'Message client';
+    case 'site_visit':
+      return 'Site visit';
+    case 'meeting':
+      return 'Client meeting';
+    case 'document_collection':
+      return 'Collect documents / token';
+    case 'generic':
+    default:
+      return 'Follow-up';
+  }
+}
+
+/**
+ * Builds notification body according to the Body Rules:
+ * Prefer: clientName + " • " + reminderNote
+ * If reminderNote is empty, use the activity type fallback.
+ *
+ * Examples:
+ * "govind • Collect documents"
+ * "govind • Client meeting"
+ * "govind • Madhurawada site visit"
+ */
+export function formatFollowUpNotificationBody(
+  clientName: string,
+  reminderNote: string | undefined | null,
+  activityType: NotificationActivityType
+): string {
+  const client = sanitizeNotificationText(clientName) || 'Client';
+  let cleanNote = sanitizeNotificationText(reminderNote);
+  // Treat auto-generated legacy boilerplate like "Follow-up call with <name>" as empty so clean fallback is used
+  if (
+    cleanNote &&
+    /^(follow-up call|whatsapp discussion|site visit|client meeting|follow-up regarding property requirements)\s+with\s+/i.test(cleanNote)
+  ) {
+    cleanNote = '';
+  }
+  const secondary = cleanNote || getBodyFallback(activityType);
+  return `${client} • ${secondary}`;
+}
+
 /**
  * Initialize Android notification channel and tap listeners.
  */
@@ -474,7 +661,7 @@ export async function cancelDailySummaryNotification(): Promise<void> {
  */
 export async function scheduleFollowUpNotifications(
   lead: Lead,
-  isExplicitVisit?: boolean
+  activityTypeOrIsVisit?: FollowUpType | boolean
 ): Promise<void> {
   if (!lead || !lead.id) return;
 
@@ -485,11 +672,10 @@ export async function scheduleFollowUpNotifications(
     return;
   }
 
+  const activityType = resolveActivityType(lead, activityTypeOrIsVisit);
+  const isVisit = activityType === 'site_visit';
+
   const settings = getStoredNotificationSettings();
-  const isVisit =
-    isExplicitVisit ||
-    lead.status === 'site_visit_scheduled' ||
-    (lead.nextFollowUpNote && /visit|site/i.test(lead.nextFollowUpNote));
 
   // Check category toggles
   if (isVisit && !settings.propertyVisitReminders) {
@@ -514,21 +700,28 @@ export async function scheduleFollowUpNotifications(
 
   const notificationsToSchedule: any[] = [];
   const scheduledIds: number[] = [];
-  const displayTime = formatTimeForDisplay(scheduledDate);
   const leadDisplayName = sanitizeNotificationText(lead.name) || 'Client';
   const targetChannelId = isVisit ? VISITS_CHANNEL_ID : FOLLOWUP_CHANNEL_ID;
+
+  // Notification body follows the professional body rules:
+  // Prefer: clientName + " • " + reminderNote
+  // If reminderNote is empty, use the activity type fallback
+  const notificationBody = formatFollowUpNotificationBody(
+    leadDisplayName,
+    lead.nextFollowUpNote,
+    activityType
+  );
 
   // 1. 30-minute reminder (only if at least 30 minutes in future)
   // Priority: DEFAULT importance for advance notification
   if (thirtyMinBefore > now) {
     const id = isVisit ? getVisit30mId(lead.id) : getFollowUp30mId(lead.id);
-    const title = isVisit ? 'Property visit in 30 min' : 'Follow-up in 30 min';
-    const body = formatNotificationBody(leadDisplayName, displayTime);
+    const title = get30mNotificationTitle(activityType);
 
     notificationsToSchedule.push({
       id,
       title,
-      body,
+      body: notificationBody,
       schedule: {
         at: new Date(thirtyMinBefore),
         allowWhileIdle: true,
@@ -550,14 +743,12 @@ export async function scheduleFollowUpNotifications(
   // 2. Exact-time reminder
   // Priority: HIGH importance for immediate action
   const exactId = isVisit ? getVisitExactId(lead.id) : getFollowUpExactId(lead.id);
-  const exactTitle = isVisit ? 'Property visit now' : 'Follow up now';
-  const exactSecondary = isVisit ? getLeadLocationSummary(lead) : getLeadRequirementSummary(lead);
-  const exactBody = formatNotificationBody(leadDisplayName, exactSecondary);
+  const exactTitle = getExactNotificationTitle(activityType);
 
   notificationsToSchedule.push({
     id: exactId,
     title: exactTitle,
-    body: exactBody,
+    body: notificationBody,
     schedule: {
       at: new Date(exactTime),
       allowWhileIdle: true,
@@ -772,8 +963,8 @@ export const SAMPLE_DEMO_LEAD: Lead = {
 /**
  * Schedule a sample test notification (triggers in ~5 seconds).
  * Supported types:
- * 1. 'followup' -> Title: "Follow-up in 30 min", Body: "Jyothi • 6:00 PM"
- * 2. 'visit'    -> Title: "Property visit now", Body: "Jyothi • Madhurawada"
+ * 1. 'followup' -> Title: "Follow-up in 30 min", Body: "Jyothi • Follow-up"
+ * 2. 'visit'    -> Title: "Property visit reminder", Body: "Jyothi • Madhurawada site visit"
  */
 export async function scheduleSampleNotification(sampleType: 'followup' | 'visit'): Promise<{
   id: number;
@@ -783,8 +974,8 @@ export async function scheduleSampleNotification(sampleType: 'followup' | 'visit
 }> {
   const isFollowup = sampleType === 'followup';
   const id = isFollowup ? SAMPLE_FOLLOWUP_NOTIFICATION_ID : SAMPLE_VISIT_NOTIFICATION_ID;
-  const title = isFollowup ? 'Follow-up in 30 min' : 'Property visit now';
-  const body = isFollowup ? 'Jyothi • 6:00 PM' : 'Jyothi • Madhurawada';
+  const title = isFollowup ? 'Follow-up in 30 min' : 'Property visit reminder';
+  const body = isFollowup ? 'Jyothi • Follow-up' : 'Jyothi • Madhurawada site visit';
   const channelId = isFollowup ? FOLLOWUP_CHANNEL_ID : VISITS_CHANNEL_ID;
   const scheduledAt = new Date(Date.now() + 5000);
 

@@ -11,9 +11,17 @@ import {
   Play,
   Pause,
   FileSpreadsheet,
+  AlertCircle,
 } from 'lucide-react';
 import { Attachment } from '../../types';
 import { openLeadDocument, isAudioAttachment } from '../../utils/documentOpener';
+import { auth } from '../../lib/firebase';
+import {
+  uploadLeadAttachmentToStorage,
+  deleteStorageFile,
+  validateAttachmentFile,
+  compressImage,
+} from '../../utils/attachmentStorage';
 
 interface LeadAttachmentManagerProps {
   leadId: string;
@@ -59,35 +67,78 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
     setToastMessage(msg);
     toastTimeoutRef.current = setTimeout(() => {
       setToastMessage(null);
-    }, 3500);
+    }, 4000);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Validate size and extension before proceeding
+    const validation = validateAttachmentFile(file);
+    if (!validation.valid) {
+      showToast(validation.error || 'Invalid file');
+      e.target.value = '';
+      return;
+    }
+
     setIsUploading(true);
     setSavedSuccess(false);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const url = reader.result as string;
-      const newAtt: Attachment = {
-        id: `att_${Date.now()}`,
-        leadId,
-        name: docName.trim() || file.name,
-        type: file.type.startsWith('image/') ? 'image' : 'document',
-        url: url,
-        size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-        createdAt: new Date().toISOString().split('T')[0],
-      };
+
+    try {
+      const currentUid = auth.currentUser?.uid;
+      let newAtt: Attachment;
+
+      if (currentUid) {
+        // Upload to Firebase Storage scoped to user's UID
+        newAtt = await uploadLeadAttachmentToStorage({
+          userId: currentUid,
+          leadId,
+          file,
+          displayName: docName.trim() || undefined,
+        });
+      } else {
+        // Safe offline fallback with image compression
+        const uploadBlob = file.type.startsWith('image/')
+          ? await compressImage(file)
+          : file;
+        const reader = new FileReader();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(uploadBlob);
+        });
+
+        newAtt = {
+          id: `att_${Date.now()}`,
+          leadId,
+          name: docName.trim() || file.name,
+          type: file.type.startsWith('image/') ? 'image' : 'document',
+          url: dataUrl,
+          size: `${(uploadBlob.size / (1024 * 1024)).toFixed(2)} MB`,
+          createdAt: new Date().toISOString().split('T')[0],
+        };
+      }
+
       onAddAttachment(newAtt);
       setDocName('');
-      setIsUploading(false);
       setShowSaveButton(true);
-    };
-    reader.readAsDataURL(file);
-    // Reset file input so user can pick same file or another file cleanly
-    e.target.value = '';
+      showToast('Document attached successfully');
+    } catch (err: any) {
+      console.error('[Attachment Upload Error]', err);
+      showToast(err?.message || 'Failed to upload attachment. Please try again.');
+    } finally {
+      setIsUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleDelete = async (att: Attachment) => {
+    if (att.storagePath) {
+      deleteStorageFile(att.storagePath).catch(() => {});
+    }
+    onDeleteAttachment(att.id);
+    showToast('Attachment deleted');
   };
 
   const handleConfirmSave = () => {
@@ -353,7 +404,7 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
                 )}
                 <button
                   type="button"
-                  onClick={() => onDeleteAttachment(att.id)}
+                  onClick={() => handleDelete(att)}
                   title="Delete file"
                   className="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center justify-center transition-colors cursor-pointer"
                 >

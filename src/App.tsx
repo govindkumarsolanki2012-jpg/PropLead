@@ -487,7 +487,11 @@ export function App() {
             const rawSubStatus = (subRecord.subscriptionStatus || '').toLowerCase();
             const isSubActive = rawSubStatus === 'active' || rawSubStatus === 'canceled_but_active';
             const subExpiry = subRecord.subscriptionExpiryTime || subRecord.subscriptionExpiryDate || subRecord.expiryDate;
-            const isUnexpired = !subExpiry || new Date(subExpiry).getTime() > Date.now() || subRecord.autoRenewing;
+            const subExpiryMs = subExpiry ? new Date(subExpiry).getTime() : NaN;
+            // A paid subscription must only be treated as unexpired when a valid expiry timestamp exists and is in the future
+            const isUnexpired = Boolean(
+              subExpiry && !isNaN(subExpiryMs) && subExpiryMs > Date.now()
+            );
 
             if (isSubActive && isUnexpired) {
               setProfile((prev) => {
@@ -505,6 +509,20 @@ export function App() {
                   autoRenewing: subRecord.autoRenewing !== undefined ? subRecord.autoRenewing : prev.autoRenewing,
                   lastVerifiedAt: subRecord.lastVerifiedAt || prev.lastVerifiedAt,
                   purchaseToken: subRecord.purchaseToken || prev.purchaseToken,
+                };
+                saveStoredProfile(merged);
+                return merged;
+              });
+            } else if (rawSubStatus === 'expired' || (isSubActive && !isUnexpired && !isNaN(subExpiryMs) && subExpiryMs <= Date.now())) {
+              setProfile((prev) => {
+                const merged: UserProfile = {
+                  ...prev,
+                  subscriptionStatus: 'EXPIRED',
+                  isSubscribed: false,
+                  subscriptionExpiryDate: subExpiry || prev.subscriptionExpiryDate,
+                  subscriptionExpiryTime: subExpiry || prev.subscriptionExpiryTime,
+                  expiryDate: subExpiry || prev.expiryDate,
+                  autoRenewing: false,
                 };
                 saveStoredProfile(merged);
                 return merged;
@@ -1037,6 +1055,7 @@ export function App() {
       type: (type === 'site_visit' ? 'site_visit' : 'followup_scheduled') as any,
       title: `Follow-Up Scheduled (${date} at ${time})`,
       description: note || `Scheduled ${type} reminder`,
+      metadata: { followUpType: type },
       timestamp: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
     };
 
@@ -1044,6 +1063,7 @@ export function App() {
       ...target,
       nextFollowUpDate: date,
       nextFollowUpTime: time,
+      nextFollowUpType: type,
       nextFollowUpNote: note,
       status: type === 'site_visit' ? 'site_visit_scheduled' : target.status,
       activities: [activity, ...(target.activities || [])],
@@ -1051,7 +1071,7 @@ export function App() {
     };
 
     handleUpdateLead(updatedLead);
-    scheduleFollowUpNotifications(updatedLead, type === 'site_visit');
+    scheduleFollowUpNotifications(updatedLead, type);
     showToast(`Reminder set for ${target.name} on ${date}! ⏰`);
   };
 
@@ -1279,6 +1299,13 @@ export function App() {
                 isCloudSynced={isCloudSynced}
                 onGoogleSignIn={handleGoogleSignIn}
                 onSignOut={handleSignOut}
+                onAccountDeleted={() => {
+                  setLeads([]);
+                  setProperties([]);
+                  setCurrentUser(null);
+                  setIsCloudSynced(false);
+                  setCurrentTab('leads');
+                }}
                 onUpdateProfile={(p) => {
                   setProfile(p);
                   saveStoredProfile(p);

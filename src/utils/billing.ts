@@ -271,24 +271,44 @@ export function getEffectiveSubscriptionStatus(
     status = 'EXPIRED';
   }
 
-  // Check canceled subscription expiration
+  // Check subscription expiration - A paid subscription must only be treated as unexpired when a valid expiry timestamp exists and is in the future
   let expiryFormatted: string | undefined;
   const resolvedExpiryDate = profile.subscriptionExpiryTime || profile.subscriptionExpiryDate;
-  if (resolvedExpiryDate) {
+  if (status === 'CANCELED_BUT_ACTIVE' || status === 'ACTIVE') {
+    if (!resolvedExpiryDate) {
+      status = 'EXPIRED';
+    } else {
+      try {
+        const expDate = new Date(resolvedExpiryDate);
+        const expTimeMs = expDate.getTime();
+        if (isNaN(expTimeMs)) {
+          status = 'EXPIRED';
+        } else {
+          expiryFormatted = expDate.toLocaleDateString('en-IN', {
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+          });
+          const refNow = serverNow ?? getAuthoritativeServerNow();
+          const refNowMs = typeof refNow === 'number' ? refNow : new Date(refNow).getTime();
+          // autoRenewing/autoRenewEnabled must NOT by itself grant Pro beyond the last verified expiryTime
+          if (refNowMs > expTimeMs) {
+            status = 'EXPIRED';
+          }
+        }
+      } catch {
+        status = 'EXPIRED';
+      }
+    }
+  } else if (resolvedExpiryDate) {
     try {
       const expDate = new Date(resolvedExpiryDate);
-      expiryFormatted = expDate.toLocaleDateString('en-IN', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-      });
-
-      if (status === 'CANCELED_BUT_ACTIVE' || status === 'ACTIVE') {
-        const refNow = serverNow ?? getAuthoritativeServerNow();
-        const refNowMs = typeof refNow === 'number' ? refNow : new Date(refNow).getTime();
-        if (refNowMs > expDate.getTime() && !profile.autoRenewing) {
-          status = 'EXPIRED';
-        }
+      if (!isNaN(expDate.getTime())) {
+        expiryFormatted = expDate.toLocaleDateString('en-IN', {
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        });
       }
     } catch {}
   }

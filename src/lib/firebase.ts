@@ -13,7 +13,7 @@ import {
   initializeFirestore,
   getFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager,
+  persistentSingleTabManager,
   Firestore,
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
@@ -27,12 +27,12 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-// Initialize Firestore with offline persistence
+// Initialize Firestore with offline persistence (single-tab manager prevents multi-lease clock drift errors)
 let firestoreInstance: Firestore;
 try {
   firestoreInstance = initializeFirestore(app, {
     localCache: persistentLocalCache({
-      tabManager: persistentMultipleTabManager(),
+      tabManager: persistentSingleTabManager({}),
     }),
   }, firebaseConfig.firestoreDatabaseId || undefined);
 } catch (e) {

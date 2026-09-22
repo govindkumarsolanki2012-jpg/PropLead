@@ -53,8 +53,8 @@ export const DeveloperNotificationTester: React.FC<DeveloperNotificationTesterPr
 
   const handleSendSample = async (type: 'followup' | 'visit') => {
     const isFollowup = type === 'followup';
-    const title = isFollowup ? 'Follow-up in 30 min' : 'Property visit now';
-    const body = isFollowup ? 'Jyothi • 6:00 PM' : 'Jyothi • Madhurawada';
+    const title = isFollowup ? 'Follow-up in 30 min' : 'Property visit reminder';
+    const body = isFollowup ? 'Jyothi • Follow-up' : 'Jyothi • Madhurawada site visit';
     const extra: NotificationPayloadExtra = {
       leadId: 'sample-lead',
       clientName: 'Jyothi',
@@ -184,7 +184,7 @@ export const DeveloperNotificationTester: React.FC<DeveloperNotificationTesterPr
             <Sparkles className="w-3.5 h-3.5 text-amber-500" />
           </div>
           <div className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug pl-1">
-            Follow-up in 30 min • <span className="font-semibold text-slate-700 dark:text-slate-200">Jyothi • 6:00 PM</span>
+            Follow-up in 30 min • <span className="font-semibold text-slate-700 dark:text-slate-200">Jyothi • Follow-up</span>
           </div>
         </button>
 
@@ -208,7 +208,7 @@ export const DeveloperNotificationTester: React.FC<DeveloperNotificationTesterPr
             <Sparkles className="w-3.5 h-3.5 text-amber-500" />
           </div>
           <div className="text-[11px] text-slate-500 dark:text-slate-400 leading-snug pl-1">
-            Property visit now • <span className="font-semibold text-slate-700 dark:text-slate-200">Jyothi • Madhurawada</span>
+            Property visit reminder • <span className="font-semibold text-slate-700 dark:text-slate-200">Jyothi • Madhurawada site visit</span>
           </div>
         </button>
       </div>
