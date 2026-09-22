@@ -45,6 +45,7 @@ import {
 } from '../../utils/notifications';
 import { useLanguage } from '../../context/LanguageContext';
 import { NotificationSettingsPage } from './NotificationSettingsPage';
+import { DeveloperNotificationTester } from './DeveloperNotificationTester';
 
 interface SettingsViewProps {
   profile: UserProfile;
@@ -477,6 +478,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <ChevronRight className="w-4 h-4" />
         </div>
       </div>
+
+      {/* Developer Testing Section for AI Studio QA */}
+      <DeveloperNotificationTester />
 
       {/* Firebase Cloud Sync & Security */}
       <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3 shadow-2xs">

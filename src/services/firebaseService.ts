@@ -472,6 +472,82 @@ export function subscribeUserProfile(
   );
 }
 
+// --- SUBSCRIPTIONS OPERATIONS (Isolated per agent) ---
+
+export interface FirestoreSubscriptionData {
+  userId: string;
+  subscriptionStatus: string;
+  subscriptionProductId?: string;
+  subscriptionBasePlan?: string;
+  subscriptionBasePlanId?: string;
+  planId?: string;
+  subscriptionExpiryDate?: string | null;
+  subscriptionExpiryTime?: string | null;
+  expiryDate?: string | null;
+  autoRenewing?: boolean;
+  purchaseToken?: string;
+  orderId?: string;
+  acknowledged?: boolean;
+  lastVerifiedAt?: string;
+  updatedAt?: string;
+}
+
+export async function saveSubscriptionRecordToFirestore(
+  userId: string,
+  data: Partial<FirestoreSubscriptionData>
+): Promise<void> {
+  try {
+    const subRef = doc(db, 'subscriptions', userId);
+    await setDoc(
+      subRef,
+      {
+        ...data,
+        userId,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.warn('[Firestore] Error saving subscription record:', err);
+  }
+}
+
+export async function getSubscriptionRecordFromFirestore(
+  userId: string
+): Promise<FirestoreSubscriptionData | null> {
+  try {
+    const subRef = doc(db, 'subscriptions', userId);
+    const snap = await getDoc(subRef);
+    if (snap.exists()) {
+      return snap.data() as FirestoreSubscriptionData;
+    }
+    return null;
+  } catch (err) {
+    console.warn('[Firestore] Error fetching subscription record:', err);
+    return null;
+  }
+}
+
+export function subscribeSubscriptionRecordFromFirestore(
+  userId: string,
+  onUpdate: (sub: FirestoreSubscriptionData | null) => void
+): Unsubscribe {
+  const subRef = doc(db, 'subscriptions', userId);
+  return onSnapshot(
+    subRef,
+    (snap) => {
+      if (snap.exists()) {
+        onUpdate(snap.data() as FirestoreSubscriptionData);
+      } else {
+        onUpdate(null);
+      }
+    },
+    (err) => {
+      console.warn('[Firestore] Subscription record stream error/offline:', err);
+    }
+  );
+}
+
 // --- LEADS OPERATIONS (Isolated per agent) ---
 
 export async function getLeadsFromFirestore(userId: string): Promise<Lead[]> {

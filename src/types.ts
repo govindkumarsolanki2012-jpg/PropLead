@@ -202,8 +202,10 @@ export interface UserProfile {
   isSubscribed: boolean;
   subscriptionPlan?: string;
   subscriptionExpiryDate?: string | null;
+  subscriptionExpiryTime?: string | null;
   subscriptionProductId?: string;
   subscriptionBasePlan?: string;
+  subscriptionBasePlanId?: string;
   planId?: SubscriptionPlanId | string;
   purchaseDate?: string;
   expiryDate?: string | null;

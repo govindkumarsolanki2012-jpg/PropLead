@@ -26,8 +26,10 @@ export interface UserSubscriptionRecord {
   trialStartDate: string;
   trialEndDate: string;
   subscriptionExpiryDate: string | null;
+  subscriptionExpiryTime?: string | null;
   subscriptionProductId: string;
   subscriptionBasePlan: string;
+  subscriptionBasePlanId?: string;
   planId?: string;
   purchaseDate?: string;
   expiryDate?: string | null;
@@ -103,25 +105,33 @@ function persistSubscriptionStoreToDisk(): void {
 
 // Firestore Field Format Converters
 function toFirestoreFields(record: UserSubscriptionRecord): Record<string, any> {
-  const effectiveBasePlan = record.subscriptionBasePlan || record.planId || 'quarterly';
-  const effectivePlanId = record.planId || record.subscriptionBasePlan || 'quarterly';
+  const effectiveBasePlan = record.subscriptionBasePlanId || record.subscriptionBasePlan || record.planId || 'quarterly';
+  const effectivePlanId = record.planId || record.subscriptionBasePlanId || record.subscriptionBasePlan || 'quarterly';
+  const rawStatus = String(record.subscriptionStatus || 'active');
+  const normalizedStatus = rawStatus.toLowerCase() === 'active' || rawStatus.toUpperCase() === 'ACTIVE'
+    ? 'active'
+    : (rawStatus.toLowerCase() === 'canceled_but_active' || rawStatus.toUpperCase() === 'CANCELED_BUT_ACTIVE'
+      ? 'canceled_but_active'
+      : rawStatus.toLowerCase());
 
   const fields: Record<string, any> = {
     userId: { stringValue: record.userId },
-    subscriptionStatus: { stringValue: record.subscriptionStatus },
+    subscriptionStatus: { stringValue: normalizedStatus },
     trialStartDate: { stringValue: record.trialStartDate },
     trialEndDate: { stringValue: record.trialEndDate },
     subscriptionProductId: { stringValue: record.subscriptionProductId || 'property_agent_pro' },
     subscriptionBasePlan: { stringValue: effectiveBasePlan },
+    subscriptionBasePlanId: { stringValue: effectiveBasePlan },
     planId: { stringValue: effectivePlanId },
     autoRenewing: { booleanValue: Boolean(record.autoRenewing) },
     acknowledged: { booleanValue: Boolean(record.acknowledged) },
     updatedAt: { stringValue: record.updatedAt || new Date().toISOString() },
   };
 
-  const resolvedExpiry = record.subscriptionExpiryDate || record.expiryDate;
+  const resolvedExpiry = record.subscriptionExpiryTime || record.subscriptionExpiryDate || record.expiryDate;
   if (resolvedExpiry) {
     fields.subscriptionExpiryDate = { stringValue: resolvedExpiry };
+    fields.subscriptionExpiryTime = { stringValue: resolvedExpiry };
     fields.expiryDate = { stringValue: resolvedExpiry };
   } else {
     fields.subscriptionExpiryDate = { nullValue: null };
@@ -139,9 +149,7 @@ function toFirestoreFields(record: UserSubscriptionRecord): Record<string, any> 
   if (record.paymentIssueMessage) {
     fields.paymentIssueMessage = { stringValue: record.paymentIssueMessage };
   }
-  if (record.lastVerifiedAt) {
-    fields.lastVerifiedAt = { stringValue: record.lastVerifiedAt };
-  }
+  fields.lastVerifiedAt = { stringValue: record.lastVerifiedAt || new Date().toISOString() };
 
   return fields;
 }
@@ -149,19 +157,33 @@ function toFirestoreFields(record: UserSubscriptionRecord): Record<string, any> 
 function fromFirestoreFields(fields: Record<string, any>): UserSubscriptionRecord | null {
   if (!fields || !fields.userId) return null;
 
-  const resolvedExpiry = fields.subscriptionExpiryDate?.stringValue || fields.expiryDate?.stringValue || null;
-  const basePlan = fields.subscriptionBasePlan?.stringValue || fields.planId?.stringValue || 'quarterly';
-  const planId = fields.planId?.stringValue || fields.subscriptionBasePlan?.stringValue || 'quarterly';
+  const resolvedExpiry = fields.subscriptionExpiryTime?.stringValue || fields.subscriptionExpiryDate?.stringValue || fields.expiryDate?.stringValue || null;
+  const basePlan = fields.subscriptionBasePlanId?.stringValue || fields.subscriptionBasePlan?.stringValue || fields.planId?.stringValue || 'quarterly';
+  const planId = fields.planId?.stringValue || fields.subscriptionBasePlanId?.stringValue || fields.subscriptionBasePlan?.stringValue || 'quarterly';
+
+  let rawStatus = fields.subscriptionStatus?.stringValue || 'TRIAL';
+  const upper = rawStatus.toUpperCase();
+  if (upper === 'ACTIVE' || upper === 'SUBSCRIBED') {
+    rawStatus = 'ACTIVE';
+  } else if (upper === 'CANCELED_BUT_ACTIVE') {
+    rawStatus = 'CANCELED_BUT_ACTIVE';
+  } else if (upper === 'EXPIRED') {
+    rawStatus = 'EXPIRED';
+  } else if (upper === 'TRIAL') {
+    rawStatus = 'TRIAL';
+  }
 
   return {
     userId: fields.userId.stringValue || '',
-    subscriptionStatus: (fields.subscriptionStatus?.stringValue || 'TRIAL') as any,
+    subscriptionStatus: rawStatus as any,
     trialStartDate: fields.trialStartDate?.stringValue || new Date().toISOString(),
     trialEndDate: fields.trialEndDate?.stringValue || new Date().toISOString(),
     subscriptionExpiryDate: resolvedExpiry,
+    subscriptionExpiryTime: resolvedExpiry,
     expiryDate: resolvedExpiry,
     subscriptionProductId: fields.subscriptionProductId?.stringValue || 'property_agent_pro',
     subscriptionBasePlan: basePlan,
+    subscriptionBasePlanId: basePlan,
     planId,
     purchaseDate: fields.purchaseDate?.stringValue,
     purchaseToken: fields.purchaseToken?.stringValue,
@@ -407,8 +429,10 @@ async function syncUserProfileSubscriptionToFirestore(
     isSubscribed: boolean;
     subscriptionStatus: string;
     subscriptionExpiryDate: string | null;
+    subscriptionExpiryTime?: string | null;
     subscriptionProductId: string;
     subscriptionBasePlan: string;
+    subscriptionBasePlanId?: string;
     planId?: string;
     purchaseDate?: string;
     expiryDate?: string | null;
@@ -429,28 +453,32 @@ async function syncUserProfileSubscriptionToFirestore(
       'updateMask.fieldPaths=subscriptionStatus',
       'updateMask.fieldPaths=subscriptionProductId',
       'updateMask.fieldPaths=subscriptionBasePlan',
+      'updateMask.fieldPaths=subscriptionBasePlanId',
       'updateMask.fieldPaths=planId',
       'updateMask.fieldPaths=autoRenewing',
       'updateMask.fieldPaths=updatedAt',
     ];
 
-    const effectiveBasePlan = record.subscriptionBasePlan || record.planId || 'quarterly';
-    const effectivePlanId = record.planId || record.subscriptionBasePlan || 'quarterly';
+    const effectiveBasePlan = record.subscriptionBasePlanId || record.subscriptionBasePlan || record.planId || 'quarterly';
+    const effectivePlanId = record.planId || record.subscriptionBasePlanId || record.subscriptionBasePlan || 'quarterly';
 
     const fields: Record<string, any> = {
       isSubscribed: { booleanValue: record.isSubscribed },
       subscriptionStatus: { stringValue: record.subscriptionStatus },
       subscriptionProductId: { stringValue: record.subscriptionProductId },
       subscriptionBasePlan: { stringValue: effectiveBasePlan },
+      subscriptionBasePlanId: { stringValue: effectiveBasePlan },
       planId: { stringValue: effectivePlanId },
       autoRenewing: { booleanValue: record.autoRenewing },
       updatedAt: { stringValue: new Date().toISOString() },
     };
 
-    const resolvedExpiry = record.subscriptionExpiryDate || record.expiryDate;
+    const resolvedExpiry = record.subscriptionExpiryTime || record.subscriptionExpiryDate || record.expiryDate;
     if (resolvedExpiry) {
       fieldMasks.push('updateMask.fieldPaths=subscriptionExpiryDate');
       fields.subscriptionExpiryDate = { stringValue: resolvedExpiry };
+      fieldMasks.push('updateMask.fieldPaths=subscriptionExpiryTime');
+      fields.subscriptionExpiryTime = { stringValue: resolvedExpiry };
       fieldMasks.push('updateMask.fieldPaths=expiryDate');
       fields.expiryDate = { stringValue: resolvedExpiry };
     }
@@ -534,6 +562,16 @@ async function fetchUserProfileFromFirestore(userId: string, idToken?: string): 
   trialStartDate?: string;
   createdAt?: string;
   subscriptionStatus?: string;
+  isSubscribed?: boolean;
+  subscriptionExpiryDate?: string;
+  subscriptionExpiryTime?: string;
+  subscriptionProductId?: string;
+  subscriptionBasePlan?: string;
+  subscriptionBasePlanId?: string;
+  planId?: string;
+  autoRenewing?: boolean;
+  purchaseToken?: string;
+  lastVerifiedAt?: string;
 } | null> {
   try {
     const token = await getFirestoreReadToken(idToken);
@@ -550,6 +588,16 @@ async function fetchUserProfileFromFirestore(userId: string, idToken?: string): 
       trialStartDate: fields.trialStartDate?.stringValue,
       createdAt: fields.createdAt?.stringValue || fields.updatedAt?.stringValue,
       subscriptionStatus: fields.subscriptionStatus?.stringValue,
+      isSubscribed: fields.isSubscribed?.booleanValue,
+      subscriptionExpiryDate: fields.subscriptionExpiryDate?.stringValue,
+      subscriptionExpiryTime: fields.subscriptionExpiryTime?.stringValue,
+      subscriptionProductId: fields.subscriptionProductId?.stringValue,
+      subscriptionBasePlan: fields.subscriptionBasePlan?.stringValue,
+      subscriptionBasePlanId: fields.subscriptionBasePlanId?.stringValue,
+      planId: fields.planId?.stringValue,
+      autoRenewing: fields.autoRenewing?.booleanValue,
+      purchaseToken: fields.purchaseToken?.stringValue,
+      lastVerifiedAt: fields.lastVerifiedAt?.stringValue,
     };
   } catch (err) {
     console.warn(`[Firestore User] Could not fetch profile for user ${userId}:`, err);
@@ -566,26 +614,73 @@ export async function getSubscriptionRecord(
   userId: string,
   idToken?: string
 ): Promise<GetSubscriptionResult> {
-  // 1. Authoritatively check Firestore
+  // 1. Authoritatively check Firestore /subscriptions/{userId}
   const remote = await fetchSubscriptionFromFirestore(userId, idToken);
 
   if (remote.status === 'FOUND' && remote.record) {
-    subscriptionStore.set(userId, remote.record);
+    // Check if subscription has expired
+    const serverNow = new Date();
+    const record = remote.record;
+    const resolvedExpiry = record.subscriptionExpiryTime || record.subscriptionExpiryDate;
+    if (resolvedExpiry && (record.subscriptionStatus === 'ACTIVE' || record.subscriptionStatus === 'CANCELED_BUT_ACTIVE')) {
+      const expTime = new Date(resolvedExpiry).getTime();
+      if (!isNaN(expTime) && serverNow.getTime() > expTime && !record.autoRenewing) {
+        record.subscriptionStatus = 'EXPIRED';
+        saveSubscriptionRecord(record, idToken).catch(() => {});
+      }
+    }
+    subscriptionStore.set(userId, record);
     persistSubscriptionStoreToDisk();
-    return { record: remote.record, unavailable: false };
+    return { record, unavailable: false };
   }
 
-  // 2. If cached in durable disk store, return it
+  // 2. Check if user already had an existing account in /users/{userId} to restore verified subscription
+  const userProfile = await fetchUserProfileFromFirestore(userId, idToken);
+  const serverNow = new Date();
+
+  if (userProfile) {
+    const rawSubStatus = userProfile.subscriptionStatus || '';
+    const isSubActive =
+      userProfile.isSubscribed === true ||
+      rawSubStatus.toUpperCase() === 'ACTIVE' ||
+      rawSubStatus.toLowerCase() === 'active' ||
+      rawSubStatus.toUpperCase() === 'CANCELED_BUT_ACTIVE';
+
+    const resolvedExpiry = userProfile.subscriptionExpiryTime || userProfile.subscriptionExpiryDate;
+    if (isSubActive && resolvedExpiry) {
+      const expTime = new Date(resolvedExpiry).getTime();
+      const isExpiredNow = !isNaN(expTime) && serverNow.getTime() > expTime && !userProfile.autoRenewing;
+
+      const restoredRecord: UserSubscriptionRecord = {
+        userId,
+        subscriptionStatus: isExpiredNow ? 'EXPIRED' : (rawSubStatus.toUpperCase() === 'CANCELED_BUT_ACTIVE' ? 'CANCELED_BUT_ACTIVE' : 'ACTIVE'),
+        trialStartDate: userProfile.trialStartDate || serverNow.toISOString(),
+        trialEndDate: userProfile.trialEndDate || serverNow.toISOString(),
+        subscriptionExpiryDate: resolvedExpiry,
+        subscriptionExpiryTime: resolvedExpiry,
+        expiryDate: resolvedExpiry,
+        subscriptionProductId: userProfile.subscriptionProductId || 'property_agent_pro',
+        subscriptionBasePlan: userProfile.subscriptionBasePlanId || userProfile.subscriptionBasePlan || 'quarterly',
+        subscriptionBasePlanId: userProfile.subscriptionBasePlanId || userProfile.subscriptionBasePlan || 'quarterly',
+        planId: userProfile.planId || userProfile.subscriptionBasePlanId || userProfile.subscriptionBasePlan || 'quarterly',
+        autoRenewing: userProfile.autoRenewing ?? true,
+        acknowledged: true,
+        purchaseToken: userProfile.purchaseToken,
+        lastVerifiedAt: userProfile.lastVerifiedAt || serverNow.toISOString(),
+        updatedAt: serverNow.toISOString(),
+      };
+
+      subscriptionStore.set(userId, restoredRecord);
+      persistSubscriptionStoreToDisk();
+      syncSubscriptionToFirestore(restoredRecord, idToken).catch(() => {});
+      return { record: restoredRecord, unavailable: false };
+    }
+  }
+
+  // 3. If cached in durable disk store, return it
   if (subscriptionStore.has(userId)) {
     return { record: subscriptionStore.get(userId)!, unavailable: false };
   }
-
-  // 3. remote.status === 'NOT_FOUND' or remote store unconfigured:
-  // User does not yet have a record in /subscriptions/{userId}
-  // Check if user already had an existing account in /users/{userId} to preserve authoritative trialEndDate
-  const userProfile = await fetchUserProfileFromFirestore(userId, idToken);
-
-  const serverNow = new Date();
   let trialStart: Date;
   let trialEnd: Date;
   let isExpired = false;
@@ -1170,9 +1265,11 @@ async function startServer() {
         currentServerTimestamp: serverTimestamp,
         trialDaysRemaining,
         subscriptionExpiryDate: record.subscriptionExpiryDate,
+        subscriptionExpiryTime: record.subscriptionExpiryTime || record.subscriptionExpiryDate,
         expiryDate: record.expiryDate || record.subscriptionExpiryDate,
         subscriptionProductId: record.subscriptionProductId,
         subscriptionBasePlan: record.subscriptionBasePlan,
+        subscriptionBasePlanId: record.subscriptionBasePlanId || record.subscriptionBasePlan || 'quarterly',
         planId: record.planId || record.subscriptionBasePlan || 'quarterly',
         purchaseDate: record.purchaseDate,
         lastVerifiedAt: record.lastVerifiedAt,
@@ -1383,11 +1480,13 @@ async function startServer() {
       record.subscriptionStatus = verification.subscriptionStatus === 'CANCELED_BUT_ACTIVE' ? 'CANCELED_BUT_ACTIVE' : 'ACTIVE';
       record.subscriptionProductId = REQUIRED_PRODUCT_ID;
       record.subscriptionBasePlan = effectiveBasePlan;
+      record.subscriptionBasePlanId = effectiveBasePlan;
       record.planId = effectiveBasePlan;
       record.purchaseDate = record.purchaseDate || nowIso;
       record.purchaseToken = purchaseToken;
       record.orderId = verification.orderId;
       record.subscriptionExpiryDate = verification.subscriptionExpiryDate; // Strictly authoritative from Google Play
+      record.subscriptionExpiryTime = verification.subscriptionExpiryDate;
       record.expiryDate = verification.subscriptionExpiryDate;
       record.autoRenewing = verification.autoRenewing;
       record.acknowledged = verification.acknowledged;
@@ -1395,7 +1494,7 @@ async function startServer() {
       record.lastVerifiedAt = nowIso;
 
       // 5. Persist to Firestore:
-      // /subscriptions/{verifiedUid}: subscriptionStatus = ACTIVE
+      // /subscriptions/{verifiedUid}: subscriptionStatus = active
       // /users/{verifiedUid}: isSubscribed = true, subscriptionStatus = ACTIVE
       let firestoreResult = { subscriptionsCollectionSynced: false, userProfileSynced: false };
       try {
@@ -1415,8 +1514,10 @@ async function startServer() {
         plan: effectiveBasePlan,
         planId: effectiveBasePlan,
         subscriptionBasePlan: effectiveBasePlan,
+        subscriptionBasePlanId: effectiveBasePlan,
         subscriptionProductId: REQUIRED_PRODUCT_ID,
         subscriptionExpiryDate: record.subscriptionExpiryDate,
+        subscriptionExpiryTime: record.subscriptionExpiryDate,
         expiryDate: record.subscriptionExpiryDate,
         orderId: verification.orderId,
         purchaseDate: record.purchaseDate,
@@ -1485,8 +1586,13 @@ async function startServer() {
       ) {
         record.subscriptionStatus = verification.subscriptionStatus;
         record.subscriptionExpiryDate = verification.subscriptionExpiryDate;
+        record.subscriptionExpiryTime = verification.subscriptionExpiryDate;
+        record.subscriptionBasePlanId = verification.basePlanId || record.subscriptionBasePlanId || record.subscriptionBasePlan || 'quarterly';
+        record.subscriptionBasePlan = record.subscriptionBasePlanId;
+        record.planId = record.subscriptionBasePlanId;
         record.autoRenewing = verification.autoRenewing;
         record.purchaseToken = tokenToVerify;
+        record.lastVerifiedAt = new Date().toISOString();
 
         await saveSubscriptionRecord(record, idToken);
 
@@ -1496,7 +1602,11 @@ async function startServer() {
           hasLiveGooglePlayAuth: Boolean(client),
           subscriptionStatus: record.subscriptionStatus,
           subscriptionExpiryDate: record.subscriptionExpiryDate,
+          subscriptionExpiryTime: record.subscriptionExpiryDate,
           subscriptionProductId: record.subscriptionProductId,
+          subscriptionBasePlan: record.subscriptionBasePlan,
+          subscriptionBasePlanId: record.subscriptionBasePlanId,
+          planId: record.planId,
           autoRenewing: record.autoRenewing,
           purchaseToken: tokenToVerify,
           message: 'Active PropLead subscription restored via Google Play!',
@@ -1508,6 +1618,29 @@ async function startServer() {
           hasLiveGooglePlayAuth: Boolean(client),
           subscriptionStatus: record.subscriptionStatus,
           message: 'No active PropLead subscription was found for this Google Play account.',
+        });
+      }
+    }
+
+    // Check if user already has an active, unexpired record in Firestore
+    if (record.subscriptionStatus === 'ACTIVE' || record.subscriptionStatus === 'CANCELED_BUT_ACTIVE') {
+      const resolvedExpiry = record.subscriptionExpiryTime || record.subscriptionExpiryDate;
+      const expTime = resolvedExpiry ? new Date(resolvedExpiry).getTime() : 0;
+      if (expTime > Date.now() || record.autoRenewing) {
+        return res.json({
+          success: true,
+          restored: true,
+          hasLiveGooglePlayAuth: Boolean(client),
+          subscriptionStatus: record.subscriptionStatus,
+          subscriptionExpiryDate: record.subscriptionExpiryDate,
+          subscriptionExpiryTime: record.subscriptionExpiryTime || record.subscriptionExpiryDate,
+          subscriptionProductId: record.subscriptionProductId,
+          subscriptionBasePlan: record.subscriptionBasePlan,
+          subscriptionBasePlanId: record.subscriptionBasePlanId || record.subscriptionBasePlan || 'quarterly',
+          planId: record.planId || record.subscriptionBasePlan || 'quarterly',
+          autoRenewing: record.autoRenewing,
+          purchaseToken: record.purchaseToken,
+          message: 'Active PropLead subscription restored from verified account record!',
         });
       }
     }

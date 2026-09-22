@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { NativePurchases, PURCHASE_TYPE } from '@capgo/native-purchases';
 import { UserProfile, SubscriptionStatus, GooglePlaySubscriptionProduct, SubscriptionPlanId, SubscriptionPlanDetails } from '../types';
 import { auth } from '../lib/firebase';
+import { saveSubscriptionRecordToFirestore, saveUserProfile } from '../services/firebaseService';
 
 export const GOOGLE_PLAY_PRODUCT_ID = 'property_agent_pro';
 export const GOOGLE_PLAY_BASE_PLAN_ID = 'quarterly';
@@ -272,9 +273,10 @@ export function getEffectiveSubscriptionStatus(
 
   // Check canceled subscription expiration
   let expiryFormatted: string | undefined;
-  if (profile.subscriptionExpiryDate) {
+  const resolvedExpiryDate = profile.subscriptionExpiryTime || profile.subscriptionExpiryDate;
+  if (resolvedExpiryDate) {
     try {
-      const expDate = new Date(profile.subscriptionExpiryDate);
+      const expDate = new Date(resolvedExpiryDate);
       expiryFormatted = expDate.toLocaleDateString('en-IN', {
         day: 'numeric',
         month: 'short',
@@ -516,24 +518,47 @@ export async function launchGooglePlayPurchase(
       onProgress?.('Subscription verified & unlocked!');
       const resolvedExpiry = verifyData.subscriptionExpiryDate || verifyData.expiryDate;
 
+      const profileUpdates: Partial<UserProfile> = {
+        subscriptionStatus: 'ACTIVE',
+        isSubscribed: true,
+        isTrialActive: false,
+        subscriptionPlan: GOOGLE_PLAY_PRODUCT_ID,
+        subscriptionProductId: GOOGLE_PLAY_PRODUCT_ID,
+        subscriptionBasePlan: basePlanId,
+        subscriptionBasePlanId: basePlanId,
+        planId: basePlanId,
+        subscriptionExpiryDate: resolvedExpiry,
+        subscriptionExpiryTime: resolvedExpiry,
+        expiryDate: resolvedExpiry,
+        purchaseDate: verifyData.purchaseDate || new Date().toISOString(),
+        lastVerifiedAt: verifyData.lastVerifiedAt || new Date().toISOString(),
+        purchaseToken: testToken,
+        autoRenewing: true,
+        paymentIssueMessage: undefined,
+      };
+
+      // Ensure dual persistence to Firestore
+      saveSubscriptionRecordToFirestore(userId, {
+        userId,
+        subscriptionStatus: 'active',
+        subscriptionProductId: GOOGLE_PLAY_PRODUCT_ID,
+        subscriptionBasePlanId: basePlanId,
+        subscriptionBasePlan: basePlanId,
+        planId: basePlanId,
+        subscriptionExpiryDate: resolvedExpiry,
+        subscriptionExpiryTime: resolvedExpiry,
+        expiryDate: resolvedExpiry,
+        autoRenewing: true,
+        purchaseToken: testToken,
+        acknowledged: true,
+        lastVerifiedAt: profileUpdates.lastVerifiedAt,
+      }).catch((e) => console.warn('[Firestore] sub record save error:', e));
+
+      saveUserProfile(userId, profileUpdates).catch((e) => console.warn('[Firestore] user profile save error:', e));
+
       return {
         success: true,
-        profileUpdates: {
-          subscriptionStatus: 'ACTIVE',
-          isSubscribed: true,
-          isTrialActive: false,
-          subscriptionPlan: GOOGLE_PLAY_PRODUCT_ID,
-          subscriptionProductId: GOOGLE_PLAY_PRODUCT_ID,
-          subscriptionBasePlan: basePlanId,
-          planId: basePlanId,
-          subscriptionExpiryDate: resolvedExpiry,
-          expiryDate: resolvedExpiry,
-          purchaseDate: verifyData.purchaseDate || new Date().toISOString(),
-          lastVerifiedAt: verifyData.lastVerifiedAt || new Date().toISOString(),
-          purchaseToken: testToken,
-          autoRenewing: true,
-          paymentIssueMessage: undefined,
-        },
+        profileUpdates,
       };
     }
 
@@ -748,24 +773,47 @@ export async function launchGooglePlayPurchase(
       throw new Error('Google Play verification succeeded but did not provide an authoritative expiry date.');
     }
 
+    const profileUpdates: Partial<UserProfile> = {
+      subscriptionStatus: 'ACTIVE',
+      isSubscribed: true,
+      isTrialActive: false,
+      subscriptionPlan: GOOGLE_PLAY_PRODUCT_ID,
+      subscriptionProductId: GOOGLE_PLAY_PRODUCT_ID,
+      subscriptionBasePlan: basePlanId,
+      subscriptionBasePlanId: basePlanId,
+      planId: basePlanId,
+      subscriptionExpiryDate: resolvedExpiry,
+      subscriptionExpiryTime: resolvedExpiry,
+      expiryDate: resolvedExpiry,
+      purchaseDate: verifyData.purchaseDate || new Date().toISOString(),
+      lastVerifiedAt: verifyData.lastVerifiedAt || new Date().toISOString(),
+      purchaseToken,
+      autoRenewing: verifyData.autoRenewing !== undefined ? verifyData.autoRenewing : true,
+      paymentIssueMessage: undefined,
+    };
+
+    // Dual persistence to Firestore
+    saveSubscriptionRecordToFirestore(userId, {
+      userId,
+      subscriptionStatus: 'active',
+      subscriptionProductId: GOOGLE_PLAY_PRODUCT_ID,
+      subscriptionBasePlanId: basePlanId,
+      subscriptionBasePlan: basePlanId,
+      planId: basePlanId,
+      subscriptionExpiryDate: resolvedExpiry,
+      subscriptionExpiryTime: resolvedExpiry,
+      expiryDate: resolvedExpiry,
+      autoRenewing: profileUpdates.autoRenewing,
+      purchaseToken,
+      acknowledged: true,
+      lastVerifiedAt: profileUpdates.lastVerifiedAt,
+    }).catch((e) => console.warn('[Firestore] native sub save error:', e));
+
+    saveUserProfile(userId, profileUpdates).catch((e) => console.warn('[Firestore] user profile save error:', e));
+
     return {
       success: true,
-      profileUpdates: {
-        subscriptionStatus: 'ACTIVE',
-        isSubscribed: true,
-        isTrialActive: false,
-        subscriptionPlan: GOOGLE_PLAY_PRODUCT_ID,
-        subscriptionProductId: GOOGLE_PLAY_PRODUCT_ID,
-        subscriptionBasePlan: basePlanId,
-        planId: basePlanId,
-        subscriptionExpiryDate: resolvedExpiry,
-        expiryDate: resolvedExpiry,
-        purchaseDate: verifyData.purchaseDate || new Date().toISOString(),
-        lastVerifiedAt: verifyData.lastVerifiedAt || new Date().toISOString(),
-        purchaseToken,
-        autoRenewing: verifyData.autoRenewing !== undefined ? verifyData.autoRenewing : true,
-        paymentIssueMessage: undefined,
-      },
+      profileUpdates,
     };
   } catch (err: any) {
     console.error('Google Play purchase verification failed:', err?.message || err);
@@ -888,26 +936,57 @@ export async function restoreGooglePlayPurchases(
       };
     }
 
-    if (data.restored && (data.subscriptionStatus === 'ACTIVE' || data.subscriptionStatus === 'CANCELED_BUT_ACTIVE')) {
+    const rawStatus = (data.subscriptionStatus || '').toUpperCase();
+    const isStatusActive = rawStatus === 'ACTIVE' || rawStatus === 'CANCELED_BUT_ACTIVE' || String(data.subscriptionStatus).toLowerCase() === 'active';
+
+    if (data.restored && isStatusActive) {
+      const resolvedExpiry = data.subscriptionExpiryTime || data.subscriptionExpiryDate;
+      const effectiveBasePlan = data.subscriptionBasePlanId || data.subscriptionBasePlan || data.planId || 'quarterly';
+      const effectiveStatus = rawStatus === 'CANCELED_BUT_ACTIVE' ? 'CANCELED_BUT_ACTIVE' : 'ACTIVE';
+
+      const profileUpdates: Partial<UserProfile> = {
+        subscriptionStatus: effectiveStatus,
+        isSubscribed: true,
+        isTrialActive: false,
+        subscriptionPlan: data.subscriptionProductId || GOOGLE_PLAY_PRODUCT_ID,
+        subscriptionProductId: data.subscriptionProductId || GOOGLE_PLAY_PRODUCT_ID,
+        subscriptionBasePlan: effectiveBasePlan,
+        subscriptionBasePlanId: effectiveBasePlan,
+        planId: effectiveBasePlan,
+        subscriptionExpiryDate: resolvedExpiry,
+        subscriptionExpiryTime: resolvedExpiry,
+        expiryDate: resolvedExpiry,
+        purchaseDate: data.purchaseDate,
+        lastVerifiedAt: data.lastVerifiedAt || new Date().toISOString(),
+        autoRenewing: data.autoRenewing !== undefined ? data.autoRenewing : true,
+        purchaseToken: data.purchaseToken || purchaseToken,
+        paymentIssueMessage: undefined,
+      };
+
+      // Dual persistence to Firestore
+      saveSubscriptionRecordToFirestore(userId, {
+        userId,
+        subscriptionStatus: 'active',
+        subscriptionProductId: data.subscriptionProductId || GOOGLE_PLAY_PRODUCT_ID,
+        subscriptionBasePlanId: effectiveBasePlan,
+        subscriptionBasePlan: effectiveBasePlan,
+        planId: effectiveBasePlan,
+        subscriptionExpiryDate: resolvedExpiry,
+        subscriptionExpiryTime: resolvedExpiry,
+        expiryDate: resolvedExpiry,
+        autoRenewing: profileUpdates.autoRenewing,
+        purchaseToken: profileUpdates.purchaseToken,
+        acknowledged: true,
+        lastVerifiedAt: profileUpdates.lastVerifiedAt,
+      }).catch((e) => console.warn('[Firestore] restore sub record save error:', e));
+
+      saveUserProfile(userId, profileUpdates).catch((e) => console.warn('[Firestore] restore user profile save error:', e));
+
       return {
         success: true,
         restored: true,
         message: 'Active PropLead subscription restored via Google Play!',
-        profileUpdates: {
-          subscriptionStatus: data.subscriptionStatus,
-          isSubscribed: true,
-          isTrialActive: false,
-          subscriptionExpiryDate: data.subscriptionExpiryDate,
-          expiryDate: data.subscriptionExpiryDate,
-          subscriptionProductId: data.subscriptionProductId || GOOGLE_PLAY_PRODUCT_ID,
-          subscriptionBasePlan: data.subscriptionBasePlan || data.planId || 'quarterly',
-          planId: data.planId || data.subscriptionBasePlan || 'quarterly',
-          purchaseDate: data.purchaseDate,
-          lastVerifiedAt: data.lastVerifiedAt,
-          autoRenewing: data.autoRenewing !== undefined ? data.autoRenewing : true,
-          purchaseToken: data.purchaseToken || purchaseToken,
-          paymentIssueMessage: undefined,
-        },
+        profileUpdates,
       };
     }
 
@@ -934,6 +1013,36 @@ export async function restoreGooglePlayPurchases(
       message: 'Google Play billing is currently unavailable. Please try again.',
     };
   }
+}
+
+/**
+ * Automatically checks for any existing Google Play subscription purchases on device startup/login
+ * and restores entitlement if present and verified.
+ */
+export async function checkAndRestoreGooglePlayEntitlement(userId: string): Promise<Partial<UserProfile> | null> {
+  if (!userId) return null;
+  try {
+    if (Capacitor.isNativePlatform()) {
+      const supported = await NativePurchases.isBillingSupported();
+      if (supported.isBillingSupported) {
+        const result = await NativePurchases.getPurchases({ productType: PURCHASE_TYPE.SUBS });
+        if (result.purchases && result.purchases.length > 0) {
+          const match = result.purchases.find(
+            (p) => (p.productIdentifier === GOOGLE_PLAY_PRODUCT_ID || !p.productIdentifier) && p.purchaseToken && p.purchaseState !== '0'
+          ) || result.purchases[0];
+          if (match && match.purchaseToken) {
+            const restoredResult = await restoreGooglePlayPurchases(userId);
+            if (restoredResult.success && restoredResult.restored && restoredResult.profileUpdates) {
+              return restoredResult.profileUpdates;
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Startup Google Play Entitlement Check Notice]:', err);
+  }
+  return null;
 }
 
 /**

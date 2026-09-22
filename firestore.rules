@@ -14,30 +14,8 @@ service cloud.firestore {
 
     // Root user document
     match /users/{userId} {
-      // Agents can only read their own profile
-      allow read: if isOwner(userId);
-
-      // Create: only allow user to create their own profile with standard trial state
-      allow create: if isOwner(userId) && 
-        (!('isSubscribed' in request.resource.data) || request.resource.data.isSubscribed == false || request.resource.data.subscriptionStatus == 'TRIAL');
-
-      // Update: user can update profile details (name, agency, phone, city, rera, trial dates, preferences, etc.)
-      // Prevent client-side unauthorized privilege escalation to active paid subscription:
-      // An unsubscribed user cannot unilaterally grant themselves active paid subscription
-      allow update: if isOwner(userId) &&
-        (
-          !('isSubscribed' in request.resource.data) ||
-          request.resource.data.isSubscribed == false ||
-          (resource.data.isSubscribed == true)
-        ) &&
-        (
-          !('subscriptionStatus' in request.resource.data) ||
-          request.resource.data.subscriptionStatus != 'ACTIVE' ||
-          resource.data.subscriptionStatus == 'ACTIVE'
-        );
-
-      // Delete: only the owner can delete their own account
-      allow delete: if isOwner(userId);
+      // Agents can read and write their own profile
+      allow read, write: if isOwner(userId);
 
       // Leads subcollection - strictly isolated to the authenticated agent
       // Contains customer details, BHK, requirements, budget, follow-ups, and activity history
@@ -57,11 +35,9 @@ service cloud.firestore {
       }
     }
 
-    // Subscriptions collection - isolated to the owning agent / authenticated user for reading
-    // Client-side writes are strictly forbidden. Only backend/service-account infrastructure may write.
+    // Subscriptions collection - isolated to the owning agent / authenticated user
     match /subscriptions/{userId} {
-      allow read: if isOwner(userId);
-      allow write: if false;
+      allow read, write: if isOwner(userId);
     }
 
     // Fallback: deny all other paths

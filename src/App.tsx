@@ -13,6 +13,7 @@ import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { SettingsView } from './components/settings/SettingsView';
 import { SplashScreen } from './components/common/SplashScreen';
 import { AnimatePresence } from 'motion/react';
+import { BellRing, X, ArrowRight } from 'lucide-react';
 
 // Modals
 import { QuickAddLeadModal } from './components/leads/QuickAddLeadModal';
@@ -45,7 +46,7 @@ import {
 import { Lead, Property, UserProfile, WhatsAppTemplate, FollowUpType, TabType } from './types';
 import { INITIAL_USER_PROFILE } from './data/initialData';
 import { formatRelativeDate, normalizePhoneForMatch } from './utils/formatters';
-import { getEffectiveSubscriptionStatus, hasProAccess, setAuthoritativeServerTime, getBillingApiUrl } from './utils/billing';
+import { getEffectiveSubscriptionStatus, hasProAccess, setAuthoritativeServerTime, getBillingApiUrl, checkAndRestoreGooglePlayEntitlement } from './utils/billing';
 import {
   subscribeToAuth,
   signInWithGoogle,
@@ -53,6 +54,7 @@ import {
   initSocialLogin,
   getCurrentUser,
   subscribeUserProfile,
+  subscribeSubscriptionRecordFromFirestore,
   subscribeLeadsFromFirestore,
   subscribePropertiesFromFirestore,
   addLeadToFirestore,
@@ -65,6 +67,7 @@ import {
   deletePropertyFromFirestore,
   batchDeletePropertiesFromFirestore,
   saveUserProfile,
+  saveSubscriptionRecordToFirestore,
 } from './services/firebaseService';
 import { syncLocalDataToFirestore } from './utils/migration';
 import { FirebaseUser } from './lib/firebase';
@@ -76,6 +79,8 @@ import {
   syncAllLeadNotifications,
   requestNotificationPermission,
   wasNotificationPermissionPrompted,
+  SAMPLE_DEMO_LEAD,
+  triggerNotificationAction,
 } from './utils/notifications';
 
 const checkHasActiveSession = (): boolean => {
@@ -107,6 +112,27 @@ export function App() {
   // Firebase Authentication coordination
   const [isAuthResolved, setIsAuthResolved] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(() => getCurrentUser());
+
+  // Developer sample notification heads-up banner for in-browser / preview test verification
+  const [sampleNotificationBanner, setSampleNotificationBanner] = useState<{
+    id: number;
+    title: string;
+    body: string;
+    extra: any;
+  } | null>(null);
+
+  useEffect(() => {
+    const handleSampleNotificationFired = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail) {
+        setSampleNotificationBanner(customEvent.detail);
+      }
+    };
+    window.addEventListener('proplead_sample_notification_fired', handleSampleNotificationFired);
+    return () => {
+      window.removeEventListener('proplead_sample_notification_fired', handleSampleNotificationFired);
+    };
+  }, []);
 
   // Safety fallback for offline / extreme latency
   useEffect(() => {
@@ -405,6 +431,7 @@ export function App() {
   // 1. Firebase Auth listener and Firestore real-time synchronization
   useEffect(() => {
     let unsubProfile: (() => void) | null = null;
+    let unsubSubscription: (() => void) | null = null;
     let unsubLeads: (() => void) | null = null;
     let unsubProps: (() => void) | null = null;
 
@@ -437,6 +464,13 @@ export function App() {
               const merged: UserProfile = {
                 ...prev,
                 ...firestoreProfile,
+                subscriptionStatus: firestoreProfile.subscriptionStatus || prev.subscriptionStatus,
+                isSubscribed: firestoreProfile.isSubscribed !== undefined ? firestoreProfile.isSubscribed : prev.isSubscribed,
+                subscriptionProductId: firestoreProfile.subscriptionProductId || prev.subscriptionProductId,
+                subscriptionBasePlan: firestoreProfile.subscriptionBasePlan || prev.subscriptionBasePlan,
+                subscriptionBasePlanId: firestoreProfile.subscriptionBasePlanId || prev.subscriptionBasePlanId,
+                subscriptionExpiryDate: firestoreProfile.subscriptionExpiryDate || prev.subscriptionExpiryDate,
+                subscriptionExpiryTime: firestoreProfile.subscriptionExpiryTime || prev.subscriptionExpiryTime,
                 trialEndDate: effectiveTrialEndDate,
                 trialStartDate: effectiveTrialStartDate,
                 isOnboarded: true,
@@ -444,6 +478,38 @@ export function App() {
               saveStoredProfile(merged);
               return merged;
             });
+          }
+        });
+
+        // Subscribe to real-time subscription entitlement record in Firestore (/subscriptions/{userId})
+        unsubSubscription = subscribeSubscriptionRecordFromFirestore(user.uid, (subRecord) => {
+          if (subRecord) {
+            const rawSubStatus = (subRecord.subscriptionStatus || '').toLowerCase();
+            const isSubActive = rawSubStatus === 'active' || rawSubStatus === 'canceled_but_active';
+            const subExpiry = subRecord.subscriptionExpiryTime || subRecord.subscriptionExpiryDate || subRecord.expiryDate;
+            const isUnexpired = !subExpiry || new Date(subExpiry).getTime() > Date.now() || subRecord.autoRenewing;
+
+            if (isSubActive && isUnexpired) {
+              setProfile((prev) => {
+                const merged: UserProfile = {
+                  ...prev,
+                  subscriptionStatus: rawSubStatus === 'canceled_but_active' ? 'CANCELED_BUT_ACTIVE' : 'ACTIVE',
+                  isSubscribed: true,
+                  subscriptionProductId: subRecord.subscriptionProductId || prev.subscriptionProductId || 'property_agent_pro',
+                  subscriptionBasePlan: subRecord.subscriptionBasePlanId || subRecord.subscriptionBasePlan || prev.subscriptionBasePlan || 'quarterly',
+                  subscriptionBasePlanId: subRecord.subscriptionBasePlanId || prev.subscriptionBasePlanId || 'quarterly',
+                  planId: subRecord.subscriptionBasePlanId || prev.planId || 'quarterly',
+                  subscriptionExpiryDate: subExpiry || prev.subscriptionExpiryDate,
+                  subscriptionExpiryTime: subExpiry || prev.subscriptionExpiryTime,
+                  expiryDate: subExpiry || prev.expiryDate,
+                  autoRenewing: subRecord.autoRenewing !== undefined ? subRecord.autoRenewing : prev.autoRenewing,
+                  lastVerifiedAt: subRecord.lastVerifiedAt || prev.lastVerifiedAt,
+                  purchaseToken: subRecord.purchaseToken || prev.purchaseToken,
+                };
+                saveStoredProfile(merged);
+                return merged;
+              });
+            }
           }
         });
 
@@ -474,6 +540,7 @@ export function App() {
     return () => {
       unsubAuth();
       if (unsubProfile) unsubProfile();
+      if (unsubSubscription) unsubSubscription();
       if (unsubLeads) unsubLeads();
       if (unsubProps) unsubProps();
     };
@@ -508,6 +575,10 @@ export function App() {
             if (data.serverTimestamp || data.serverNow) {
               setAuthoritativeServerTime(data.serverTimestamp || data.serverNow);
             }
+            const rawStat = (data.subscriptionStatus || '').toUpperCase();
+            const isSub = Boolean(data.isSubscribed || rawStat === 'ACTIVE' || rawStat === 'CANCELED_BUT_ACTIVE');
+            const resolvedExp = data.subscriptionExpiryTime || data.subscriptionExpiryDate || data.expiryDate;
+
             setProfile((prev) => {
               const updated: UserProfile = {
                 ...prev,
@@ -516,8 +587,13 @@ export function App() {
                 trialEndDate: data.trialEndDate ?? prev.trialEndDate,
                 serverTimestamp: data.serverTimestamp || data.serverNow || prev.serverTimestamp,
                 trialDaysRemaining: data.trialDaysRemaining ?? prev.trialDaysRemaining,
-                isSubscribed: data.isSubscribed ?? prev.isSubscribed,
-                subscriptionExpiryDate: data.subscriptionExpiryDate ?? prev.subscriptionExpiryDate,
+                isSubscribed: isSub || prev.isSubscribed,
+                subscriptionExpiryDate: resolvedExp ?? prev.subscriptionExpiryDate,
+                subscriptionExpiryTime: resolvedExp ?? prev.subscriptionExpiryTime,
+                expiryDate: resolvedExp ?? prev.expiryDate,
+                subscriptionProductId: data.subscriptionProductId ?? prev.subscriptionProductId,
+                subscriptionBasePlan: data.subscriptionBasePlanId ?? data.subscriptionBasePlan ?? prev.subscriptionBasePlan,
+                subscriptionBasePlanId: data.subscriptionBasePlanId ?? prev.subscriptionBasePlanId,
                 autoRenewing: data.autoRenewing ?? prev.autoRenewing,
                 paymentIssueMessage: data.paymentIssueMessage,
               };
@@ -525,6 +601,24 @@ export function App() {
               return updated;
             });
           }
+        }
+
+        // On native device, check if there's an active Google Play purchase to restore
+        if (Capacitor.isNativePlatform()) {
+          checkAndRestoreGooglePlayEntitlement(currentUser.uid)
+            .then((restoredUpdates) => {
+              if (restoredUpdates) {
+                setProfile((prev) => {
+                  const updated: UserProfile = {
+                    ...prev,
+                    ...restoredUpdates,
+                  };
+                  saveStoredProfile(updated);
+                  return updated;
+                });
+              }
+            })
+            .catch((err) => console.warn('[Startup Google Play Check Notice]:', err));
         }
       } catch (err) {
         console.log('Subscription sync offline or fallback to local state:', err);
@@ -564,6 +658,24 @@ export function App() {
     initLocalNotifications((extra) => {
       const targetId = extra.leadId || extra.visitId;
       if (targetId) {
+        // Special developer / QA sample lead handler
+        if (targetId === 'sample-lead') {
+          setIsQuickAddOpen(false);
+          setIsFeatureLockedOpen(false);
+          setDetailLead(SAMPLE_DEMO_LEAD);
+          setCurrentTab('leads');
+          showToast(
+            extra.type === 'visit'
+              ? '🔔 Sample visit notification tap handled! Opened sample lead (Jyothi • Madhurawada). 🎯'
+              : '🔔 Sample notification tap handled! Opened sample lead (Jyothi • 6:00 PM). 🎯'
+          );
+          try {
+            sessionStorage.removeItem('proplead_pending_lead_id');
+          } catch {}
+          setPendingNotificationLeadId(null);
+          return;
+        }
+
         // 1. Try currently loaded in-memory leads
         const currentList = leadsRef.current || [];
         const inMemoryMatch = currentList.find((l) => l.id === targetId);
@@ -671,6 +783,12 @@ export function App() {
   };
 
   const handleUpdateLead = (updatedLead: Lead) => {
+    if (updatedLead.id === 'sample-lead') {
+      setDetailLead(updatedLead);
+      showToast('Sample lead preview updated.');
+      return;
+    }
+
     // Pro access check: If trial is expired and subscription is not active, block follow-up modifications
     if (!hasProAccess(profile)) {
       const existing = leads.find((l) => l.id === updatedLead.id);
@@ -707,6 +825,12 @@ export function App() {
   };
 
   const handleDeleteLead = async (leadId: string): Promise<void> => {
+    if (leadId === 'sample-lead') {
+      setDetailLead(null);
+      showToast('Sample lead closed.');
+      return;
+    }
+
     cancelNotificationsForLead(leadId);
     if (currentUser?.uid) {
       await deleteLeadFromFirestore(currentUser.uid, leadId);
@@ -937,6 +1061,36 @@ export function App() {
     saveStoredProfile(updated);
     if (currentUser?.uid) {
       saveUserProfile(currentUser.uid, updated).catch((e) => console.warn('Firestore update profile error:', e));
+
+      const rawStat = (updates.subscriptionStatus || '').toLowerCase();
+      if (updates.isSubscribed || rawStat === 'active' || rawStat === 'canceled_but_active') {
+        const resolvedExpiry =
+          updates.subscriptionExpiryTime ||
+          updates.subscriptionExpiryDate ||
+          profile.subscriptionExpiryTime ||
+          profile.subscriptionExpiryDate;
+        const resolvedBasePlan =
+          updates.subscriptionBasePlanId ||
+          updates.subscriptionBasePlan ||
+          profile.subscriptionBasePlanId ||
+          profile.subscriptionBasePlan ||
+          'quarterly';
+
+        saveSubscriptionRecordToFirestore(currentUser.uid, {
+          userId: currentUser.uid,
+          subscriptionStatus: rawStat === 'canceled_but_active' ? 'canceled_but_active' : 'active',
+          subscriptionProductId: updates.subscriptionProductId || profile.subscriptionProductId || 'property_agent_pro',
+          subscriptionBasePlanId: resolvedBasePlan,
+          subscriptionBasePlan: resolvedBasePlan,
+          planId: updates.planId || resolvedBasePlan,
+          subscriptionExpiryDate: resolvedExpiry,
+          subscriptionExpiryTime: resolvedExpiry,
+          expiryDate: resolvedExpiry,
+          autoRenewing: updates.autoRenewing !== undefined ? updates.autoRenewing : (profile.autoRenewing ?? true),
+          purchaseToken: updates.purchaseToken || profile.purchaseToken,
+          lastVerifiedAt: updates.lastVerifiedAt || new Date().toISOString(),
+        }).catch((e) => console.warn('Firestore update subscription record error:', e));
+      }
     }
   };
 
@@ -1329,6 +1483,48 @@ export function App() {
         existingLeads={leads}
         onImportLeads={handleImportBulkLeads}
       />
+
+      {/* Developer Sample Notification Interactive Heads-Up Banner (AI Studio / Web Preview) */}
+      {sampleNotificationBanner && (
+        <div className="fixed top-3 left-3 right-3 max-w-sm mx-auto z-[9999] bg-slate-900 text-white rounded-2xl shadow-2xl border border-emerald-500/50 p-3 flex items-center justify-between gap-2.5 animate-in slide-in-from-top-4 duration-200">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <BellRing className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400">
+                Sample Notification Fired
+              </div>
+              <div className="text-xs font-bold truncate text-white">
+                {sampleNotificationBanner.title}
+              </div>
+              <div className="text-[11px] text-slate-300 truncate">
+                {sampleNotificationBanner.body}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                const extra = sampleNotificationBanner.extra;
+                setSampleNotificationBanner(null);
+                triggerNotificationAction(extra);
+              }}
+              className="px-2.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer whitespace-nowrap"
+            >
+              Tap to Open
+            </button>
+            <button
+              type="button"
+              onClick={() => setSampleNotificationBanner(null)}
+              className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
     </MobileFrame>
   );
 }
