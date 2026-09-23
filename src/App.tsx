@@ -413,8 +413,22 @@ export function App() {
     let unsubSubscription: (() => void) | null = null;
     let unsubLeads: (() => void) | null = null;
     let unsubProps: (() => void) | null = null;
+    let authGeneration = 0;
+
+    const stopUserListeners = () => {
+      if (unsubProfile) unsubProfile();
+      if (unsubSubscription) unsubSubscription();
+      if (unsubLeads) unsubLeads();
+      if (unsubProps) unsubProps();
+      unsubProfile = null;
+      unsubSubscription = null;
+      unsubLeads = null;
+      unsubProps = null;
+    };
 
     const unsubAuth = subscribeToAuth(async (user) => {
+      const generation = ++authGeneration;
+      stopUserListeners();
       setCurrentUser(user);
       setIsAuthResolved(true);
 
@@ -425,6 +439,7 @@ export function App() {
         setIsCloudSynced(true);
         // Safely migrate/initialize user data in Firestore with user phone
         const syncRes = await syncLocalDataToFirestore(user.uid, user.email, user.displayName, user.phoneNumber);
+        if (generation !== authGeneration || getCurrentUser()?.uid !== user.uid) return;
 
         // Detect if this account was just created brand-new for onboarding
         if (syncRes.isNewUser) {
@@ -436,6 +451,7 @@ export function App() {
 
         // Subscribe to real-time user profile in Firestore
         unsubProfile = subscribeUserProfile(user.uid, (firestoreProfile) => {
+          if (generation !== authGeneration) return;
           if (firestoreProfile) {
             setProfile((prev) => {
               let effectiveTrialEndDate = firestoreProfile.trialEndDate || prev.trialEndDate;
@@ -474,6 +490,7 @@ export function App() {
 
         // Subscribe to real-time subscription entitlement record in Firestore (/subscriptions/{userId})
         unsubSubscription = subscribeSubscriptionRecordFromFirestore(user.uid, (subRecord) => {
+          if (generation !== authGeneration) return;
           if (subRecord) {
             const rawSubStatus = (subRecord.subscriptionStatus || '').toLowerCase();
             const subExpiry = subRecord.subscriptionExpiryTime || subRecord.subscriptionExpiryDate || subRecord.expiryDate;
@@ -531,6 +548,7 @@ export function App() {
 
         // Subscribe to real-time leads in Firestore
         unsubLeads = subscribeLeadsFromFirestore(user.uid, (firestoreLeads) => {
+          if (generation !== authGeneration) return;
           if (firestoreLeads) {
             setLeads(firestoreLeads);
             saveStoredLeads(firestoreLeads);
@@ -539,6 +557,7 @@ export function App() {
 
         // Subscribe to real-time properties in Firestore
         unsubProps = subscribePropertiesFromFirestore(user.uid, (firestoreProps) => {
+          if (generation !== authGeneration) return;
           if (firestoreProps) {
             setProperties(firestoreProps);
             saveStoredProperties(firestoreProps);
@@ -554,11 +573,9 @@ export function App() {
     });
 
     return () => {
+      authGeneration++;
       unsubAuth();
-      if (unsubProfile) unsubProfile();
-      if (unsubSubscription) unsubSubscription();
-      if (unsubLeads) unsubLeads();
-      if (unsubProps) unsubProps();
+      stopUserListeners();
     };
   }, []);
 
@@ -1309,15 +1326,35 @@ export function App() {
                 onGoogleSignIn={handleGoogleSignIn}
                 onSignOut={handleSignOut}
                 onAccountDeleted={() => {
+                  // Reset every user-scoped in-memory value before exposing the
+                  // unauthenticated UI. The auth listener independently stops
+                  // all Firestore listeners when Firebase sign-out completes.
                   setLeads([]);
                   setProperties([]);
-                  setTemplates(getStoredTemplates());
+                  setTemplates([]);
                   setProfile(INITIAL_USER_PROFILE);
                   setCurrentUser(null);
+                  setIsAuthResolved(true);
                   setIsCloudSynced(false);
                   setCurrentTab('home');
                   setTabHistory(['home']);
-                  showToast('Account and all associated data have been permanently deleted.');
+                  setLeadsFilter('all');
+                  setSearchQuery('');
+                  setPropertySearchQuery('');
+                  setDashboardSearchQuery('');
+                  setIsQuickAddOpen(false);
+                  setDetailLead(null);
+                  setWhatsAppLead(null);
+                  setScheduleLead(null);
+                  setEditLead(null);
+                  setIsSubscriptionOpen(false);
+                  setIsImportContactsOpen(false);
+                  setIsFeatureLockedOpen(false);
+                  setIsWelcomeOnboardingOpen(false);
+                  setIsAddPropertyOpen(false);
+                  setDetailProperty(null);
+                  setEditProperty(null);
+                  setSharePropertyData(null);
                 }}
                 onUpdateProfile={(p) => {
                   setProfile(p);
