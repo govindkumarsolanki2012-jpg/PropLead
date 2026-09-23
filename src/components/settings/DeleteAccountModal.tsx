@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   AlertTriangle,
   X,
@@ -11,12 +11,16 @@ import {
 import { auth } from '../../lib/firebase';
 import { openGooglePlayManageSubscriptions, getBillingApiUrl } from '../../utils/billing';
 import { deleteAllUserStorageFiles } from '../../utils/attachmentStorage';
+import { clearUserScopedStorage } from '../../utils/storage';
+import { cancelAllUserNotifications } from '../../utils/notifications';
+import { Lead } from '../../types';
 
 interface DeleteAccountModalProps {
   isOpen: boolean;
   onClose: () => void;
   onAccountDeleted: () => void;
   currentUserEmail?: string | null;
+  leads?: Lead[];
 }
 
 export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
@@ -24,14 +28,38 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
   onClose,
   onAccountDeleted,
   currentUserEmail,
+  leads = [],
 }) => {
   const [confirmText, setConfirmText] = useState<string>('');
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [deletionResult, setDeletionResult] = useState<'confirm' | 'success' | 'partial'>('confirm');
+  const finalizingRef = useRef<boolean>(false);
 
   if (!isOpen) return null;
 
   const isConfirmed = confirmText.trim().toUpperCase() === 'DELETE';
+
+  const finishAndReturnToSignIn = async () => {
+    if (finalizingRef.current) return;
+    finalizingRef.current = true;
+
+    try {
+      // The backend deletes the Firebase Auth user before returning success.
+      // Explicitly end the local Firebase session so no stale authenticated
+      // dashboard can remain visible with a now-deleted account.
+      await auth.signOut();
+      onAccountDeleted();
+    } catch (signOutErr) {
+      console.error('[Account Deletion] Local Firebase sign-out failed:', signOutErr);
+      setDeletionResult('partial');
+      finalizingRef.current = false;
+
+      // Never leave the deleted account inside the dashboard, even if the
+      // local Firebase SDK could not complete sign-out cleanly.
+      window.setTimeout(onAccountDeleted, 2000);
+    }
+  };
 
   const handleDelete = async () => {
     if (!isConfirmed || isDeleting) return;
@@ -46,11 +74,11 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
       return;
     }
 
-    try {
-      // 1. Obtain current valid Firebase ID token
-      const idToken = await currentUser.getIdToken(true);
+    const deletedUserId = currentUser.uid;
 
-      // 2. Call backend secure account deletion endpoint
+    try {
+      // Obtain a fresh Firebase ID token for the authenticated backend request.
+      const idToken = await currentUser.getIdToken(true);
       const deleteApiUrl = getBillingApiUrl('/api/account/delete');
       const res = await fetch(deleteApiUrl, {
         method: 'POST',
@@ -59,39 +87,35 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
           Authorization: `Bearer ${idToken}`,
         },
         body: JSON.stringify({
-          userId: currentUser.uid,
+          userId: deletedUserId,
           email: currentUser.email,
         }),
       });
 
       const data = await res.json().catch(() => null);
-
       if (!res.ok || (data && data.success === false)) {
         throw new Error(data?.error || data?.message || 'Server failed to delete user data.');
       }
 
-      // 3. Delete user storage files if any remain
-      try {
-        await deleteAllUserStorageFiles(currentUser.uid);
-      } catch (storageErr) {
-        console.warn('[Account Deletion] Storage cleanup warning:', storageErr);
-      }
+      // The backend has now deleted Firestore data, Storage objects where
+      // configured, and the Firebase Auth account. Complete device cleanup.
+      await Promise.allSettled([
+        deleteAllUserStorageFiles(deletedUserId),
+        cancelAllUserNotifications(leads),
+      ]);
 
-      // 4. Delete Firebase Auth User account
+      clearUserScopedStorage(deletedUserId);
       try {
-        await currentUser.delete();
-      } catch (authErr: any) {
-        console.warn('[Account Deletion] Firebase Auth delete requires recent login or succeeded on server:', authErr);
-        // If auth/requires-recent-login, sign out locally
-        await auth.signOut().catch(() => {});
-      }
-
-      // 5. Clear all local storage caches
-      try {
-        localStorage.clear();
+        sessionStorage.removeItem('proplead_pending_lead_id');
       } catch {}
 
-      onAccountDeleted();
+      setIsDeleting(false);
+      setDeletionResult('success');
+
+      // Give the user a brief confirmation before returning to sign-in.
+      window.setTimeout(() => {
+        void finishAndReturnToSignIn();
+      }, 1600);
     } catch (err: any) {
       console.error('[Account Deletion Error]', err);
       setErrorMessage(
@@ -100,6 +124,40 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
       setIsDeleting(false);
     }
   };
+
+  if (deletionResult !== 'confirm') {
+    const isPartial = deletionResult === 'partial';
+    return (
+      <div className="fixed inset-0 z-50 flex min-h-[100dvh] items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-xs">
+        <div className="w-full max-w-md rounded-2xl border border-emerald-200 bg-white p-6 text-center shadow-2xl dark:border-emerald-900/60 dark:bg-slate-900">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400">
+            <CheckCircle2 className="h-8 w-8" />
+          </div>
+          <h2 className="text-xl font-extrabold text-slate-900 dark:text-white">
+            Account deleted
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+            Your PropLead account and saved data have been deleted.
+          </p>
+          {isPartial && (
+            <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              Your PropLead data was deleted, but we could not fully remove the sign-in account. Please sign in again to finish account deletion.
+            </p>
+          )}
+          <p className="mt-3 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+            If you had an active Google Play subscription, manage or cancel it separately in Google Play.
+          </p>
+          <button
+            type="button"
+            onClick={() => void finishAndReturnToSignIn()}
+            className="mt-5 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-emerald-700"
+          >
+            Back to Sign In
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
