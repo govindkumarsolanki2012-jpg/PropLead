@@ -650,7 +650,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           onAccountDeleted?.();
         }}
         currentUserEmail={currentUserEmail}
-        isSubscribed={profile?.isSubscribed}
         leads={leads}
       />
     </div>
