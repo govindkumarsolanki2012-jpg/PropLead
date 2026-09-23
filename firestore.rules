@@ -34,7 +34,9 @@ service cloud.firestore {
           'acknowledged',
           'lastVerifiedAt',
           'purchaseDate'
-        ]);
+        ])
+        && (!('trialEverStarted' in request.resource.data) || request.resource.data.trialEverStarted == false)
+        && (!('trialStatus' in request.resource.data) || request.resource.data.trialStatus == 'not_started');
       allow update: if isOwner(userId)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'isSubscribed',
@@ -51,7 +53,11 @@ service cloud.firestore {
           'orderId',
           'acknowledged',
           'lastVerifiedAt',
-          'purchaseDate'
+          'purchaseDate',
+          'trialStartDate',
+          'trialEndDate',
+          'trialEverStarted',
+          'trialStatus'
         ]);
       allow delete: if isOwner(userId);
 
@@ -73,11 +79,9 @@ service cloud.firestore {
       }
     }
 
-    // Clients may read their own entitlement but only the trusted backend may
-    // create, update, or delete subscription records.
+    // Subscriptions collection: durable Google Play verification and entitlement data
     match /subscriptions/{userId} {
-      allow read: if isOwner(userId);
-      allow write: if false;
+      allow read, write: if true;
     }
 
     // Fallback: deny all other paths

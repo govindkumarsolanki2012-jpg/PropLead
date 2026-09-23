@@ -128,6 +128,7 @@ export interface Lead {
 }
 
 export type SubscriptionStatus =
+  | 'NOT_STARTED'
   | 'TRIAL'
   | 'ACTIVE'
   | 'CANCELED_BUT_ACTIVE'
@@ -197,8 +198,10 @@ export interface UserProfile {
   reraNumber?: string;
   subscriptionStatus?: SubscriptionStatus | 'trial' | 'subscribed' | 'expired'; // Full support for legacy and new state
   isTrialActive: boolean;
-  trialStartDate: string;
-  trialEndDate?: string;
+  trialStatus?: 'not_started' | 'active' | 'expired';
+  trialEverStarted?: boolean;
+  trialStartDate?: string | null;
+  trialEndDate?: string | null;
   serverTimestamp?: string;
   trialDaysRemaining: number;
   isSubscribed: boolean;
@@ -220,6 +223,8 @@ export interface UserProfile {
   darkMode?: boolean;
   notificationsEnabled: boolean;
   notificationSettings?: NotificationSettings;
+  createdAt?: string;
+  onboardingCompleted?: boolean;
   hasCompletedOnboarding?: boolean;
   isOnboarded?: boolean;
 }

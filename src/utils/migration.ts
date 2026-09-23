@@ -5,6 +5,7 @@ import { getStoredLeads, getStoredProperties, getStoredProfile } from './storage
 
 export interface MigrationResult {
   migrated: boolean;
+  isNewUser?: boolean;
   leadsUploaded: number;
   propertiesUploaded: number;
   error?: string;
@@ -18,10 +19,25 @@ const DEMO_PROP_IDS = new Set([
 ]);
 
 function cleanFirestorePayload<T extends Record<string, any>>(obj: T): Record<string, any> {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
   const result: Record<string, any> = {};
   for (const [key, value] of Object.entries(obj)) {
     if (value !== undefined) {
-      result[key] = value;
+      if (Array.isArray(value)) {
+        result[key] = value
+          .filter((item) => item !== undefined)
+          .map((item) =>
+            item !== null && typeof item === 'object' && !(item instanceof Date)
+              ? cleanFirestorePayload(item)
+              : item
+          );
+      } else if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
+        result[key] = cleanFirestorePayload(value);
+      } else {
+        result[key] = value;
+      }
     }
   }
   return result;
@@ -58,6 +74,7 @@ export async function syncLocalDataToFirestore(
     // 1. Check if user profile already exists in Firestore
     const userDocRef = doc(db, 'users', userId);
     const userSnap = await getDoc(userDocRef);
+    const isGenuinelyNewUser = !userSnap.exists();
 
     // 2. Check if Firestore already has leads for this user
     const leadsColl = collection(db, 'users', userId, 'leads');
@@ -95,31 +112,39 @@ export async function syncLocalDataToFirestore(
     }
 
     // A. Migrate/Initialize Profile ONLY if not already in Firestore
-    if (!userSnap.exists()) {
+    if (isGenuinelyNewUser) {
       const isDemoName = localProfile.name === 'Rajesh Sharma' || localProfile.name === 'Vikram Malhotra';
       const isDemoPhone = localProfile.phone === '9820123456';
       const cleanName = userName || (!isDemoName ? localProfile.name : '') || (userEmail ? userEmail.split('@')[0] : 'Property Agent');
       const cleanPhone = userPhone || (!isDemoPhone ? localProfile.phone : '') || '';
 
-      const now = new Date();
-      const trialStartDate = now.toISOString();
-      const trialEndDate = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
-
-      const mergedProfile: Partial<UserProfile> = {
-        ...localProfile,
+      // Bug 1 Fix: Client-side new-user provisioning must NOT write protected entitlement fields
+      // that Firestore security rules reject (isSubscribed, subscriptionStatus, etc.).
+      // Only write safe profile attributes and allowed initial trial markers (trialStatus: 'not_started', trialEverStarted: false).
+      const safeProfile: Record<string, any> = {
         id: userId,
         name: cleanName,
         phone: cleanPhone,
         email: userEmail || localProfile.email || '',
+        agencyName: localProfile.agencyName || '',
+        city: localProfile.city || '',
+        reraNumber: localProfile.reraNumber || '',
+        language: localProfile.language || 'en',
+        darkMode: Boolean(localProfile.darkMode),
+        notificationsEnabled: localProfile.notificationsEnabled ?? true,
         isOnboarded: true,
-        isTrialActive: true,
-        trialStartDate,
-        trialEndDate,
-        subscriptionStatus: 'TRIAL',
-        isSubscribed: false,
+        onboardingCompleted: false,
+        hasCompletedOnboarding: false,
+        trialStatus: 'not_started',
+        trialEverStarted: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
-      batch.set(userDocRef, cleanFirestorePayload(mergedProfile), { merge: true });
+      batch.set(userDocRef, cleanFirestorePayload(safeProfile), { merge: true });
       batchOperations++;
+    } else {
+      // Safe preservation for existing users: NEVER reset or overwrite existing trial dates or subscription fields from client.
+      // Entitlements and trial status are strictly managed by trusted backend logic.
     }
 
     // B. Migrate Leads (only real user-created leads, never demo data)
@@ -154,6 +179,7 @@ export async function syncLocalDataToFirestore(
 
     return {
       migrated: true,
+      isNewUser: isGenuinelyNewUser,
       leadsUploaded: leadsToUpload,
       propertiesUploaded: propsToUpload,
     };

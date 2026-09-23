@@ -43,8 +43,42 @@ export const TrialBanner: React.FC<TrialBannerProps> = ({ profile, onOpenSubscri
     );
   }
 
-  // 3. TRIAL EXPIRED (View-Only Mode)
-  if (status === 'EXPIRED' || daysRemaining <= 0) {
+  // 3. TRIAL NOT STARTED
+  if (status === 'NOT_STARTED') {
+    return (
+      <div
+        id="dashboard-trial-not-started-banner"
+        onClick={onOpenSubscription}
+        className="mx-4 mt-3 p-2.5 rounded-xl border bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/60 flex items-center justify-between cursor-pointer transition-all hover:shadow-xs"
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-6 h-6 rounded-md bg-emerald-600 text-white flex items-center justify-center flex-shrink-0">
+            <Sparkles className="w-3.5 h-3.5" />
+          </div>
+          <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
+            <span className="font-bold text-emerald-800 dark:text-emerald-300">Free Trial Available</span>
+            <span className="mx-1.5 opacity-40">•</span>
+            <span className="text-slate-600 dark:text-slate-300 font-medium">7 Days of Pro Features</span>
+          </div>
+        </div>
+        <button
+          type="button"
+          id="dashboard-trial-start-cta"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenSubscription();
+          }}
+          className="flex items-center gap-1 text-xs font-bold text-emerald-700 dark:text-emerald-300 hover:text-emerald-800 dark:hover:text-emerald-200 flex-shrink-0 pl-2 cursor-pointer"
+        >
+          <span>Start Trial</span>
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  // 4. TRIAL EXPIRED (View-Only Mode)
+  if (status === 'EXPIRED' || (status === 'TRIAL' && daysRemaining <= 0)) {
     return (
       <div
         id="dashboard-trial-expired-banner"
@@ -75,7 +109,7 @@ export const TrialBanner: React.FC<TrialBannerProps> = ({ profile, onOpenSubscri
     );
   }
 
-  // 4. ACTIVE FREE TRIAL (Dynamic days remaining)
+  // 5. ACTIVE FREE TRIAL (Dynamic days remaining)
   const isUrgent = daysRemaining <= 2;
   const isWarning = daysRemaining <= 4 && !isUrgent;
 

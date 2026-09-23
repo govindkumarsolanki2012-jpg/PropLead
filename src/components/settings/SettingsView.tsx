@@ -47,7 +47,6 @@ import {
 } from '../../utils/notifications';
 import { useLanguage } from '../../context/LanguageContext';
 import { NotificationSettingsPage } from './NotificationSettingsPage';
-import { DeveloperNotificationTester } from './DeveloperNotificationTester';
 import { PrivacyPolicyModal } from './PrivacyPolicyModal';
 import { DeleteAccountModal } from './DeleteAccountModal';
 
@@ -489,9 +488,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       </div>
 
-      {/* Developer Testing Section for AI Studio QA */}
-      <DeveloperNotificationTester />
-
       {/* Firebase Cloud Sync & Security */}
       <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3 shadow-2xs">
         <div className="flex items-center justify-between">
@@ -654,6 +650,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           onAccountDeleted?.();
         }}
         currentUserEmail={currentUserEmail}
+        isSubscribed={profile?.isSubscribed}
+        leads={leads}
       />
     </div>
   );

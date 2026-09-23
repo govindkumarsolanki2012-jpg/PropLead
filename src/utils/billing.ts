@@ -215,6 +215,29 @@ export function calculateTrialDaysRemaining(
 }
 
 /**
+ * Formats server trialEndDate into a human-readable string in user's local timezone.
+ * Example: "Ends on 30 September 2026 at 4:15 PM"
+ */
+export function formatTrialEndDateTime(isoString?: string | null): string {
+  if (!isoString) return '';
+  try {
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return '';
+    const day = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return `Ends on ${day} at ${time}`;
+  } catch {
+    return '';
+  }
+}
+
+export function maskToken(token?: string | null): string {
+  if (!token) return 'NONE';
+  if (token.length <= 8) return '***';
+  return `...${token.slice(-6)}`;
+}
+
+/**
  * Normalized resolution of the current subscription status and feature entitlement
  */
 export function getEffectiveSubscriptionStatus(
@@ -222,6 +245,8 @@ export function getEffectiveSubscriptionStatus(
   customServerNow?: number | string | Date
 ): {
   status: SubscriptionStatus;
+  trialStatus: 'not_started' | 'active' | 'expired';
+  trialEverStarted: boolean;
   daysRemaining: number;
   isSubscribed: boolean;
   isLocked: boolean;
@@ -230,58 +255,36 @@ export function getEffectiveSubscriptionStatus(
   isTrialEndDateMissingOrInvalid: boolean;
 } {
   // Normalize legacy string flags if present
-  let rawStatus = profile.subscriptionStatus;
+  let rawStatus: SubscriptionStatus | string | undefined = profile.subscriptionStatus;
   if (typeof rawStatus === 'string') {
     const upper = rawStatus.toUpperCase();
     if (upper === 'ACTIVE' || upper === 'SUBSCRIBED') rawStatus = 'ACTIVE';
     else if (upper === 'EXPIRED') rawStatus = 'EXPIRED';
     else if (upper === 'TRIAL') rawStatus = 'TRIAL';
+    else if (upper === 'NOT_STARTED') rawStatus = 'NOT_STARTED';
+    else if (upper === 'PAYMENT_ISSUE') rawStatus = 'PAYMENT_ISSUE';
+    else if (upper === 'CANCELED_BUT_ACTIVE') rawStatus = 'CANCELED_BUT_ACTIVE';
   }
-
-  // Server authoritative status takes precedence
-  let status: SubscriptionStatus = (rawStatus as SubscriptionStatus) || (profile.isSubscribed ? 'ACTIVE' : 'TRIAL');
 
   const serverNow = customServerNow ?? getAuthoritativeServerNow();
 
-  // Validate trialEndDate presence and integrity
-  const hasValidTrialEndDate = Boolean(
-    profile.trialEndDate && !isNaN(new Date(profile.trialEndDate).getTime())
-  );
-  const isTrialEndDateMissingOrInvalid = !hasValidTrialEndDate && (status === 'TRIAL' || status === 'EXPIRED');
+  // 1. Paid Subscription status takes precedence
+  let isSubscribed = Boolean(profile.isSubscribed);
+  let status: SubscriptionStatus = (rawStatus as SubscriptionStatus) || (isSubscribed ? 'ACTIVE' : 'NOT_STARTED');
 
-  if (isTrialEndDateMissingOrInvalid && !profile.isSubscribed) {
-    console.warn('[Trial Countdown Debug] User profile has missing or invalid authoritative trialEndDate:', {
-      userId: profile.id,
-      trialEndDate: profile.trialEndDate,
-      trialStartDate: profile.trialStartDate,
-      subscriptionStatus: profile.subscriptionStatus,
-    });
-  }
-
-  let days = calculateTrialDaysRemaining(profile.trialStartDate, profile.trialEndDate, serverNow);
-
-  // If server has authoritatively set status to EXPIRED or trialEndDate is missing/invalid, days remaining is strictly 0
-  if (status === 'EXPIRED' || (!hasValidTrialEndDate && status === 'TRIAL')) {
-    days = 0;
-  }
-
-  // Check trial expiration: if trial days reached 0, transition to EXPIRED
-  if (status === 'TRIAL' && (days <= 0 || !hasValidTrialEndDate)) {
-    status = 'EXPIRED';
-  }
-
-  // Check subscription expiration - A paid subscription must only be treated as unexpired when a valid expiry timestamp exists and is in the future
   let expiryFormatted: string | undefined;
   const resolvedExpiryDate = profile.subscriptionExpiryTime || profile.subscriptionExpiryDate;
   if (status === 'CANCELED_BUT_ACTIVE' || status === 'ACTIVE') {
     if (!resolvedExpiryDate) {
       status = 'EXPIRED';
+      isSubscribed = false;
     } else {
       try {
         const expDate = new Date(resolvedExpiryDate);
         const expTimeMs = expDate.getTime();
         if (isNaN(expTimeMs)) {
           status = 'EXPIRED';
+          isSubscribed = false;
         } else {
           expiryFormatted = expDate.toLocaleDateString('en-IN', {
             day: 'numeric',
@@ -290,13 +293,54 @@ export function getEffectiveSubscriptionStatus(
           });
           const refNow = serverNow ?? getAuthoritativeServerNow();
           const refNowMs = typeof refNow === 'number' ? refNow : new Date(refNow).getTime();
-          // autoRenewing/autoRenewEnabled must NOT by itself grant Pro beyond the last verified expiryTime
           if (refNowMs > expTimeMs) {
             status = 'EXPIRED';
+            isSubscribed = false;
+          } else {
+            isSubscribed = true;
           }
         }
       } catch {
         status = 'EXPIRED';
+        isSubscribed = false;
+      }
+    }
+  } else if (status === 'PAYMENT_ISSUE') {
+    // Bugs 5 & 6: PAYMENT_ISSUE Access Policy
+    // If PAYMENT_ISSUE has a verified future expiry:
+    // - keep Pro access during the grace period (isSubscribed = true)
+    // - status remains PAYMENT_ISSUE
+    // If expiry has passed:
+    // - remove Pro access (isSubscribed = false, status = 'EXPIRED')
+    if (!resolvedExpiryDate) {
+      status = 'EXPIRED';
+      isSubscribed = false;
+    } else {
+      try {
+        const expDate = new Date(resolvedExpiryDate);
+        const expTimeMs = expDate.getTime();
+        if (isNaN(expTimeMs)) {
+          status = 'EXPIRED';
+          isSubscribed = false;
+        } else {
+          expiryFormatted = expDate.toLocaleDateString('en-IN', {
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+          });
+          const refNow = serverNow ?? getAuthoritativeServerNow();
+          const refNowMs = typeof refNow === 'number' ? refNow : new Date(refNow).getTime();
+          if (refNowMs > expTimeMs) {
+            status = 'EXPIRED';
+            isSubscribed = false;
+          } else {
+            status = 'PAYMENT_ISSUE';
+            isSubscribed = true;
+          }
+        }
+      } catch {
+        status = 'EXPIRED';
+        isSubscribed = false;
       }
     }
   } else if (resolvedExpiryDate) {
@@ -312,11 +356,52 @@ export function getEffectiveSubscriptionStatus(
     } catch {}
   }
 
-  const isSubscribed = status === 'ACTIVE' || status === 'CANCELED_BUT_ACTIVE';
+  // 2. Evaluate Trial Status
+  const trialEverStarted = Boolean(
+    profile.trialEverStarted ||
+    (profile.trialStartDate && profile.trialStartDate !== 'null') ||
+    (profile.trialEndDate && profile.trialEndDate !== 'null') ||
+    rawStatus === 'TRIAL' ||
+    rawStatus === 'EXPIRED'
+  );
+
+  let trialStatus: 'not_started' | 'active' | 'expired' = 'not_started';
+  let days = 0;
+  let isTrialEndDateMissingOrInvalid = false;
+
+  // Bug 12: Paid subscription overrides trial state. If paid subscription is active, Pro comes from paid subscription.
+  if (isSubscribed && (status === 'ACTIVE' || status === 'CANCELED_BUT_ACTIVE' || status === 'PAYMENT_ISSUE')) {
+    trialStatus = trialEverStarted ? 'expired' : 'not_started';
+  } else if (!trialEverStarted && (profile.trialStatus === 'not_started' || !profile.trialStatus)) {
+    trialStatus = 'not_started';
+    status = 'NOT_STARTED';
+    days = 0;
+  } else {
+    // Trial was started or active or expired
+    const hasValidTrialEndDate = Boolean(
+      profile.trialEndDate && !isNaN(new Date(profile.trialEndDate).getTime())
+    );
+    isTrialEndDateMissingOrInvalid = !hasValidTrialEndDate;
+
+    days = calculateTrialDaysRemaining(profile.trialStartDate, profile.trialEndDate, serverNow);
+
+    if (days > 0 && hasValidTrialEndDate && profile.trialStatus !== 'expired') {
+      trialStatus = 'active';
+      status = 'TRIAL';
+    } else {
+      trialStatus = 'expired';
+      status = 'EXPIRED';
+      days = 0;
+    }
+  }
+
   const isLocked = status === 'EXPIRED';
 
   let displayStatusText = '';
   switch (status) {
+    case 'NOT_STARTED':
+      displayStatusText = 'Free Trial Available';
+      break;
     case 'TRIAL':
       displayStatusText = `Free Trial • ${days} ${days === 1 ? 'day' : 'days'} remaining`;
       break;
@@ -327,15 +412,19 @@ export function getEffectiveSubscriptionStatus(
       displayStatusText = `Pro • Active until ${expiryFormatted || 'end of period'}`;
       break;
     case 'PAYMENT_ISSUE':
-      displayStatusText = 'Payment Issue • Action Required';
+      displayStatusText = isSubscribed
+        ? `Payment Issue • Grace Period until ${expiryFormatted || 'end of period'}`
+        : 'Payment Issue • Action Required';
       break;
     case 'EXPIRED':
-      displayStatusText = isTrialEndDateMissingOrInvalid ? 'Trial Unverified' : 'Trial Expired';
+      displayStatusText = 'Trial Expired';
       break;
   }
 
   return {
     status,
+    trialStatus,
+    trialEverStarted,
     daysRemaining: days,
     isSubscribed,
     isLocked,
@@ -350,14 +439,15 @@ export function getEffectiveSubscriptionStatus(
  * Access is allowed ONLY when:
  *   trialActive === true (trial status with valid trial days remaining and not locked)
  *   OR
- *   subscriptionActive === true (active or canceled-but-active subscription)
+ *   subscriptionActive === true (active, canceled-but-active, or payment-issue with future expiry)
  * Expired users without an active subscription return false.
  */
 export function hasProAccess(profile?: UserProfile | null): boolean {
   if (!profile) return false;
   const { status, daysRemaining, isSubscribed, isLocked } = getEffectiveSubscriptionStatus(profile);
   const trialActive = status === 'TRIAL' && daysRemaining > 0 && !isLocked;
-  const subscriptionActive = isSubscribed && (status === 'ACTIVE' || status === 'CANCELED_BUT_ACTIVE');
+  // Bug 6: PAYMENT_ISSUE with future verified expiry maintains Pro access during grace period
+  const subscriptionActive = isSubscribed && (status === 'ACTIVE' || status === 'CANCELED_BUT_ACTIVE' || status === 'PAYMENT_ISSUE');
   return trialActive || subscriptionActive;
 }
 
@@ -571,7 +661,10 @@ export async function launchGooglePlayPurchase(
       };
     }
 
-    // 2. Fetch available offer token and ensure product exists in Google Play catalog
+    // 2. Fetch available offer token strictly matching basePlanId ('monthly' | 'quarterly')
+    // Bug 4 Fix: monthly -> use only the offer token whose planIdentifier/basePlanId is monthly
+    // quarterly -> use only the offer token whose planIdentifier/basePlanId is quarterly
+    // Do NOT fall back to another base plan or to products[0].
     let offerToken: string | undefined;
     try {
       const prodsRes = await NativePurchases.getProducts({
@@ -579,16 +672,40 @@ export async function launchGooglePlayPurchase(
         productType: PURCHASE_TYPE.SUBS,
       });
 
-      const matching =
-        prodsRes.products?.find(
-          (p) => p.identifier === GOOGLE_PLAY_PRODUCT_ID || (p as any).planIdentifier === basePlanId
-        ) || prodsRes.products?.[0];
-      if (matching && (matching as any).offerToken) {
-        offerToken = (matching as any).offerToken;
+      const allProducts = prodsRes.products || [];
+      console.log(`[Google Play Billing] Querying products for base plan "${basePlanId}". Found ${allProducts.length} product(s).`);
+
+      for (const p of allProducts) {
+        const prod = p as any;
+        if (prod.planIdentifier === basePlanId || prod.basePlanId === basePlanId) {
+          if (prod.offerToken) {
+            offerToken = prod.offerToken;
+            break;
+          }
+        }
+        if (Array.isArray(prod.subscriptionOfferDetails)) {
+          const matchOffer = prod.subscriptionOfferDetails.find((o: any) => o.basePlanId === basePlanId);
+          if (matchOffer?.offerToken) {
+            offerToken = matchOffer.offerToken;
+            break;
+          }
+        }
       }
     } catch (queryErr: any) {
       console.warn('[Google Play Billing] Product pre-query notice:', queryErr);
     }
+
+    // Bug 4: If no matching offer token exists for the requested base plan, stop purchase and show a clear error
+    if (!offerToken) {
+      console.error(`[Google Play Billing] No matching offer token found for base plan "${basePlanId}". Stopping purchase.`);
+      return {
+        success: false,
+        error: `OFFER_TOKEN_NOT_FOUND: No Google Play offer found for base plan ${basePlanId}`,
+        message: `Unable to find the Google Play offer for the ${selectedPlan.name}. Please ensure your Play Store app is updated and try again.`,
+      };
+    }
+
+    console.log(`[Google Play Billing] Selected offer token for base plan "${basePlanId}". Token present: YES`);
 
     // 3. Initiate native Google Play purchase flow with specific basePlanId
     onProgress?.(`Opening Google Play checkout (${selectedPlan.name})...`);
@@ -918,12 +1035,22 @@ export async function restoreGooglePlayPurchases(
     }
 
     const rawStatus = (data.subscriptionStatus || '').toUpperCase();
-    const isStatusActive = rawStatus === 'ACTIVE' || rawStatus === 'CANCELED_BUT_ACTIVE' || String(data.subscriptionStatus).toLowerCase() === 'active';
+    const resolvedExpiry = data.subscriptionExpiryTime || data.subscriptionExpiryDate;
+    const isFutureExpiry = resolvedExpiry ? new Date(resolvedExpiry).getTime() > Date.now() : false;
+
+    // Bug 10: Support ACTIVE, CANCELED_BUT_ACTIVE, and PAYMENT_ISSUE with future expiry
+    const isStatusActive =
+      rawStatus === 'ACTIVE' ||
+      rawStatus === 'CANCELED_BUT_ACTIVE' ||
+      (rawStatus === 'PAYMENT_ISSUE' && isFutureExpiry);
 
     if (data.restored && isStatusActive) {
-      const resolvedExpiry = data.subscriptionExpiryTime || data.subscriptionExpiryDate;
-      const effectiveBasePlan = data.subscriptionBasePlanId || data.subscriptionBasePlan || data.planId || 'quarterly';
-      const effectiveStatus = rawStatus === 'CANCELED_BUT_ACTIVE' ? 'CANCELED_BUT_ACTIVE' : 'ACTIVE';
+      // Bug 10: Do NOT default to quarterly if base plan is unknown
+      const effectiveBasePlan = data.subscriptionBasePlanId || data.subscriptionBasePlan || data.planId || data.basePlanId;
+      const effectiveStatus: SubscriptionStatus =
+        rawStatus === 'CANCELED_BUT_ACTIVE'
+          ? 'CANCELED_BUT_ACTIVE'
+          : (rawStatus === 'PAYMENT_ISSUE' ? 'PAYMENT_ISSUE' : 'ACTIVE');
 
       const profileUpdates: Partial<UserProfile> = {
         subscriptionStatus: effectiveStatus,
@@ -941,13 +1068,15 @@ export async function restoreGooglePlayPurchases(
         lastVerifiedAt: data.lastVerifiedAt || new Date().toISOString(),
         autoRenewing: data.autoRenewing !== undefined ? data.autoRenewing : true,
         purchaseToken: data.purchaseToken || purchaseToken,
-        paymentIssueMessage: undefined,
+        paymentIssueMessage: effectiveStatus === 'PAYMENT_ISSUE' ? data.paymentIssueMessage || 'Payment issue with Google Play subscription. Please update your payment method.' : undefined,
       };
 
       return {
         success: true,
         restored: true,
-        message: 'Active PropLead subscription restored via Google Play!',
+        message: effectiveStatus === 'PAYMENT_ISSUE'
+          ? 'Subscription restored with active grace period!'
+          : 'Active PropLead subscription restored via Google Play!',
         profileUpdates,
       };
     }
@@ -1038,3 +1167,68 @@ export async function openGooglePlayFixPayment(): Promise<void> {
   const url = 'https://play.google.com/store/account/subscriptions';
   window.open(url, '_blank', 'noopener,noreferrer');
 }
+
+export interface StartTrialResult {
+  success: boolean;
+  trialStatus?: 'active';
+  trialStartDate?: string;
+  trialEndDate?: string;
+  trialEverStarted?: boolean;
+  serverNow?: string;
+  error?: string;
+  message?: string;
+}
+
+/**
+ * Manually activate 7-day free trial on the backend server.
+ * Backend verifies eligibility (authenticated, trialEverStarted is false, no active subscription)
+ * and sets server-authoritative timestamps.
+ */
+export async function startFreeTrialServer(userId: string): Promise<StartTrialResult> {
+  try {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      return { success: false, error: 'Authentication required. Please sign in.' };
+    }
+    const idToken = await currentUser.getIdToken(true);
+    const endpoint = getBillingApiUrl('/api/billing/start-trial');
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({ userId }),
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      return {
+        success: false,
+        error: data.error || 'Failed to activate trial',
+        message: data.message || 'Unable to start trial at this time. Please try again.',
+      };
+    }
+
+    if (data.serverNow || data.serverTimestamp) {
+      setAuthoritativeServerTime(data.serverNow || data.serverTimestamp);
+    }
+
+    return {
+      success: true,
+      trialStatus: data.trialStatus,
+      trialStartDate: data.trialStartDate,
+      trialEndDate: data.trialEndDate,
+      trialEverStarted: data.trialEverStarted,
+      serverNow: data.serverNow,
+    };
+  } catch (err: any) {
+    console.error('[Billing] startFreeTrialServer error:', err);
+    return {
+      success: false,
+      error: err?.message || 'Network error starting trial',
+      message: 'Network error communicating with billing server.',
+    };
+  }
+}
+

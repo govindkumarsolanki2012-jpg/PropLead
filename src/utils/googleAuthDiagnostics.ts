@@ -61,7 +61,11 @@ export function safeGoogleAuthError(error: unknown): { code: string; message: st
   const rawCode = typeof candidate?.code === 'string' ? candidate.code : 'UNKNOWN';
   const code = /^[A-Za-z0-9_./-]{1,80}$/.test(rawCode) ? rawCode : 'UNKNOWN';
 
-  if (code === 'USER_CANCELLED' || code === 'auth/popup-closed-by-user') {
+  if (
+    code === 'USER_CANCELLED' ||
+    code === 'auth/popup-closed-by-user' ||
+    code === 'auth/cancelled-popup-request'
+  ) {
     return { code, message: 'Google Sign-In was cancelled.' };
   }
   if (code === 'auth/network-request-failed') {

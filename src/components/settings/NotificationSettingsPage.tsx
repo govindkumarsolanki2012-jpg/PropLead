@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronLeft, AlertTriangle, BellOff } from 'lucide-react';
 import { NotificationSettings } from '../../types';
-import { DeveloperNotificationTester } from './DeveloperNotificationTester';
 
 type ConfirmableNotificationKey = 'followUpReminders' | 'propertyVisitReminders' | 'dailySummary';
 
@@ -221,9 +220,6 @@ export const NotificationSettingsPage: React.FC<NotificationSettingsPageProps> =
           </span>
         </div>
       </div>
-
-      {/* Developer-Only Sample Notification Testing Feature */}
-      <DeveloperNotificationTester />
 
       {/* Confirmation Warning Modal before turning OFF any notification */}
       {confirmDisableKey && (

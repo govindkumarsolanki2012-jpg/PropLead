@@ -62,9 +62,11 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
       const isCancelled =
         !isTechnicalError &&
         (err?.code === 'auth/popup-closed-by-user' ||
+          err?.code === 'auth/cancelled-popup-request' ||
           err?.code === 'USER_CANCELLED' ||
           msg.toLowerCase().includes('user cancelled') ||
           msg.toLowerCase().includes('user canceled') ||
+          msg.toLowerCase().includes('cancelled-popup-request') ||
           msg === 'Google Sign-In cancelled by user');
 
       if (isCancelled) {

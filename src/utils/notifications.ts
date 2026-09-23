@@ -646,6 +646,49 @@ export async function cancelDailySummaryNotification(): Promise<void> {
 }
 
 /**
+ * Cancel all pending and scheduled notifications for the user on account deletion.
+ */
+export async function cancelAllUserNotifications(leads?: Lead[]): Promise<void> {
+  try {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const pending = await LocalNotifications.getPending();
+        if (pending.notifications && pending.notifications.length > 0) {
+          await LocalNotifications.cancel({
+            notifications: pending.notifications.map((n) => ({ id: n.id })),
+          });
+        }
+      } catch (err) {
+        console.warn('Error clearing pending notifications via LocalNotifications.getPending:', err);
+      }
+    }
+
+    // Cancel by lead ID for all registered notifications
+    const registry = getActiveScheduledRegistry();
+    for (const leadId of Object.keys(registry)) {
+      await cancelNotificationsForLead(leadId);
+    }
+
+    // Also cancel for any provided leads array
+    if (leads && leads.length > 0) {
+      for (const lead of leads) {
+        if (lead?.id) {
+          await cancelNotificationsForLead(lead.id);
+        }
+      }
+    }
+
+    // Cancel daily summary notification
+    await cancelDailySummaryNotification();
+
+    // Clear registry cache
+    saveActiveScheduledRegistry({});
+  } catch (err) {
+    console.warn('Error cancelling all user notifications:', err);
+  }
+}
+
+/**
  * Schedule notifications for a lead's follow-up or property visit.
  *
  * Follow-up:
@@ -905,143 +948,3 @@ export async function syncAllLeadNotifications(leads: Lead[]): Promise<void> {
   }
 }
 
-/**
- * Trigger the global notification tap handler manually (used for preview / test simulation).
- */
-export function triggerNotificationAction(extra: NotificationPayloadExtra): void {
-  if (globalActionListener) {
-    globalActionListener(extra);
-  }
-}
-
-export const SAMPLE_FOLLOWUP_NOTIFICATION_ID = 999901;
-export const SAMPLE_VISIT_NOTIFICATION_ID = 999902;
-
-/**
- * Realistic Sample / Demo Lead used strictly for developer notification testing.
- * NEVER saved or written to Firestore.
- */
-export const SAMPLE_DEMO_LEAD: Lead = {
-  id: 'sample-lead',
-  name: 'Jyothi',
-  phone: '9876543210',
-  whatsapp: '9876543210',
-  email: 'jyothi@example.com',
-  requirement: 'buy',
-  propertyType: 'flat',
-  bhk: '3 BHK',
-  budgetMin: 7500000,
-  budgetMax: 9000000,
-  currentCity: 'Visakhapatnam',
-  preferredCity: 'Visakhapatnam',
-  preferredLocality: 'Madhurawada',
-  preferredLocations: ['Madhurawada'],
-  source: 'WhatsApp',
-  priority: 'hot',
-  status: 'contacted',
-  notes: 'Client Jyothi interested in a 3 BHK gated community apartment in Madhurawada. Follow-up scheduled for 6:00 PM.',
-  nextFollowUpDate: new Date().toISOString().split('T')[0],
-  nextFollowUpTime: '18:00',
-  nextFollowUpNote: 'Follow-up discussion on Madhurawada property options',
-  lastContactedAt: new Date().toISOString(),
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-  voiceNotes: [],
-  attachments: [],
-  activities: [
-    {
-      id: 'sample-act-1',
-      leadId: 'sample-lead',
-      type: 'followup_created',
-      title: 'Sample Follow-up Test',
-      description: 'Follow-up scheduled for Jyothi at 6:00 PM (Madhurawada)',
-      timestamp: new Date().toISOString(),
-    },
-  ],
-};
-
-/**
- * Schedule a sample test notification (triggers in ~5 seconds).
- * Supported types:
- * 1. 'followup' -> Title: "Follow-up in 30 min", Body: "Jyothi • Follow-up"
- * 2. 'visit'    -> Title: "Property visit reminder", Body: "Jyothi • Madhurawada site visit"
- */
-export async function scheduleSampleNotification(sampleType: 'followup' | 'visit'): Promise<{
-  id: number;
-  title: string;
-  body: string;
-  scheduledAt: Date;
-}> {
-  const isFollowup = sampleType === 'followup';
-  const id = isFollowup ? SAMPLE_FOLLOWUP_NOTIFICATION_ID : SAMPLE_VISIT_NOTIFICATION_ID;
-  const title = isFollowup ? 'Follow-up in 30 min' : 'Property visit reminder';
-  const body = isFollowup ? 'Jyothi • Follow-up' : 'Jyothi • Madhurawada site visit';
-  const channelId = isFollowup ? FOLLOWUP_CHANNEL_ID : VISITS_CHANNEL_ID;
-  const scheduledAt = new Date(Date.now() + 5000);
-
-  const extra: NotificationPayloadExtra = {
-    leadId: 'sample-lead',
-    clientName: 'Jyothi',
-    type: isFollowup ? 'followup' : 'visit',
-    reminderKind: '30m',
-  };
-
-  // 1. Native Android local notification via Capacitor
-  if (Capacitor.isNativePlatform()) {
-    try {
-      await initLocalNotifications();
-      try {
-        await LocalNotifications.cancel({ notifications: [{ id }] });
-      } catch {}
-
-      await LocalNotifications.schedule({
-        notifications: [
-          {
-            id,
-            title,
-            body,
-            schedule: {
-              at: scheduledAt,
-              allowWhileIdle: true,
-            },
-            channelId,
-            smallIcon: NOTIFICATION_SMALL_ICON,
-            iconColor: NOTIFICATION_ICON_COLOR,
-            group: NOTIFICATION_GROUP_KEY,
-            extra,
-          },
-        ],
-      });
-    } catch (err) {
-      console.warn('Failed to schedule native sample notification:', err);
-    }
-  }
-
-  // 2. Web browser / AI Studio preview execution (fires after 5 seconds)
-  setTimeout(() => {
-    // Try browser Web Notification if permission is granted
-    if (typeof window !== 'undefined' && 'Notification' in window && window.Notification.permission === 'granted') {
-      try {
-        const notif = new window.Notification(title, {
-          body,
-          icon: '/icon.png',
-        });
-        notif.onclick = () => {
-          window.focus();
-          triggerNotificationAction(extra);
-        };
-      } catch {}
-    }
-
-    // Dispatch custom event for in-app floating banner / test toast
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('proplead_sample_notification_fired', {
-          detail: { id, title, body, extra },
-        })
-      );
-    }
-  }, 5000);
-
-  return { id, title, body, scheduledAt };
-}

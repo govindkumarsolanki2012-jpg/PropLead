@@ -24,6 +24,8 @@ import {
   openGooglePlayFixPayment,
   SUBSCRIPTION_PLANS,
   PRO_FEATURES_LIST,
+  startFreeTrialServer,
+  formatTrialEndDateTime,
 } from '../../utils/billing';
 import confetti from 'canvas-confetti';
 
@@ -44,6 +46,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
 }) => {
   const [selectedPlanId, setSelectedPlanId] = useState<SubscriptionPlanId>('quarterly');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isStartingTrial, setIsStartingTrial] = useState<boolean>(false);
   const [processingStatus, setProcessingStatus] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -61,6 +64,8 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
 
   const {
     status,
+    trialStatus,
+    trialEverStarted,
     daysRemaining,
     expiryFormatted,
     isLocked,
@@ -85,6 +90,39 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const handleStartTrial = async () => {
+    setIsStartingTrial(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      const res = await startFreeTrialServer(profile.id);
+      if (res.success && res.trialEndDate) {
+        onUpdateProfile({
+          trialStatus: 'active',
+          trialStartDate: res.trialStartDate,
+          trialEndDate: res.trialEndDate,
+          trialEverStarted: true,
+          subscriptionStatus: 'TRIAL',
+          isTrialActive: true,
+        });
+        setSuccessMessage('🎉 7-day free trial activated! All features unlocked.');
+        try {
+          confetti({
+            particleCount: 60,
+            spread: 70,
+            origin: { y: 0.6 },
+          });
+        } catch {}
+      } else {
+        setErrorMessage(res.error || res.message || 'Failed to activate free trial.');
+      }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Error activating free trial.');
+    } finally {
+      setIsStartingTrial(false);
+    }
+  };
 
   const handleStartPurchase = async () => {
     setIsProcessing(true);
@@ -252,10 +290,54 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
             </div>
           )}
 
+          {/* Manual Free Trial Available Banner */}
+          {trialStatus === 'not_started' && status !== 'ACTIVE' && status !== 'CANCELED_BUT_ACTIVE' && status !== 'PAYMENT_ISSUE' && !trialEverStarted && (
+            <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-emerald-500/5 border-2 border-emerald-500/30 dark:border-emerald-500/20 text-xs flex flex-col gap-3 shadow-xs">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-slate-900 dark:text-white text-sm">
+                      7-Day Free Trial
+                    </span>
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded-full">
+                      Free • ₹0
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
+                    Try all PropLead Pro features risk-free for 7 days. Start whenever you are ready.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                id="btn_modal_start_trial"
+                disabled={isStartingTrial || isProcessing}
+                onClick={handleStartTrial}
+                className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
+              >
+                {isStartingTrial ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Activating Trial...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Start 7-Day Free Trial Now</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
           {/* Dynamic Real Trial Countdown Indicator */}
           {status === 'TRIAL' && (
             <div
-              className={`p-3 rounded-2xl border text-xs flex items-center justify-between transition-all ${
+              className={`p-3.5 rounded-2xl border text-xs flex flex-col gap-2 transition-all ${
                 daysRemaining <= 2
                   ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700'
                   : daysRemaining <= 4
@@ -263,34 +345,43 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                   : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700/60'
               }`}
             >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div
-                  className={`w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 text-white shadow-2xs ${
-                    daysRemaining <= 2 ? 'bg-amber-500' : 'bg-emerald-600'
-                  }`}
-                >
-                  <Clock className="w-3.5 h-3.5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="font-bold text-slate-900 dark:text-white text-xs truncate">
-                    Free Trial Active
-                  </div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5 min-w-0">
                   <div
-                    className={`text-[11px] font-bold mt-0.5 ${
-                      daysRemaining <= 2
-                        ? 'text-amber-700 dark:text-amber-300'
-                        : 'text-emerald-700 dark:text-emerald-400'
+                    className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 text-white shadow-2xs ${
+                      daysRemaining <= 2 ? 'bg-amber-500' : 'bg-emerald-600'
                     }`}
                   >
-                    {daysRemaining} {daysRemaining === 1 ? 'day' : 'days'} remaining
+                    <Clock className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-bold text-slate-900 dark:text-white text-xs truncate">
+                      Free Trial Active
+                    </div>
+                    <div
+                      className={`text-[11px] font-bold mt-0.5 ${
+                        daysRemaining <= 2
+                          ? 'text-amber-700 dark:text-amber-300'
+                          : 'text-emerald-700 dark:text-emerald-400'
+                      }`}
+                    >
+                      {daysRemaining} {daysRemaining === 1 ? 'day' : 'days'} remaining
+                    </div>
                   </div>
                 </div>
+                <div className="shrink-0 pl-2">
+                  <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60 px-2.5 py-1 rounded-full whitespace-nowrap">
+                    ₹0 Today
+                  </span>
+                </div>
               </div>
-              <div className="flex-shrink-0 pl-2">
-                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60 px-2.5 py-1 rounded-full whitespace-nowrap">
-                  ₹0 Today
-                </span>
-              </div>
+
+              {profile.trialEndDate && (
+                <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 text-[11px] text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>{formatTrialEndDateTime(profile.trialEndDate)}</span>
+                </div>
+              )}
             </div>
           )}
 

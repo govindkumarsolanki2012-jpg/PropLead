@@ -127,6 +127,44 @@ export function clearAllData(): void {
 }
 
 /**
+ * Clears user-scoped local storage during account deletion without touching
+ * unrelated application settings (e.g. language preferences).
+ */
+export function clearUserScopedStorage(userId?: string): void {
+  try {
+    localStorage.removeItem(STORAGE_KEYS.LEADS);
+    localStorage.removeItem(STORAGE_KEYS.PROPERTIES);
+    localStorage.removeItem(STORAGE_KEYS.PROFILE);
+    localStorage.removeItem(STORAGE_KEYS.TEMPLATES);
+    localStorage.removeItem(STORAGE_KEYS.IS_LOGGED_IN);
+
+    if (userId) {
+      localStorage.removeItem(`proplead_onboarded_v1_${userId}`);
+      localStorage.removeItem(`proplead_migrated_${userId}`);
+      localStorage.removeItem(`proplead_trial_v1_${userId}`);
+      localStorage.removeItem(`proplead_sub_status_${userId}`);
+    }
+
+    // Clean any user-scoped keys dynamically
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (
+        key &&
+        (key.startsWith('proplead_onboarded_') ||
+          key.startsWith('proplead_migrated_') ||
+          key.startsWith('proplead_sub_') ||
+          key.startsWith('proplead_trial_') ||
+          key.startsWith('proplead_sync_'))
+      ) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch (err) {
+    console.warn('Error clearing user-scoped storage:', err);
+  }
+}
+
+/**
  * Export Leads array to clean CSV download with native Android and Web support.
  * Filename format: PropLead_Leads_YYYY-MM-DD.csv
  */

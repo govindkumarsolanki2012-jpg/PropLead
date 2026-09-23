@@ -13,7 +13,6 @@ import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { SettingsView } from './components/settings/SettingsView';
 import { SplashScreen } from './components/common/SplashScreen';
 import { AnimatePresence } from 'motion/react';
-import { BellRing, X, ArrowRight } from 'lucide-react';
 
 // Modals
 import { QuickAddLeadModal } from './components/leads/QuickAddLeadModal';
@@ -30,6 +29,7 @@ import { AddPropertyModal } from './components/properties/AddPropertyModal';
 import { EditPropertyModal } from './components/properties/EditPropertyModal';
 import { PropertyDetailModal } from './components/properties/PropertyDetailModal';
 import { SharePropertyModal } from './components/properties/SharePropertyModal';
+import { WelcomeOnboardingModal } from './components/auth/WelcomeOnboardingModal';
 
 // Storage & Types
 import {
@@ -43,10 +43,10 @@ import {
   saveStoredTemplates,
   clearAllData,
 } from './utils/storage';
-import { Lead, Property, UserProfile, WhatsAppTemplate, FollowUpType, TabType } from './types';
+import { Lead, Property, UserProfile, WhatsAppTemplate, FollowUpType, TabType, SubscriptionStatus } from './types';
 import { INITIAL_USER_PROFILE } from './data/initialData';
 import { formatRelativeDate, normalizePhoneForMatch } from './utils/formatters';
-import { getEffectiveSubscriptionStatus, hasProAccess, setAuthoritativeServerTime, getBillingApiUrl, checkAndRestoreGooglePlayEntitlement } from './utils/billing';
+import { getEffectiveSubscriptionStatus, hasProAccess, setAuthoritativeServerTime, getBillingApiUrl, checkAndRestoreGooglePlayEntitlement, startFreeTrialServer } from './utils/billing';
 import {
   subscribeToAuth,
   signInWithGoogle,
@@ -78,8 +78,6 @@ import {
   syncAllLeadNotifications,
   requestNotificationPermission,
   wasNotificationPermissionPrompted,
-  SAMPLE_DEMO_LEAD,
-  triggerNotificationAction,
 } from './utils/notifications';
 
 const checkHasActiveSession = (): boolean => {
@@ -111,27 +109,6 @@ export function App() {
   // Firebase Authentication coordination
   const [isAuthResolved, setIsAuthResolved] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(() => getCurrentUser());
-
-  // Developer sample notification heads-up banner for in-browser / preview test verification
-  const [sampleNotificationBanner, setSampleNotificationBanner] = useState<{
-    id: number;
-    title: string;
-    body: string;
-    extra: any;
-  } | null>(null);
-
-  useEffect(() => {
-    const handleSampleNotificationFired = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      if (customEvent.detail) {
-        setSampleNotificationBanner(customEvent.detail);
-      }
-    };
-    window.addEventListener('proplead_sample_notification_fired', handleSampleNotificationFired);
-    return () => {
-      window.removeEventListener('proplead_sample_notification_fired', handleSampleNotificationFired);
-    };
-  }, []);
 
   // Safety fallback for offline / extreme latency
   useEffect(() => {
@@ -203,6 +180,7 @@ export function App() {
   const [isImportContactsOpen, setIsImportContactsOpen] = useState<boolean>(false);
   const [isFeatureLockedOpen, setIsFeatureLockedOpen] = useState<boolean>(false);
   const [lockedFeatureName, setLockedFeatureName] = useState<string>('');
+  const [isWelcomeOnboardingOpen, setIsWelcomeOnboardingOpen] = useState<boolean>(false);
 
   // Modal states for Properties
   const [isAddPropertyOpen, setIsAddPropertyOpen] = useState<boolean>(false);
@@ -248,6 +226,7 @@ export function App() {
     isSubscriptionOpen,
     isImportContactsOpen,
     isFeatureLockedOpen,
+    isWelcomeOnboardingOpen,
     isAddPropertyOpen,
     detailProperty,
     editProperty,
@@ -269,6 +248,7 @@ export function App() {
       isSubscriptionOpen,
       isImportContactsOpen,
       isFeatureLockedOpen,
+      isWelcomeOnboardingOpen,
       isAddPropertyOpen,
       detailProperty,
       editProperty,
@@ -444,7 +424,15 @@ export function App() {
         } catch {}
         setIsCloudSynced(true);
         // Safely migrate/initialize user data in Firestore with user phone
-        await syncLocalDataToFirestore(user.uid, user.email, user.displayName, user.phoneNumber);
+        const syncRes = await syncLocalDataToFirestore(user.uid, user.email, user.displayName, user.phoneNumber);
+
+        // Detect if this account was just created brand-new for onboarding
+        if (syncRes.isNewUser) {
+          const completedInStorage = localStorage.getItem(`proplead_onboarded_v1_${user.uid}`) === 'true';
+          if (!completedInStorage) {
+            setIsWelcomeOnboardingOpen(true);
+          }
+        }
 
         // Subscribe to real-time user profile in Firestore
         unsubProfile = subscribeUserProfile(user.uid, (firestoreProfile) => {
@@ -472,6 +460,10 @@ export function App() {
                 subscriptionExpiryTime: firestoreProfile.subscriptionExpiryTime || prev.subscriptionExpiryTime,
                 trialEndDate: effectiveTrialEndDate,
                 trialStartDate: effectiveTrialStartDate,
+                onboardingCompleted:
+                  firestoreProfile.onboardingCompleted !== undefined
+                    ? firestoreProfile.onboardingCompleted
+                    : prev.onboardingCompleted,
                 isOnboarded: true,
               };
               saveStoredProfile(merged);
@@ -484,19 +476,26 @@ export function App() {
         unsubSubscription = subscribeSubscriptionRecordFromFirestore(user.uid, (subRecord) => {
           if (subRecord) {
             const rawSubStatus = (subRecord.subscriptionStatus || '').toLowerCase();
-            const isSubActive = rawSubStatus === 'active' || rawSubStatus === 'canceled_but_active';
             const subExpiry = subRecord.subscriptionExpiryTime || subRecord.subscriptionExpiryDate || subRecord.expiryDate;
             const subExpiryMs = subExpiry ? new Date(subExpiry).getTime() : NaN;
             // A paid subscription must only be treated as unexpired when a valid expiry timestamp exists and is in the future
             const isUnexpired = Boolean(
               subExpiry && !isNaN(subExpiryMs) && subExpiryMs > Date.now()
             );
+            const isSubActive =
+              rawSubStatus === 'active' ||
+              rawSubStatus === 'canceled_but_active' ||
+              (rawSubStatus === 'payment_issue' && isUnexpired);
 
             if (isSubActive && isUnexpired) {
               setProfile((prev) => {
+                const effectiveStatus: SubscriptionStatus =
+                  rawSubStatus === 'canceled_but_active'
+                    ? 'CANCELED_BUT_ACTIVE'
+                    : (rawSubStatus === 'payment_issue' ? 'PAYMENT_ISSUE' : 'ACTIVE');
                 const merged: UserProfile = {
                   ...prev,
-                  subscriptionStatus: rawSubStatus === 'canceled_but_active' ? 'CANCELED_BUT_ACTIVE' : 'ACTIVE',
+                  subscriptionStatus: effectiveStatus,
                   isSubscribed: true,
                   subscriptionProductId: subRecord.subscriptionProductId || prev.subscriptionProductId || 'property_agent_pro',
                   subscriptionBasePlan: subRecord.subscriptionBasePlanId || subRecord.subscriptionBasePlan || prev.subscriptionBasePlan || 'quarterly',
@@ -512,7 +511,7 @@ export function App() {
                 saveStoredProfile(merged);
                 return merged;
               });
-            } else if (rawSubStatus === 'expired' || (isSubActive && !isUnexpired && !isNaN(subExpiryMs) && subExpiryMs <= Date.now())) {
+            } else if (rawSubStatus === 'expired' || (!isUnexpired && !isNaN(subExpiryMs) && subExpiryMs <= Date.now())) {
               setProfile((prev) => {
                 const merged: UserProfile = {
                   ...prev,
@@ -593,18 +592,35 @@ export function App() {
               setAuthoritativeServerTime(data.serverTimestamp || data.serverNow);
             }
             const rawStat = (data.subscriptionStatus || '').toUpperCase();
-            const isSub = Boolean(data.isSubscribed || rawStat === 'ACTIVE' || rawStat === 'CANCELED_BUT_ACTIVE');
             const resolvedExp = data.subscriptionExpiryTime || data.subscriptionExpiryDate || data.expiryDate;
+            const expMs = resolvedExp ? new Date(resolvedExp).getTime() : NaN;
+            const hasFutureExpiry = !isNaN(expMs) && expMs > Date.now();
+
+            // Bug 7 & Bug 6 Fix: Use authoritative backend state.
+            // If backend says inactive/expired, isSubscribed must be set to false.
+            let isSub = false;
+            if (rawStat === 'ACTIVE' || rawStat === 'CANCELED_BUT_ACTIVE') {
+              isSub = hasFutureExpiry;
+            } else if (rawStat === 'PAYMENT_ISSUE') {
+              isSub = hasFutureExpiry;
+            } else if (data.isSubscribed !== undefined) {
+              isSub = Boolean(data.isSubscribed);
+            }
 
             setProfile((prev) => {
               const updated: UserProfile = {
                 ...prev,
-                subscriptionStatus: data.subscriptionStatus,
+                subscriptionStatus: isSub
+                  ? (rawStat as SubscriptionStatus)
+                  : (rawStat === 'ACTIVE' || rawStat === 'CANCELED_BUT_ACTIVE' ? 'EXPIRED' : (rawStat as SubscriptionStatus)),
+                trialStatus: data.trialStatus ?? prev.trialStatus,
+                trialEverStarted: data.trialEverStarted !== undefined ? data.trialEverStarted : prev.trialEverStarted,
+                isTrialActive: data.trialStatus === 'active' || data.subscriptionStatus === 'TRIAL',
                 trialStartDate: data.trialStartDate ?? prev.trialStartDate,
                 trialEndDate: data.trialEndDate ?? prev.trialEndDate,
                 serverTimestamp: data.serverTimestamp || data.serverNow || prev.serverTimestamp,
                 trialDaysRemaining: data.trialDaysRemaining ?? prev.trialDaysRemaining,
-                isSubscribed: isSub || prev.isSubscribed,
+                isSubscribed: isSub, // Bug 7: Authoritative backend state, never sticky!
                 subscriptionExpiryDate: resolvedExp ?? prev.subscriptionExpiryDate,
                 subscriptionExpiryTime: resolvedExp ?? prev.subscriptionExpiryTime,
                 expiryDate: resolvedExp ?? prev.expiryDate,
@@ -675,24 +691,6 @@ export function App() {
     initLocalNotifications((extra) => {
       const targetId = extra.leadId || extra.visitId;
       if (targetId) {
-        // Special developer / QA sample lead handler
-        if (targetId === 'sample-lead') {
-          setIsQuickAddOpen(false);
-          setIsFeatureLockedOpen(false);
-          setDetailLead(SAMPLE_DEMO_LEAD);
-          setCurrentTab('leads');
-          showToast(
-            extra.type === 'visit'
-              ? '🔔 Sample visit notification tap handled! Opened sample lead (Jyothi • Madhurawada). 🎯'
-              : '🔔 Sample notification tap handled! Opened sample lead (Jyothi • 6:00 PM). 🎯'
-          );
-          try {
-            sessionStorage.removeItem('proplead_pending_lead_id');
-          } catch {}
-          setPendingNotificationLeadId(null);
-          return;
-        }
-
         // 1. Try currently loaded in-memory leads
         const currentList = leadsRef.current || [];
         const inMemoryMatch = currentList.find((l) => l.id === targetId);
@@ -800,12 +798,6 @@ export function App() {
   };
 
   const handleUpdateLead = (updatedLead: Lead) => {
-    if (updatedLead.id === 'sample-lead') {
-      setDetailLead(updatedLead);
-      showToast('Sample lead preview updated.');
-      return;
-    }
-
     // Pro access check: If trial is expired and subscription is not active, block follow-up modifications
     if (!hasProAccess(profile)) {
       const existing = leads.find((l) => l.id === updatedLead.id);
@@ -842,12 +834,6 @@ export function App() {
   };
 
   const handleDeleteLead = async (leadId: string): Promise<void> => {
-    if (leadId === 'sample-lead') {
-      setDetailLead(null);
-      showToast('Sample lead closed.');
-      return;
-    }
-
     cancelNotificationsForLead(leadId);
     if (currentUser?.uid) {
       await deleteLeadFromFirestore(currentUser.uid, leadId);
@@ -1094,9 +1080,11 @@ export function App() {
       const msg = err?.message || String(err || '');
       const isCancelled =
         err?.code === 'auth/popup-closed-by-user' ||
+        err?.code === 'auth/cancelled-popup-request' ||
         err?.code === 'USER_CANCELLED' ||
         msg.toLowerCase().includes('user cancelled') ||
-        msg.toLowerCase().includes('user canceled');
+        msg.toLowerCase().includes('user canceled') ||
+        msg.toLowerCase().includes('cancelled-popup-request');
 
       if (!isCancelled) {
         showToast(err?.message || 'Sign-in failed. Please try again.');
@@ -1104,8 +1092,60 @@ export function App() {
     }
   };
 
+  const handleStartTrialFromOnboarding = async (): Promise<boolean> => {
+    if (!currentUser?.uid) return false;
+    try {
+      const res = await startFreeTrialServer(currentUser.uid);
+      if (res.success && res.trialEndDate) {
+        handleUpdateProfile({
+          trialStatus: 'active',
+          trialStartDate: res.trialStartDate,
+          trialEndDate: res.trialEndDate,
+          trialEverStarted: true,
+          subscriptionStatus: 'TRIAL',
+          isTrialActive: true,
+          onboardingCompleted: true,
+        });
+        showToast('🎉 7-Day Free Trial activated!');
+        return true;
+      } else {
+        showToast(res.error || res.message || 'Unable to start trial');
+        return false;
+      }
+    } catch (err: any) {
+      console.error('[App] Error starting trial from onboarding:', err);
+      showToast(err?.message || 'Error starting trial');
+      return false;
+    }
+  };
+
+  const handleExploreFirstFromOnboarding = () => {
+    setIsWelcomeOnboardingOpen(false);
+    if (currentUser?.uid) {
+      try {
+        localStorage.setItem(`proplead_onboarded_v1_${currentUser.uid}`, 'true');
+      } catch {}
+      handleUpdateProfile({ onboardingCompleted: true });
+    }
+    showToast('Welcome to PropLead! You can start your free trial anytime.');
+  };
+
+  const handleCompleteWelcomeOnboarding = async (action: 'lead' | 'dashboard') => {
+    setIsWelcomeOnboardingOpen(false);
+    if (currentUser?.uid) {
+      try {
+        localStorage.setItem(`proplead_onboarded_v1_${currentUser.uid}`, 'true');
+      } catch {}
+      handleUpdateProfile({ onboardingCompleted: true });
+    }
+    if (action === 'lead') {
+      setIsQuickAddOpen(true);
+    }
+  };
+
   const handleSignOut = async () => {
     try {
+      setIsWelcomeOnboardingOpen(false);
       await signOutUser();
       try {
         localStorage.removeItem('proplead_is_logged_in_v1');
@@ -1271,9 +1311,13 @@ export function App() {
                 onAccountDeleted={() => {
                   setLeads([]);
                   setProperties([]);
+                  setTemplates(getStoredTemplates());
+                  setProfile(INITIAL_USER_PROFILE);
                   setCurrentUser(null);
                   setIsCloudSynced(false);
-                  setCurrentTab('leads');
+                  setCurrentTab('home');
+                  setTabHistory(['home']);
+                  showToast('Account and all associated data have been permanently deleted.');
                 }}
                 onUpdateProfile={(p) => {
                   setProfile(p);
@@ -1480,47 +1524,14 @@ export function App() {
         onImportLeads={handleImportBulkLeads}
       />
 
-      {/* Developer Sample Notification Interactive Heads-Up Banner (AI Studio / Web Preview) */}
-      {sampleNotificationBanner && (
-        <div className="fixed top-3 left-3 right-3 max-w-sm mx-auto z-[9999] bg-slate-900 text-white rounded-2xl shadow-2xl border border-emerald-500/50 p-3 flex items-center justify-between gap-2.5 animate-in slide-in-from-top-4 duration-200">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-              <BellRing className="w-4 h-4" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400">
-                Sample Notification Fired
-              </div>
-              <div className="text-xs font-bold truncate text-white">
-                {sampleNotificationBanner.title}
-              </div>
-              <div className="text-[11px] text-slate-300 truncate">
-                {sampleNotificationBanner.body}
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                const extra = sampleNotificationBanner.extra;
-                setSampleNotificationBanner(null);
-                triggerNotificationAction(extra);
-              }}
-              className="px-2.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer whitespace-nowrap"
-            >
-              Tap to Open
-            </button>
-            <button
-              type="button"
-              onClick={() => setSampleNotificationBanner(null)}
-              className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
+      {/* First-Time User Welcome & Quick Setup Onboarding Modal */}
+      <WelcomeOnboardingModal
+        isOpen={isWelcomeOnboardingOpen}
+        onComplete={handleCompleteWelcomeOnboarding}
+        onStartTrial={handleStartTrialFromOnboarding}
+        onExploreFirst={handleExploreFirstFromOnboarding}
+        agentName={profile.name || currentUser?.displayName || ''}
+      />
     </MobileFrame>
   );
 }

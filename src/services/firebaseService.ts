@@ -147,6 +147,9 @@ export function subscribeToAuth(callback: (user: FirebaseUser | null) => void): 
  *   and authenticates with Firebase using GoogleAuthProvider.credential(idToken) and signInWithCredential().
  * - On Web / Preview: Uses standard Firebase signInWithPopup.
  */
+// Prevent concurrent signInWithPopup calls on web that trigger auth/cancelled-popup-request
+let webSignInPromise: Promise<FirebaseUser> | null = null;
+
 export async function signInWithGoogle(): Promise<FirebaseUser> {
   if (isNativeAndroid()) {
     await initSocialLogin();
@@ -227,9 +230,23 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
     });
     return userCredential.user;
   } else {
+    // If a popup request is already in progress, reuse the existing promise to prevent auth/cancelled-popup-request
+    if (webSignInPromise) {
+      console.log('[GoogleAuth] Reusing active web signInWithPopup promise...');
+      return webSignInPromise;
+    }
+
     console.log('[GoogleAuth] Web platform: Launching Firebase signInWithPopup...');
-    const result = await signInWithPopup(auth, googleProvider);
-    return result.user;
+    webSignInPromise = (async () => {
+      try {
+        const result = await signInWithPopup(auth, googleProvider);
+        return result.user;
+      } finally {
+        webSignInPromise = null;
+      }
+    })();
+
+    return webSignInPromise;
   }
 }
 
@@ -438,6 +455,31 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
   }
 }
 
+export function cleanFirestorePayload<T extends Record<string, any>>(obj: T): Record<string, any> {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      if (Array.isArray(value)) {
+        result[key] = value
+          .filter((item) => item !== undefined)
+          .map((item) =>
+            item !== null && typeof item === 'object' && !(item instanceof Date)
+              ? cleanFirestorePayload(item)
+              : item
+          );
+      } else if (value !== null && typeof value === 'object' && !(value instanceof Date)) {
+        result[key] = cleanFirestorePayload(value);
+      } else {
+        result[key] = value;
+      }
+    }
+  }
+  return result;
+}
+
 export async function saveUserProfile(userId: string, profile: Partial<UserProfile>): Promise<void> {
   try {
     const {
@@ -456,15 +498,20 @@ export async function saveUserProfile(userId: string, profile: Partial<UserProfi
       acknowledged: _acknowledged,
       lastVerifiedAt: _lastVerifiedAt,
       purchaseDate: _purchaseDate,
+      trialStartDate: _trialStartDate,
+      trialEndDate: _trialEndDate,
+      trialEverStarted: _trialEverStarted,
+      trialStatus: _trialStatus,
+      isTrialActive: _isTrialActive,
       ...clientWritableProfile
     } = profile as Partial<UserProfile> & Record<string, unknown>;
 
     const userRef = doc(db, 'users', userId);
-    await setDoc(userRef, {
+    await setDoc(userRef, cleanFirestorePayload({
       ...clientWritableProfile,
       id: userId,
       updatedAt: new Date().toISOString(),
-    }, { merge: true });
+    }), { merge: true });
   } catch (err) {
     console.error('Error saving user profile to Firestore:', err);
     throw err;
@@ -600,16 +647,6 @@ export function subscribeLeadsFromFirestore(
   );
 }
 
-function cleanFirestorePayload<T extends Record<string, any>>(obj: T): Record<string, any> {
-  const result: Record<string, any> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (value !== undefined) {
-      result[key] = value;
-    }
-  }
-  return result;
-}
-
 export async function addLeadToFirestore(userId: string, lead: Lead): Promise<void> {
   const leadRef = doc(db, 'users', userId, 'leads', lead.id);
   await setDoc(leadRef, cleanFirestorePayload({
@@ -648,7 +685,7 @@ export async function batchAddLeadsToFirestore(userId: string, leads: Lead[]): P
   const batch = writeBatch(db);
   leads.forEach((lead) => {
     const refDoc = doc(db, 'users', userId, 'leads', lead.id);
-    batch.set(refDoc, lead, { merge: true });
+    batch.set(refDoc, cleanFirestorePayload(lead), { merge: true });
   });
   await batch.commit();
 }
@@ -705,18 +742,18 @@ export function subscribePropertiesFromFirestore(
 
 export async function addPropertyToFirestore(userId: string, property: Property): Promise<void> {
   const propRef = doc(db, 'users', userId, 'properties', property.id);
-  await setDoc(propRef, {
+  await setDoc(propRef, cleanFirestorePayload({
     ...property,
     updatedAt: new Date().toISOString(),
-  });
+  }));
 }
 
 export async function updatePropertyInFirestore(userId: string, property: Property): Promise<void> {
   const propRef = doc(db, 'users', userId, 'properties', property.id);
-  await setDoc(propRef, {
+  await setDoc(propRef, cleanFirestorePayload({
     ...property,
     updatedAt: new Date().toISOString(),
-  }, { merge: true });
+  }), { merge: true });
 }
 
 export async function deletePropertyFromFirestore(userId: string, propertyId: string): Promise<void> {
