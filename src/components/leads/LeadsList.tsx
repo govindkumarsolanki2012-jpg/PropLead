@@ -181,7 +181,7 @@ export const LeadsList: React.FC<LeadsListProps> = ({
       setIsSelectionMode(false);
       setShowDeleteModal(false);
     } catch (err: any) {
-      console.error('Error deleting selected leads:', err);
+      console.warn('Notice deleting selected leads:', err);
       setDeleteError(err?.message || 'Unable to delete selected leads. Please try again.');
     } finally {
       setIsDeletingBulk(false);

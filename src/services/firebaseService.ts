@@ -32,6 +32,8 @@ import {
   signInWithPopup,
   signInWithCredential,
   GoogleAuthProvider,
+  reauthenticateWithPopup,
+  reauthenticateWithCredential,
 } from 'firebase/auth';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Lead, Property, UserProfile, WhatsAppTemplate } from '../types';
@@ -103,7 +105,7 @@ export async function initSocialLogin(): Promise<void> {
     isSocialLoginInitialized = true;
     console.log('[GoogleAuth] Native PropLead Google bridge initialized with Credential Manager.');
   } catch (err) {
-    console.error('[GoogleAuth] Error initializing native SocialLogin:', err);
+    console.warn('[GoogleAuth] Native SocialLogin init notice:', err);
   }
 }
 
@@ -184,7 +186,7 @@ export async function signInWithGoogle(): Promise<FirebaseUser> {
     const idToken = result?.idToken;
 
     if (!idToken) {
-      console.error('[GoogleAuth] native_login_missing_id_token');
+      console.warn('[GoogleAuth] native_login_missing_id_token');
       throw new Error('Google Sign-In completed, but no ID token was returned.');
     }
 
@@ -302,7 +304,7 @@ export async function signInWithDeveloperAccount(): Promise<FirebaseUser> {
       }
       return newCred.user;
     }
-    console.error('[DevLogin] Error authenticating developer account:', err);
+    console.warn('[DevLogin] Notice authenticating developer account:', err);
     throw err;
   }
 }
@@ -318,6 +320,44 @@ export async function signOutUser(): Promise<void> {
     }
   }
   await fbSignOut(auth);
+}
+
+/**
+ * Reauthenticates the current user with Google if credentials have expired.
+ * Supports both Native Android (Credential Manager) and Web popup.
+ */
+export async function reauthenticateGoogleUser(currentUser: FirebaseUser): Promise<void> {
+  if (isNativeAndroid()) {
+    await initSocialLogin();
+    const response = await PropLeadSocialLogin.login({ provider: 'google' });
+    const result = (response as any)?.result || response;
+    const idToken = result?.idToken;
+    if (!idToken) throw new Error('No Google ID token returned during reauthentication.');
+    const credential = GoogleAuthProvider.credential(idToken);
+    await reauthenticateWithCredential(currentUser, credential);
+  } else {
+    await reauthenticateWithPopup(currentUser, googleProvider);
+  }
+}
+
+/**
+ * Deletes the current Firebase Auth user account.
+ * If Firebase Auth throws 'auth/requires-recent-login', prompts for Google reauthentication
+ * and retries user deletion cleanly.
+ */
+export async function deleteCurrentUserAccount(currentUser: FirebaseUser): Promise<boolean> {
+  try {
+    await currentUser.delete();
+    return true;
+  } catch (err: any) {
+    if (err?.code === 'auth/requires-recent-login') {
+      console.warn('[Account Deletion] Requires recent login. Attempting reauthentication...');
+      await reauthenticateGoogleUser(currentUser);
+      await currentUser.delete();
+      return true;
+    }
+    throw err;
+  }
 }
 
 export function getCurrentUser(): FirebaseUser | null {
@@ -417,7 +457,7 @@ export async function sendPhoneOtp(
   try {
     return await signInWithPhoneNumber(auth, e164PhoneNumber, verifier);
   } catch (err: any) {
-    console.error('Firebase signInWithPhoneNumber error:', err);
+    console.warn('Firebase signInWithPhoneNumber notice:', err);
     throw err;
   }
 }
@@ -434,7 +474,7 @@ export async function verifyPhoneOtp(
     const userCredential = await confirmationResult.confirm(otpCode.trim());
     return userCredential.user;
   } catch (err: any) {
-    console.error('Firebase OTP confirmation error:', err);
+    console.warn('Firebase OTP confirmation notice:', err);
     throw err;
   }
 }
@@ -450,7 +490,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
     }
     return null;
   } catch (err) {
-    console.error('Error fetching user profile from Firestore:', err);
+    console.warn('Notice fetching user profile from Firestore:', err);
     return null;
   }
 }
@@ -513,7 +553,7 @@ export async function saveUserProfile(userId: string, profile: Partial<UserProfi
       updatedAt: new Date().toISOString(),
     }), { merge: true });
   } catch (err) {
-    console.error('Error saving user profile to Firestore:', err);
+    console.warn('Notice saving user profile to Firestore:', err);
     throw err;
   }
 }
@@ -611,7 +651,7 @@ export async function getLeadsFromFirestore(userId: string): Promise<Lead[]> {
     });
     return validLeads;
   } catch (err) {
-    console.error('Error getting leads from Firestore:', err);
+    console.warn('Notice getting leads from Firestore:', err);
     return [];
   }
 }
@@ -706,7 +746,7 @@ export async function getPropertiesFromFirestore(userId: string): Promise<Proper
     });
     return validProps;
   } catch (err) {
-    console.error('Error getting properties from Firestore:', err);
+    console.warn('Notice getting properties from Firestore:', err);
     return [];
   }
 }
@@ -789,7 +829,7 @@ export async function uploadPropertyPhoto(
     const downloadUrl = await getDownloadURL(uploadResult.ref);
     return downloadUrl;
   } catch (err) {
-    console.error('Firebase Storage photo upload error:', err);
+    console.warn('Firebase Storage photo upload notice:', err);
     throw err;
   }
 }

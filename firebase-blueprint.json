@@ -145,6 +145,21 @@
         "acknowledged": { "type": "boolean", "description": "Play Store acknowledgment state" },
         "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
       }
+    },
+    "AccountDeletionJob": {
+      "collection": "accountDeletionJobs",
+      "path": "accountDeletionJobs/{jobId}",
+      "description": "Durable queued account deletion and data purge jobs",
+      "fields": {
+        "uid": { "type": "string", "description": "Agent User ID" },
+        "email": { "type": "string", "description": "Agent email address", "optional": true },
+        "status": { "type": "string", "description": "pending | processing | completed | failed" },
+        "requestedAt": { "type": "string", "description": "ISO timestamp when deletion was requested" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last status update", "optional": true },
+        "completedAt": { "type": "string", "description": "ISO timestamp when purge completed", "optional": true },
+        "retryCount": { "type": "number", "description": "Number of retry attempts" },
+        "lastError": { "type": "string", "description": "Error message from last failure", "optional": true }
+      }
     }
   }
 }

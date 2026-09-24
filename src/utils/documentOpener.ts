@@ -240,7 +240,7 @@ export async function openLeadDocument(
       return { success: true };
     }
   } catch (webErr) {
-    console.error('[DocumentOpener] Fallback open failed:', webErr);
+    console.warn('[DocumentOpener] Fallback open notice:', webErr);
     return {
       success: false,
       message: 'No app available to open this file.',

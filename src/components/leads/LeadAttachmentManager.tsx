@@ -125,7 +125,7 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
       setShowSaveButton(true);
       showToast('Document attached successfully');
     } catch (err: any) {
-      console.error('[Attachment Upload Error]', err);
+      console.warn('[Attachment Upload Notice]', err);
       showToast(err?.message || 'Failed to upload attachment. Please try again.');
     } finally {
       setIsUploading(false);

@@ -58,7 +58,7 @@ interface SettingsViewProps {
   isCloudSynced?: boolean;
   onGoogleSignIn?: () => void;
   onSignOut?: () => void;
-  onAccountDeleted?: () => void;
+  onAccountDeleted?: (info?: { isPartial?: boolean; partialMessage?: string }) => void;
   onUpdateProfile: (profile: UserProfile) => void;
   onUpdateTemplates: (templates: WhatsAppTemplate[]) => void;
   onOpenSubscription: () => void;
@@ -645,9 +645,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <DeleteAccountModal
         isOpen={showDeleteAccountModal}
         onClose={() => setShowDeleteAccountModal(false)}
-        onAccountDeleted={() => {
+        onAccountDeleted={(info) => {
           setShowDeleteAccountModal(false);
-          onAccountDeleted?.();
+          onAccountDeleted?.(info);
         }}
         currentUserEmail={currentUserEmail}
         leads={leads}

@@ -250,7 +250,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
       setIsSubmitting(false);
       onClose();
     } catch (err: any) {
-      console.error('Error updating property:', err);
+      console.warn('Notice updating property:', err);
       setIsSubmitting(false);
       setErrorMessage(err?.message || 'Failed to update property. Please try again.');
     }

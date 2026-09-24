@@ -271,7 +271,7 @@ export function openWhatsApp(phone: string, text?: string): void {
       window.location.assign(url);
     }
   } catch (err) {
-    console.error('Failed to open WhatsApp window:', err);
+    console.warn('Notice opening WhatsApp window:', err);
     window.location.href = url;
   }
 }
@@ -321,7 +321,7 @@ export async function copyUnicodeTextToClipboard(text: string): Promise<boolean>
     document.body.removeChild(textArea);
     return successful;
   } catch (err) {
-    console.error('All clipboard copy attempts failed', err);
+    console.warn('All clipboard copy attempts notice:', err);
     return false;
   }
 }

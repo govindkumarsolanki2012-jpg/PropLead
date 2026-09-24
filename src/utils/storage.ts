@@ -36,7 +36,7 @@ export function getStoredProperties(): Property[] {
     }
     return cleaned;
   } catch (err) {
-    console.error('Error loading properties from storage:', err);
+    console.warn('Notice loading properties from storage:', err);
     return [];
   }
 }
@@ -45,7 +45,7 @@ export function saveStoredProperties(properties: Property[]): void {
   try {
     localStorage.setItem(STORAGE_KEYS.PROPERTIES, JSON.stringify(properties));
   } catch (err) {
-    console.error('Error saving properties to storage:', err);
+    console.warn('Notice saving properties to storage:', err);
   }
 }
 
@@ -63,7 +63,7 @@ export function getStoredLeads(): Lead[] {
     }
     return cleaned;
   } catch (err) {
-    console.error('Error loading leads from storage:', err);
+    console.warn('Notice loading leads from storage:', err);
     return [];
   }
 }
@@ -72,7 +72,7 @@ export function saveStoredLeads(leads: Lead[]): void {
   try {
     localStorage.setItem(STORAGE_KEYS.LEADS, JSON.stringify(leads));
   } catch (err) {
-    console.error('Error saving leads to storage:', err);
+    console.warn('Notice saving leads to storage:', err);
   }
 }
 
@@ -90,7 +90,7 @@ export function getStoredProfile(): UserProfile {
     }
     return parsed || INITIAL_USER_PROFILE;
   } catch (err) {
-    console.error('Error loading profile from storage:', err);
+    console.warn('Notice loading profile from storage:', err);
     return INITIAL_USER_PROFILE;
   }
 }
@@ -99,7 +99,7 @@ export function saveStoredProfile(profile: UserProfile): void {
   try {
     localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile));
   } catch (err) {
-    console.error('Error saving profile to storage:', err);
+    console.warn('Notice saving profile to storage:', err);
   }
 }
 
@@ -111,7 +111,7 @@ export function saveStoredTemplates(templates: WhatsAppTemplate[]): void {
   try {
     localStorage.setItem(STORAGE_KEYS.TEMPLATES, JSON.stringify(templates));
   } catch (err) {
-    console.error('Error saving templates to storage:', err);
+    console.warn('Notice saving templates to storage:', err);
   }
 }
 
@@ -122,7 +122,7 @@ export function clearAllData(): void {
     localStorage.removeItem(STORAGE_KEYS.PROFILE);
     localStorage.removeItem(STORAGE_KEYS.IS_LOGGED_IN);
   } catch (err) {
-    console.error('Error clearing local storage:', err);
+    console.warn('Notice clearing local storage:', err);
   }
 }
 
@@ -262,7 +262,7 @@ export async function exportLeadsToCSV(
         return { success: false, message: errMsg };
       }
     } catch (nativeErr: any) {
-      console.error('[CSV Export] Native Save As error:', nativeErr);
+      console.warn('[CSV Export] Native Save As notice:', nativeErr);
       if (
         nativeErr?.message?.includes('canceled') ||
         nativeErr?.message?.includes('CANCELED')
@@ -294,7 +294,7 @@ export async function exportLeadsToCSV(
     showAppToast('CSV downloaded successfully');
     return { success: true, message: 'CSV downloaded successfully' };
   } catch (dlErr: any) {
-    console.error('[CSV Export] Standard web download failed:', dlErr);
+    console.warn('[CSV Export] Standard web download notice:', dlErr);
     const errMsg = dlErr?.message || 'Download failed. Please check permissions.';
     showAppToast(errMsg, true);
     return { success: false, message: errMsg };

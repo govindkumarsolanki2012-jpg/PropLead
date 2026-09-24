@@ -26,6 +26,7 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleGoogleSignIn = async () => {
+    if (loading) return;
     setErrorMessage(null);
     resetGoogleAuthDiagnostics();
     reportGoogleAuthDiagnostic({
@@ -40,7 +41,6 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
       // On success, onAuthStateChanged in App.tsx detects the user session,
       // syncs/initializes the Firestore profile and 7-day trial, and opens the Dashboard.
     } catch (err: any) {
-      console.error('[AuthFlow] Google sign-in error:', err);
       const safeError = safeGoogleAuthError(err);
       reportGoogleAuthDiagnostic({
         stage: 13,
@@ -69,14 +69,21 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
           msg.toLowerCase().includes('cancelled-popup-request') ||
           msg === 'Google Sign-In cancelled by user');
 
+      const isNetworkError =
+        err?.code === 'auth/network-request-failed' ||
+        msg.toLowerCase().includes('network-request-failed') ||
+        msg.toLowerCase().includes('failed to fetch') ||
+        msg.toLowerCase().includes('network error');
+
       if (isCancelled) {
+        console.info('[AuthFlow] Google sign-in dismissed by user');
         setErrorMessage(null); // User intentionally dismissed the bottom sheet / dialog
-      } else if (err?.code === 'auth/network-request-failed') {
-        setErrorMessage('Network connection error. Please check your internet connection.');
-      } else if (err?.message) {
-        setErrorMessage(err.message);
+      } else if (isNetworkError) {
+        console.warn('[AuthFlow] Google sign-in network connection issue:', err?.message || err);
+        setErrorMessage('Network connection error. Please check your internet connection and try again.');
       } else {
-        setErrorMessage('Could not sign in with Google. Please try again.');
+        console.warn('[AuthFlow] Google sign-in issue:', err?.message || err);
+        setErrorMessage(err?.message || 'Could not sign in with Google. Please try again.');
       }
     } finally {
       setLoading(false);
@@ -155,9 +162,18 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
 
         {/* Error Alert */}
         {errorMessage && (
-          <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-xl text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-600" />
-            <span>{errorMessage}</span>
+          <div className="mb-4 p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-xl text-xs text-rose-700 dark:text-rose-300 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-600" />
+              <span>{errorMessage}</span>
+            </div>
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              className="text-xs font-bold text-rose-800 dark:text-rose-200 underline shrink-0 cursor-pointer hover:opacity-80"
+            >
+              Retry
+            </button>
           </div>
         )}
 

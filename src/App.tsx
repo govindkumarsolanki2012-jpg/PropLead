@@ -13,6 +13,7 @@ import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { SettingsView } from './components/settings/SettingsView';
 import { SplashScreen } from './components/common/SplashScreen';
 import { AnimatePresence } from 'motion/react';
+import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 // Modals
 import { QuickAddLeadModal } from './components/leads/QuickAddLeadModal';
@@ -109,6 +110,13 @@ export function App() {
   // Firebase Authentication coordination
   const [isAuthResolved, setIsAuthResolved] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(() => getCurrentUser());
+  const firestoreCleanupRef = useRef<(() => void) | null>(null);
+
+  // Account deletion standalone success notice state
+  const [accountDeletedNotice, setAccountDeletedNotice] = useState<{
+    isPartial?: boolean;
+    partialMessage?: string;
+  } | null>(null);
 
   // Safety fallback for offline / extreme latency
   useEffect(() => {
@@ -124,6 +132,16 @@ export function App() {
       initSocialLogin().catch((err) => console.debug('[GoogleAuth] Pre-init error:', err));
     }
   }, []);
+
+  // 1-2 second automatic transition after account deletion to return to login screen
+  useEffect(() => {
+    if (accountDeletedNotice && !accountDeletedNotice.isPartial) {
+      const timer = setTimeout(() => {
+        setAccountDeletedNotice(null);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [accountDeletedNotice]);
 
   const isUserAuthenticated = Boolean(currentUser) || (!isAuthResolved && checkHasActiveSession());
   const [profile, setProfile] = useState<UserProfile>(getStoredProfile());
@@ -413,22 +431,32 @@ export function App() {
     let unsubSubscription: (() => void) | null = null;
     let unsubLeads: (() => void) | null = null;
     let unsubProps: (() => void) | null = null;
-    let authGeneration = 0;
 
-    const stopUserListeners = () => {
-      if (unsubProfile) unsubProfile();
-      if (unsubSubscription) unsubSubscription();
-      if (unsubLeads) unsubLeads();
-      if (unsubProps) unsubProps();
-      unsubProfile = null;
-      unsubSubscription = null;
-      unsubLeads = null;
-      unsubProps = null;
+    const cleanupFirestoreListeners = () => {
+      if (unsubProfile) {
+        unsubProfile();
+        unsubProfile = null;
+      }
+      if (unsubSubscription) {
+        unsubSubscription();
+        unsubSubscription = null;
+      }
+      if (unsubLeads) {
+        unsubLeads();
+        unsubLeads = null;
+      }
+      if (unsubProps) {
+        unsubProps();
+        unsubProps = null;
+      }
     };
 
+    firestoreCleanupRef.current = cleanupFirestoreListeners;
+
     const unsubAuth = subscribeToAuth(async (user) => {
-      const generation = ++authGeneration;
-      stopUserListeners();
+      // Whenever auth state transitions (including to null or another user), clean up existing Firestore listeners
+      cleanupFirestoreListeners();
+
       setCurrentUser(user);
       setIsAuthResolved(true);
 
@@ -439,7 +467,6 @@ export function App() {
         setIsCloudSynced(true);
         // Safely migrate/initialize user data in Firestore with user phone
         const syncRes = await syncLocalDataToFirestore(user.uid, user.email, user.displayName, user.phoneNumber);
-        if (generation !== authGeneration || getCurrentUser()?.uid !== user.uid) return;
 
         // Detect if this account was just created brand-new for onboarding
         if (syncRes.isNewUser) {
@@ -451,7 +478,6 @@ export function App() {
 
         // Subscribe to real-time user profile in Firestore
         unsubProfile = subscribeUserProfile(user.uid, (firestoreProfile) => {
-          if (generation !== authGeneration) return;
           if (firestoreProfile) {
             setProfile((prev) => {
               let effectiveTrialEndDate = firestoreProfile.trialEndDate || prev.trialEndDate;
@@ -490,7 +516,6 @@ export function App() {
 
         // Subscribe to real-time subscription entitlement record in Firestore (/subscriptions/{userId})
         unsubSubscription = subscribeSubscriptionRecordFromFirestore(user.uid, (subRecord) => {
-          if (generation !== authGeneration) return;
           if (subRecord) {
             const rawSubStatus = (subRecord.subscriptionStatus || '').toLowerCase();
             const subExpiry = subRecord.subscriptionExpiryTime || subRecord.subscriptionExpiryDate || subRecord.expiryDate;
@@ -548,7 +573,6 @@ export function App() {
 
         // Subscribe to real-time leads in Firestore
         unsubLeads = subscribeLeadsFromFirestore(user.uid, (firestoreLeads) => {
-          if (generation !== authGeneration) return;
           if (firestoreLeads) {
             setLeads(firestoreLeads);
             saveStoredLeads(firestoreLeads);
@@ -557,7 +581,6 @@ export function App() {
 
         // Subscribe to real-time properties in Firestore
         unsubProps = subscribePropertiesFromFirestore(user.uid, (firestoreProps) => {
-          if (generation !== authGeneration) return;
           if (firestoreProps) {
             setProperties(firestoreProps);
             saveStoredProperties(firestoreProps);
@@ -573,9 +596,9 @@ export function App() {
     });
 
     return () => {
-      authGeneration++;
       unsubAuth();
-      stopUserListeners();
+      cleanupFirestoreListeners();
+      firestoreCleanupRef.current = null;
     };
   }, []);
 
@@ -934,7 +957,7 @@ export function App() {
       showToast(`Property "${newProperty.title}" added to inventory! 🏠`);
       return true;
     } catch (err: any) {
-      console.error('Firestore add property error:', err);
+      console.warn('Firestore add property offline/fallback:', err);
       const updated = [newProperty, ...properties];
       setProperties(updated);
       saveStoredProperties(updated);
@@ -957,7 +980,7 @@ export function App() {
       showToast('Property details updated.');
       return true;
     } catch (err: any) {
-      console.error('Firestore update property error:', err);
+      console.warn('Firestore update property offline/fallback:', err);
       const updated = properties.map((p) => (p.id === updatedProperty.id ? updatedProperty : p));
       setProperties(updated);
       saveStoredProperties(updated);
@@ -983,7 +1006,7 @@ export function App() {
       showToast('Property removed from inventory.');
       return true;
     } catch (err: any) {
-      console.error('Firestore delete property error:', err);
+      console.warn('Firestore delete property offline/fallback:', err);
       const updated = properties.filter((p) => p.id !== propertyId);
       setProperties(updated);
       saveStoredProperties(updated);
@@ -1010,7 +1033,7 @@ export function App() {
       }
       showToast(`${propertyIds.length} propert${propertyIds.length === 1 ? 'y' : 'ies'} removed from inventory.`);
     } catch (err: any) {
-      console.error('Firestore batch delete properties error:', err);
+      console.warn('Firestore batch delete properties offline/fallback:', err);
       const idSet = new Set(propertyIds);
       const updated = properties.filter((p) => !idSet.has(p.id));
       setProperties(updated);
@@ -1093,7 +1116,6 @@ export function App() {
         showToast(`Connected as ${user.displayName || user.email}! ☁️`);
       }
     } catch (err: any) {
-      console.error('[App] Google sign-in failed:', err);
       const msg = err?.message || String(err || '');
       const isCancelled =
         err?.code === 'auth/popup-closed-by-user' ||
@@ -1103,7 +1125,19 @@ export function App() {
         msg.toLowerCase().includes('user canceled') ||
         msg.toLowerCase().includes('cancelled-popup-request');
 
-      if (!isCancelled) {
+      const isNetworkError =
+        err?.code === 'auth/network-request-failed' ||
+        msg.toLowerCase().includes('network-request-failed') ||
+        msg.toLowerCase().includes('failed to fetch') ||
+        msg.toLowerCase().includes('network error');
+
+      if (isCancelled) {
+        console.info('[App] Google sign-in dismissed by user');
+      } else if (isNetworkError) {
+        console.warn('[App] Google sign-in network connection issue:', err?.message || err);
+        showToast('Network connection error. Please check your internet connection.');
+      } else {
+        console.warn('[App] Google sign-in failed:', err?.message || err);
         showToast(err?.message || 'Sign-in failed. Please try again.');
       }
     }
@@ -1130,7 +1164,7 @@ export function App() {
         return false;
       }
     } catch (err: any) {
-      console.error('[App] Error starting trial from onboarding:', err);
+      console.warn('[App] Error starting trial from onboarding:', err);
       showToast(err?.message || 'Error starting trial');
       return false;
     }
@@ -1177,10 +1211,48 @@ export function App() {
       clearAllData();
       showToast('Logged out successfully. Cloud data preserved! 🔒');
     } catch (err) {
-      console.error('Sign-out error:', err);
+      console.warn('Sign-out error:', err);
       showToast('Failed to log out. Please try again.');
     }
   };
+
+  const handleAccountDeleted = useCallback((info?: { isPartial?: boolean; partialMessage?: string }) => {
+    // 1. Instantly tear down all Firestore real-time snapshot listeners
+    if (firestoreCleanupRef.current) {
+      firestoreCleanupRef.current();
+    }
+
+    // 2. Clear all sensitive in-memory user data & reset profile
+    setLeads([]);
+    setProperties([]);
+    setTemplates(getStoredTemplates());
+    setProfile(INITIAL_USER_PROFILE);
+    setCurrentUser(null);
+    setIsCloudSynced(false);
+
+    // 3. Close all open modals & reset navigation
+    setIsQuickAddOpen(false);
+    setDetailLead(null);
+    setWhatsAppLead(null);
+    setScheduleLead(null);
+    setEditLead(null);
+    setIsSubscriptionOpen(false);
+    setIsImportContactsOpen(false);
+    setIsFeatureLockedOpen(false);
+    setIsWelcomeOnboardingOpen(false);
+    setIsAddPropertyOpen(false);
+    setDetailProperty(null);
+    setEditProperty(null);
+    setSharePropertyData(null);
+    setCurrentTab('home');
+    setTabHistory(['home']);
+
+    // 4. Immediately transition to standalone Account Deleted state
+    setAccountDeletedNotice({
+      isPartial: Boolean(info?.isPartial),
+      partialMessage: info?.partialMessage,
+    });
+  }, []);
 
   // Check today and overdue follow-up counts for bottom nav badge
   const todayCount = leads.filter((l) => formatRelativeDate(l.nextFollowUpDate).isToday).length;
@@ -1208,7 +1280,57 @@ export function App() {
         </div>
       )}
 
-      {!isUserAuthenticated ? (
+      {accountDeletedNotice ? (
+        <div
+          className="flex-1 flex flex-col justify-between bg-white dark:bg-slate-900 text-slate-900 dark:text-white px-6 relative overflow-y-auto animate-in fade-in duration-200"
+          style={{
+            paddingTop: 'calc(2rem + max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)))',
+            paddingBottom: 'calc(1.5rem + max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px)))',
+          }}
+        >
+          <div className="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full py-6 space-y-6">
+            <div
+              className={`w-16 h-16 mx-auto rounded-3xl flex items-center justify-center shadow-xl ${
+                accountDeletedNotice.isPartial
+                  ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 shadow-amber-600/20'
+                  : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 shadow-emerald-600/20'
+              }`}
+            >
+              {accountDeletedNotice.isPartial ? (
+                <AlertTriangle className="w-8 h-8" />
+              ) : (
+                <CheckCircle2 className="w-8 h-8" />
+              )}
+            </div>
+
+            <div className="text-center space-y-2">
+              <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                {accountDeletedNotice.isPartial ? 'Account data deleted' : 'Account deleted'}
+              </h2>
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                {accountDeletedNotice.isPartial && accountDeletedNotice.partialMessage
+                  ? accountDeletedNotice.partialMessage
+                  : 'Your PropLead account and saved data have been deleted.'}
+              </p>
+            </div>
+
+            {/* Optional Google Play note */}
+            <div className="p-3.5 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-800/60 text-left">
+              <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                If you had an active Google Play subscription, manage or cancel it separately in Google Play.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setAccountDeletedNotice(null)}
+              className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-2xl text-xs transition-all shadow-md active:scale-[0.99] cursor-pointer"
+            >
+              Back to Sign In
+            </button>
+          </div>
+        </div>
+      ) : !isUserAuthenticated ? (
         <AuthFlow />
       ) : (
         <div className="flex-1 min-h-0 flex flex-col h-full bg-slate-100/70 dark:bg-slate-950 w-full max-w-full">
@@ -1325,37 +1447,7 @@ export function App() {
                 isCloudSynced={isCloudSynced}
                 onGoogleSignIn={handleGoogleSignIn}
                 onSignOut={handleSignOut}
-                onAccountDeleted={() => {
-                  // Reset every user-scoped in-memory value before exposing the
-                  // unauthenticated UI. The auth listener independently stops
-                  // all Firestore listeners when Firebase sign-out completes.
-                  setLeads([]);
-                  setProperties([]);
-                  setTemplates([]);
-                  setProfile(INITIAL_USER_PROFILE);
-                  setCurrentUser(null);
-                  setIsAuthResolved(true);
-                  setIsCloudSynced(false);
-                  setCurrentTab('home');
-                  setTabHistory(['home']);
-                  setLeadsFilter('all');
-                  setSearchQuery('');
-                  setPropertySearchQuery('');
-                  setDashboardSearchQuery('');
-                  setIsQuickAddOpen(false);
-                  setDetailLead(null);
-                  setWhatsAppLead(null);
-                  setScheduleLead(null);
-                  setEditLead(null);
-                  setIsSubscriptionOpen(false);
-                  setIsImportContactsOpen(false);
-                  setIsFeatureLockedOpen(false);
-                  setIsWelcomeOnboardingOpen(false);
-                  setIsAddPropertyOpen(false);
-                  setDetailProperty(null);
-                  setEditProperty(null);
-                  setSharePropertyData(null);
-                }}
+                onAccountDeleted={handleAccountDeleted}
                 onUpdateProfile={(p) => {
                   setProfile(p);
                   saveStoredProfile(p);
@@ -1568,6 +1660,9 @@ export function App() {
         onStartTrial={handleStartTrialFromOnboarding}
         onExploreFirst={handleExploreFirstFromOnboarding}
         agentName={profile.name || currentUser?.displayName || ''}
+        trialStatus={profile.trialStatus}
+        trialEndDate={profile.trialEndDate}
+        isSubscribed={profile.isSubscribed}
       />
     </MobileFrame>
   );

@@ -257,7 +257,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
       resetForm();
       onClose();
     } catch (err: any) {
-      console.error('Error adding property:', err);
+      console.warn('Notice adding property:', err);
       setIsSubmitting(false);
       setErrorMessage(err?.message || 'Failed to add property. Please try again.');
     }

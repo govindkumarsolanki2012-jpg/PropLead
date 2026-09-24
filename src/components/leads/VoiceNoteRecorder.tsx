@@ -225,7 +225,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
           setShowSaveButton(true);
           setSavedSuccess(false);
         } catch (saveErr) {
-          console.error('Failed to encode/save voice note:', saveErr);
+          console.warn('Notice encoding/saving voice note:', saveErr);
           setErrorMessage('Failed to save audio recording. Please try again.');
         } finally {
           setIsRecording(false);
@@ -295,7 +295,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
       try {
         mediaRecorderRef.current.stop();
       } catch (err) {
-        console.error('Error stopping MediaRecorder:', err);
+        console.warn('Notice stopping MediaRecorder:', err);
         setErrorMessage('Failed to finalize audio recording.');
         setIsRecording(false);
         setIsSaving(false);
@@ -358,7 +358,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
       setShowSaveButton(true);
       setSavedSuccess(false);
     } catch (err) {
-      console.error('Failed to upload audio file:', err);
+      console.warn('Notice processing uploaded audio file:', err);
       setErrorMessage('Failed to process audio file.');
     } finally {
       e.target.value = '';
@@ -424,7 +424,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
         };
 
         audio.onerror = (e) => {
-          console.error('Audio element playback error:', e);
+          console.warn('Audio element playback notice:', e);
           setErrorMessage('Playback error: audio format not supported or data corrupted.');
           setPlayingId(null);
           setPlaybackProgress(null);
@@ -438,7 +438,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
 
         await audio.play();
       } catch (playErr: any) {
-        console.error('Failed to play audio note:', playErr);
+        console.warn('Playback notice for audio note:', playErr);
         setErrorMessage(`Playback failed: ${playErr.message || 'Please check device volume and audio permissions.'}`);
         setPlayingId(null);
         setPlaybackProgress(null);

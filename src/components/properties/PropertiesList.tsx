@@ -167,7 +167,7 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
       setIsSelectionMode(false);
       setShowDeleteModal(false);
     } catch (err: any) {
-      console.error('Error deleting selected properties:', err);
+      console.warn('Notice deleting selected properties:', err);
       setDeleteError(err?.message || 'Unable to delete selected properties. Please try again.');
     } finally {
       setIsDeletingBulk(false);

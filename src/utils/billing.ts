@@ -208,7 +208,7 @@ export function calculateTrialDaysRemaining(
     const days = Math.min(7, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
     return Math.max(0, days);
   } catch (err) {
-    console.error('[Trial Countdown] Error calculating trial days from authoritative trialEndDate:', err);
+    console.warn('[Trial Countdown] Error calculating trial days from authoritative trialEndDate:', err);
     // Safe fallback: never grant 7 days on error
     return 0;
   }
@@ -697,7 +697,7 @@ export async function launchGooglePlayPurchase(
 
     // Bug 4: If no matching offer token exists for the requested base plan, stop purchase and show a clear error
     if (!offerToken) {
-      console.error(`[Google Play Billing] No matching offer token found for base plan "${basePlanId}". Stopping purchase.`);
+      console.warn(`[Google Play Billing] No matching offer token found for base plan "${basePlanId}". Stopping purchase.`);
       return {
         success: false,
         error: `OFFER_TOKEN_NOT_FOUND: No Google Play offer found for base plan ${basePlanId}`,
@@ -814,7 +814,7 @@ export async function launchGooglePlayPurchase(
       });
       responseText = await verifyRes.text();
     } catch (networkErr: any) {
-      console.error('[Google Play Verification Failed - Network Error]', {
+      console.warn('[Google Play Verification Notice - Network Error]', {
         endpoint: verifyEndpoint,
         error: networkErr?.message || networkErr,
       });
@@ -825,7 +825,7 @@ export async function launchGooglePlayPurchase(
     try {
       verifyData = JSON.parse(responseText);
     } catch (parseErr) {
-      console.error('[Google Play Verification Failed - Non-JSON Response Body]', {
+      console.warn('[Google Play Verification Notice - Non-JSON Response Body]', {
         endpoint: verifyEndpoint,
         httpStatus: verifyRes.status,
         statusText: verifyRes.statusText,
@@ -836,7 +836,7 @@ export async function launchGooglePlayPurchase(
     }
 
     if (!verifyRes.ok || !verifyData?.success) {
-      console.error('[Google Play Verification Failed - Server Error]', {
+      console.warn('[Google Play Verification Notice - Server Response]', {
         endpoint: verifyEndpoint,
         httpStatus: verifyRes.status,
         statusText: verifyRes.statusText,
@@ -914,7 +914,7 @@ export async function launchGooglePlayPurchase(
       profileUpdates,
     };
   } catch (err: any) {
-    console.error('Google Play purchase verification failed:', err?.message || err);
+    console.warn('Google Play purchase verification notice:', err?.message || err);
     return {
       success: false,
       error: err?.message || 'Failed to complete Google Play purchase. Please try again.',
@@ -1005,7 +1005,7 @@ export async function restoreGooglePlayPurchases(
     try {
       data = JSON.parse(restoreText);
     } catch (parseErr) {
-      console.error('[Google Play Restore Failed - Non-JSON Response]', {
+      console.warn('[Google Play Restore Notice - Non-JSON Response]', {
         endpoint: restoreEndpoint,
         httpStatus: res.status,
         statusText: res.statusText,
@@ -1020,7 +1020,7 @@ export async function restoreGooglePlayPurchases(
     }
 
     if (!res.ok) {
-      console.error('[Google Play Restore Failed - Server Error]', {
+      console.warn('[Google Play Restore Notice - Server Response]', {
         endpoint: restoreEndpoint,
         httpStatus: res.status,
         statusText: res.statusText,
@@ -1096,7 +1096,7 @@ export async function restoreGooglePlayPurchases(
       message: data.message || 'No active PropLead subscription was found for this Google Play account.',
     };
   } catch (err: any) {
-    console.error('Restore purchases error:', err?.message || err);
+    console.warn('Restore purchases notice:', err?.message || err);
     return {
       success: false,
       restored: false,
@@ -1223,7 +1223,7 @@ export async function startFreeTrialServer(userId: string): Promise<StartTrialRe
       serverNow: data.serverNow,
     };
   } catch (err: any) {
-    console.error('[Billing] startFreeTrialServer error:', err);
+    console.warn('[Billing] startFreeTrialServer notice:', err?.message || err);
     return {
       success: false,
       error: err?.message || 'Network error starting trial',

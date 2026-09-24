@@ -240,7 +240,7 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
                       setShowDeleteConfirm(false);
                       onClose();
                     } catch (err: any) {
-                      console.error('Error deleting property:', err);
+                      console.warn('Notice deleting property:', err);
                       setDeleteError(err?.message || 'Unable to delete property. Please try again.');
                     } finally {
                       setIsDeleting(false);

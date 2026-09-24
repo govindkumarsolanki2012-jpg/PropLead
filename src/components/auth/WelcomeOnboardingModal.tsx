@@ -19,6 +19,9 @@ interface WelcomeOnboardingModalProps {
   onStartTrial?: () => Promise<boolean>;
   onExploreFirst?: () => void;
   agentName?: string;
+  trialStatus?: 'not_started' | 'active' | 'expired';
+  trialEndDate?: string | null;
+  isSubscribed?: boolean;
 }
 
 export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
@@ -27,8 +30,12 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
   onStartTrial,
   onExploreFirst,
   agentName,
+  trialStatus = 'not_started',
+  trialEndDate,
+  isSubscribed = false,
 }) => {
-  const [step, setStep] = useState<1 | 2>(1);
+  const isAlreadyActive = trialStatus === 'active' || isSubscribed;
+  const [step, setStep] = useState<1 | 2>(isAlreadyActive ? 2 : 1);
   const [isActivating, setIsActivating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -63,6 +70,16 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
     }
   };
 
+  const formattedExpiry = trialEndDate
+    ? new Date(trialEndDate).toLocaleString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
       <div
@@ -72,14 +89,27 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
         {/* Top Decorative Header */}
         <div className="relative px-6 pt-8 pb-6 bg-gradient-to-b from-emerald-50/80 via-teal-50/40 to-transparent dark:from-emerald-950/30 dark:via-slate-900 dark:to-transparent text-center">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white shadow-xl shadow-emerald-600/25 mb-4">
-            {step === 1 ? (
+            {step === 1 && !isSubscribed ? (
               <Building2 className="w-8 h-8" />
             ) : (
               <CheckCircle2 className="w-8 h-8" />
             )}
           </div>
 
-          {step === 1 ? (
+          {isSubscribed ? (
+            <>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 text-[11px] font-bold mb-2">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>PropLead Pro Active</span>
+              </div>
+              <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                Welcome to Pro!
+              </h1>
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5">
+                All Pro features and cloud sync are unlocked for your account.
+              </p>
+            </>
+          ) : step === 1 && trialStatus === 'not_started' ? (
             <>
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 text-[11px] font-bold mb-2">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
@@ -104,9 +134,14 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
                 <span>Trial Active • 7 Days Unlocked</span>
               </div>
               <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                You're all set!
+                Your 7-day free trial is active
               </h1>
-              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1.5">
+              {formattedExpiry && (
+                <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 mt-1">
+                  Valid until: {formattedExpiry}
+                </p>
+              )}
+              <p className="text-xs text-slate-600 dark:text-slate-300 mt-1">
                 Full Pro access is now active. Add your first lead to get started.
               </p>
             </>
@@ -121,7 +156,7 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
             </div>
           )}
 
-          {step === 1 ? (
+          {step === 1 && !isSubscribed && trialStatus === 'not_started' ? (
             <div className="space-y-3">
               {/* Benefit 1 */}
               <div className="flex items-start gap-3.5 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/60">
@@ -172,7 +207,9 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
             <div className="space-y-3 py-2">
               <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-center">
                 <p className="text-xs text-emerald-900 dark:text-emerald-200 leading-relaxed font-medium">
-                  Your workspace is ready with full Pro access for 7 days. You can capture a lead in under 10 seconds or jump straight into the dashboard.
+                  {isSubscribed
+                    ? 'Your workspace is ready with full Pro access. You can capture a lead in under 10 seconds or jump straight into the dashboard.'
+                    : 'Your workspace is ready with full Pro access for 7 days. You can capture a lead in under 10 seconds or jump straight into the dashboard.'}
                 </p>
               </div>
 
@@ -186,7 +223,7 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
 
         {/* Action Footer */}
         <div className="px-6 py-5 bg-slate-50 dark:bg-slate-850 border-t border-slate-100 dark:border-slate-800">
-          {step === 1 ? (
+          {step === 1 && !isSubscribed && trialStatus === 'not_started' ? (
             <div className="space-y-2.5">
               <button
                 type="button"

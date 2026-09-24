@@ -137,7 +137,7 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
           </div>
           <div className="py-3 px-4 bg-emerald-50 dark:bg-emerald-950/40 rounded-2xl border border-emerald-500/30">
             <div className="text-2xl font-black text-emerald-700 dark:text-emerald-300">
-              ₹49<span className="text-sm font-semibold text-slate-500 dark:text-slate-400">/month</span>
+              ₹79<span className="text-sm font-semibold text-slate-500 dark:text-slate-400">/month</span>
             </div>
           </div>
           <div className="space-y-2 pt-1">

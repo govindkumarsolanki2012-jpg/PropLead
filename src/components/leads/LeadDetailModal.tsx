@@ -1107,7 +1107,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                       setShowDeleteConfirm(false);
                       onClose();
                     } catch (err) {
-                      console.error('Error deleting lead:', err);
+                      console.warn('Notice deleting lead:', err);
                       setDeleteError('Unable to delete lead. Please try again.');
                     } finally {
                       setIsDeleting(false);

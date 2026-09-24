@@ -184,7 +184,7 @@ export async function syncLocalDataToFirestore(
       propertiesUploaded: propsToUpload,
     };
   } catch (err: any) {
-    console.error('Migration error:', err);
+    console.warn('Migration notice:', err);
     return {
       migrated: false,
       leadsUploaded: 0,
