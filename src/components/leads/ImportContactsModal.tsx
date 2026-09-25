@@ -280,21 +280,27 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
 
   // 1. Check live permission state upon modal open and auto-load if already granted
   useEffect(() => {
-    if (isOpen) {
-      checkContactsPermission().then((perm) => {
-        if (perm.state === 'granted') {
-          setPermissionDenied(false);
-          setIsPermanentlyDenied(false);
-          setPermissionErrorMessage(null);
-          fetchAndLoadContacts(true);
-        } else if (perm.state === 'denied') {
-          setIsPermanentlyDenied(true);
-        }
-      });
+    if (!isOpen) {
+      setSearch('');
+      setShowPasteInput(false);
+      setPasteText('');
+      setPermissionErrorMessage(null);
+      return;
     }
+
+    checkContactsPermission().then((perm) => {
+      if (perm.state === 'granted') {
+        setPermissionDenied(false);
+        setIsPermanentlyDenied(false);
+        setPermissionErrorMessage(null);
+        fetchAndLoadContacts(true);
+      } else if (perm.state === 'denied') {
+        setIsPermanentlyDenied(true);
+      }
+    });
   }, [isOpen, fetchAndLoadContacts]);
 
-  // 2. App Resume listener: Re-check permissions automatically when returning from Android Settings
+  // 2. App Resume listener: Re-check permissions automatically when returning from Android Settings (ONLY when modal is open)
   useEffect(() => {
     if (!isOpen) return;
 
@@ -314,6 +320,9 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
 
     return () => unsubscribe();
   }, [isOpen, fetchAndLoadContacts]);
+
+  // Guard render: Modal must NEVER render DOM when closed
+  if (!isOpen) return null;
 
   const handlePickDeviceContacts = () => {
     fetchAndLoadContacts(false);
@@ -467,7 +476,14 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
   const newContactsCount = contacts.filter((c) => !c.isExistingLead).length;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[90vh] flex flex-col overflow-hidden animate-slide-up safe-bottom">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-800">
@@ -483,8 +499,10 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
             </div>
           </div>
           <button
+            id="btn_close_import_contacts_modal"
             onClick={onClose}
-            className="w-7 h-7 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 flex items-center justify-center"
+            aria-label="Close"
+            className="w-8 h-8 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
