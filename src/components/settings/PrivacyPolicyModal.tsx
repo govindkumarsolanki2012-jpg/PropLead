@@ -173,7 +173,7 @@ export const PrivacyPolicyModal: React.FC<PrivacyPolicyModalProps> = ({
             </p>
             <div className="flex items-center gap-2 text-slate-800 dark:text-slate-200 font-medium mt-1">
               <Mail className="w-4 h-4 text-emerald-600" />
-              <span>jyothigehlot2025@gmail.com</span>
+              <span>brightcore733@gmail.com</span>
             </div>
           </section>
         </div>

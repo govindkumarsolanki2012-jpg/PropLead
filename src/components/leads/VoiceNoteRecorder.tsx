@@ -70,6 +70,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   const refreshMicPermission = useCallback(async () => {
     try {
       const res = await checkMicrophonePermission();
+      console.log(`[VoiceNoteRecorder] refreshMicPermission result: state=${res.state} permanentlyDenied=${res.isPermanentlyDenied}`);
       if (res.state === 'granted') {
         setIsMicPermanentlyDenied(false);
         setErrorMessage((prev) =>
@@ -79,6 +80,8 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
         );
       } else if (res.state === 'denied' && res.isPermanentlyDenied) {
         setIsMicPermanentlyDenied(true);
+      } else {
+        setIsMicPermanentlyDenied(false);
       }
     } catch {
       // ignore
@@ -92,6 +95,15 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
     });
     return () => unsubscribe();
   }, [refreshMicPermission]);
+
+  useEffect(() => {
+    console.log('[VoiceNoteRecorder] MIC_UI_STATE:', {
+      isRecording,
+      isMicPermanentlyDenied,
+      hasErrorMessage: Boolean(errorMessage),
+      errorMessage,
+    });
+  }, [isRecording, isMicPermanentlyDenied, errorMessage]);
 
   // Stop playback and stream cleanup on unmount
   useEffect(() => {
@@ -509,7 +521,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   };
 
   return (
-    <div className="space-y-3">
+    <div className="w-full max-w-full min-w-0 space-y-3">
       {/* Error Message Alert */}
       {errorMessage && (
         <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-xl flex items-start justify-between gap-2.5 text-xs text-rose-800 dark:text-rose-200 animate-in fade-in">
@@ -543,14 +555,14 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
       )}
 
       {/* Recorder Action Box */}
-      <div className="p-4 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
-            <Mic className="w-4 h-4 text-emerald-600" />
-            <span>Voice Memo (Driving / Site Visit Notes)</span>
+      <div className="w-full max-w-full min-w-0 p-3.5 sm:p-4 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700">
+        <div className="flex items-center justify-between mb-3 min-w-0">
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200 min-w-0">
+            <Mic className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="truncate">Voice Memo (Driving / Site Visit Notes)</span>
           </div>
           {isRecording && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 text-[11px] font-bold animate-pulse">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 text-[11px] font-bold animate-pulse shrink-0">
               <span className="w-2 h-2 rounded-full bg-rose-600" />
               <span>Recording {formatAudioDuration(recordingSeconds)}</span>
             </div>
@@ -558,17 +570,17 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
         </div>
 
         {isRecording ? (
-          <div className="space-y-2.5 p-3.5 bg-rose-50/80 dark:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-800">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-3 h-3 rounded-full bg-rose-600 animate-ping" />
-                <span className="text-xs font-semibold text-rose-900 dark:text-rose-200">
+          <div className="space-y-2.5 p-3.5 bg-rose-50/80 dark:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-800 w-full max-w-full min-w-0">
+            <div className="flex items-center justify-between min-w-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-3 h-3 rounded-full bg-rose-600 animate-ping shrink-0" />
+                <span className="text-xs font-semibold text-rose-900 dark:text-rose-200 truncate">
                   Recording audio... ({formatAudioDuration(recordingSeconds)})
                 </span>
               </div>
 
               {/* Animated sound wave indicators */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
                 <span className="w-1 h-3 bg-rose-500 rounded-full animate-bounce" />
                 <span className="w-1 h-5 bg-rose-600 rounded-full animate-bounce [animation-delay:0.15s]" />
                 <span className="w-1 h-2.5 bg-rose-500 rounded-full animate-bounce [animation-delay:0.3s]" />
@@ -590,7 +602,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
                 type="button"
                 onClick={stopAndSaveRecording}
                 disabled={isSaving}
-                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer disabled:opacity-50"
               >
                 {isSaving ? (
                   <>
@@ -607,37 +619,42 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
             </div>
           </div>
         ) : (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
+          <div className="space-y-2.5 w-full max-w-full min-w-0">
+            <div className="w-full max-w-full min-w-0 flex flex-col sm:flex-row sm:items-center gap-2">
+              {/* Row 1 on mobile: Full width label input */}
               <input
                 type="text"
                 value={voiceTextNote}
                 onChange={(e) => setVoiceTextNote(e.target.value)}
                 placeholder="Optional label (e.g. Budget discussed, wife liked floor plan)..."
-                className="flex-1 px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
+                className="w-full sm:flex-1 min-w-0 px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
               />
-              <label
-                className="p-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl cursor-pointer flex items-center justify-center transition-colors flex-shrink-0"
-                title="Upload audio file from phone"
-              >
-                <UploadCloud className="w-4 h-4" />
-                <input
-                  type="file"
-                  accept="audio/*"
-                  onChange={handleAudioUpload}
-                  className="hidden"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={startRecording}
-                className="px-3.5 sm:px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-all flex-shrink-0 cursor-pointer"
-              >
-                <Mic className="w-3.5 h-3.5" />
-                <span>Record Voice Note</span>
-              </button>
+
+              {/* Row 2 on mobile / Inline on tablet/desktop: Upload + Record Voice Button */}
+              <div className="w-full sm:w-auto flex items-center gap-2 min-w-0">
+                <label
+                  className="p-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl cursor-pointer flex items-center justify-center transition-colors shrink-0"
+                  title="Upload audio file from phone"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={handleAudioUpload}
+                    className="hidden"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={startRecording}
+                  className="flex-1 sm:flex-none min-w-0 justify-center px-3.5 sm:px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                >
+                  <Mic className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Record Voice</span>
+                </button>
+              </div>
             </div>
-            <p className="text-[11px] text-slate-400 dark:text-slate-500 px-1">
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 px-1 leading-relaxed">
               Audio is saved locally and synced with this lead profile for playback anytime.
             </p>
 
@@ -647,7 +664,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
                 <button
                   type="button"
                   onClick={handleConfirmSave}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-sm inline-flex items-center gap-1.5 transition-all cursor-pointer"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-xs inline-flex items-center gap-1.5 transition-all cursor-pointer"
                 >
                   <Check className="w-3.5 h-3.5" />
                   <span>Save</span>

@@ -25,6 +25,7 @@ import {
   requestContactsPermission,
   openNativeAppSettings,
   registerAppResumeListener,
+  getNativeDeviceContacts,
 } from '../../utils/nativePermissions';
 
 export interface ContactItem {
@@ -63,6 +64,20 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
   const [permissionErrorMessage, setPermissionErrorMessage] = useState<string | null>(null);
   const [deviceHasNoContacts, setDeviceHasNoContacts] = useState<boolean>(false);
   const [previewLoaded, setPreviewLoaded] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      console.log('[ImportContacts] CONTACTS_UI_STATE:', {
+        isOpen,
+        isLoading,
+        permissionDenied,
+        isPermanentlyDenied,
+        hasErrorMessage: Boolean(permissionErrorMessage),
+        permissionErrorMessage,
+        contactsLoadedCount: contacts.length,
+      });
+    }
+  }, [isOpen, isLoading, permissionDenied, isPermanentlyDenied, permissionErrorMessage, contacts.length]);
 
   // Set of existing phone numbers normalized to 10 digits
   const existingPhoneSet = new Set(
@@ -154,16 +169,8 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
           setIsLoading(true);
           setDeviceHasNoContacts(false);
 
-          // Step 2: Permission granted -> Read contacts from Android device
-          const result = await Contacts.getContacts({
-            projection: {
-              name: true,
-              phones: true,
-              postalAddresses: true,
-            },
-          });
-
-          const rawContacts = result?.contacts || [];
+          // Step 2: Permission granted -> Read contacts from Android device using native READ_CONTACTS
+          const rawContacts = await getNativeDeviceContacts();
 
           if (rawContacts.length === 0) {
             setDeviceHasNoContacts(true);
@@ -178,16 +185,8 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
 
           for (let i = 0; i < rawContacts.length; i++) {
             const rc = rawContacts[i];
-            const displayName =
-              rc.name?.display?.trim() ||
-              [rc.name?.given, rc.name?.middle, rc.name?.family].filter(Boolean).join(' ').trim() ||
-              '';
-
-            const phoneList = (rc.phones || [])
-              .map((p) => p.number?.trim())
-              .filter((num): num is string => Boolean(num));
-
-            const primaryPhone = phoneList[0] || '';
+            const displayName = rc.name?.trim() || 'Client';
+            const primaryPhone = rc.phone?.trim() || '';
             const normPhone = normalizePhoneForMatch(primaryPhone);
 
             if (!displayName && !primaryPhone) continue;
@@ -195,18 +194,13 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
             if (normPhone) seenPhonesInDevice.add(normPhone);
 
             const isDuplicate = checkIsDuplicate(primaryPhone, displayName);
-            const locality =
-              rc.postalAddresses?.[0]?.neighborhood ||
-              rc.postalAddresses?.[0]?.city ||
-              undefined;
 
             parsedContacts.push({
-              id: rc.contactId || `dev_${Date.now()}_${i}`,
-              name: displayName || 'Client',
+              id: rc.id || `dev_${Date.now()}_${i}`,
+              name: displayName,
               phone: primaryPhone,
-              suggestedLocality: locality,
               isExistingLead: isDuplicate,
-              rawContactId: rc.contactId,
+              rawContactId: rc.id,
             });
           }
 

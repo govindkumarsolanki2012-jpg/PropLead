@@ -2832,7 +2832,7 @@ async function startServer() {
     <p>PropLead Pro subscriptions are billed through Google Play. Deleting your PropLead account or uninstalling the app does not automatically cancel active recurring subscriptions in Google Play. Users can manage or cancel their subscription at any time at: <a href="https://play.google.com/store/account/subscriptions" target="_blank" rel="noopener noreferrer">https://play.google.com/store/account/subscriptions</a>.</p>
 
     <h2>7. Contact Information</h2>
-    <p>For questions or privacy inquiries, please contact the PropLead team at: <a href="mailto:jyothigehlot2025@gmail.com">jyothigehlot2025@gmail.com</a>.</p>
+    <p>For questions or privacy inquiries, please contact the PropLead team at: <a href="mailto:brightcore733@gmail.com">brightcore733@gmail.com</a>.</p>
 
     <div class="footer">
       &copy; 2026 PropLead Real Estate CRM. All rights reserved.
@@ -2913,7 +2913,7 @@ async function startServer() {
       <p><strong>Option 2: Web Deletion Request Form</strong></p>
       <p>If you no longer have access to the mobile app, you can submit a deletion request below using your registered Google account email. Requests are processed within 24–48 hours.</p>
       
-      <form action="mailto:jyothigehlot2025@gmail.com?subject=PropLead%20Account%20and%20Data%20Deletion%20Request" method="POST" enctype="text/plain" class="form-box">
+      <form action="mailto:brightcore733@gmail.com?subject=PropLead%20Account%20and%20Data%20Deletion%20Request" method="POST" enctype="text/plain" class="form-box">
         <div class="form-group">
           <label for="email">Registered Google Email Address *</label>
           <input type="email" id="email" name="RegisteredEmail" required placeholder="e.g. broker@gmail.com" />
@@ -2934,7 +2934,7 @@ async function startServer() {
     </ul>
 
     <h2>Contact Support</h2>
-    <p>For immediate assistance with account or data deletion, email our Data Protection Officer at: <a href="mailto:jyothigehlot2025@gmail.com">jyothigehlot2025@gmail.com</a>.</p>
+    <p>For immediate assistance with account or data deletion, email our Data Protection Officer at: <a href="mailto:brightcore733@gmail.com">brightcore733@gmail.com</a>.</p>
 
     <div class="footer">
       &copy; 2026 PropLead Real Estate CRM. All rights reserved.
