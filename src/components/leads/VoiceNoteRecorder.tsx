@@ -13,6 +13,7 @@ import {
   Loader2,
   RotateCcw,
   UploadCloud,
+  Settings,
 } from 'lucide-react';
 import { VoiceNote } from '../../types';
 import {
@@ -24,6 +25,11 @@ import {
   saveAudioToIndexedDB,
   deleteAudioFromIndexedDB,
 } from '../../utils/audioStorage';
+import {
+  checkMicrophonePermission,
+  openNativeAppSettings,
+  registerAppResumeListener,
+} from '../../utils/nativePermissions';
 
 interface VoiceNoteRecorderProps {
   leadId: string;
@@ -44,6 +50,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [voiceTextNote, setVoiceTextNote] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isMicPermanentlyDenied, setIsMicPermanentlyDenied] = useState<boolean>(false);
   const [showSaveButton, setShowSaveButton] = useState<boolean>(false);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
   const [playbackProgress, setPlaybackProgress] = useState<{
@@ -58,6 +65,33 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   const startTimeRef = useRef<number>(0);
   const canceledRef = useRef<boolean>(false);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
+
+  // Check live microphone permission on mount and on app resume
+  const refreshMicPermission = useCallback(async () => {
+    try {
+      const res = await checkMicrophonePermission();
+      if (res.state === 'granted') {
+        setIsMicPermanentlyDenied(false);
+        setErrorMessage((prev) =>
+          prev && (prev.toLowerCase().includes('microphone') || prev.toLowerCase().includes('audio')) && prev.toLowerCase().includes('denied')
+            ? null
+            : prev
+        );
+      } else if (res.state === 'denied' && res.isPermanentlyDenied) {
+        setIsMicPermanentlyDenied(true);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshMicPermission();
+    const unsubscribe = registerAppResumeListener(() => {
+      refreshMicPermission();
+    });
+    return () => unsubscribe();
+  }, [refreshMicPermission]);
 
   // Stop playback and stream cleanup on unmount
   useEffect(() => {
@@ -110,6 +144,16 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
       audioElementRef.current.pause();
       setPlayingId(null);
       setPlaybackProgress(null);
+    }
+
+    // Check live native microphone permission before attempting capture
+    const livePerm = await checkMicrophonePermission();
+    if (livePerm.state === 'denied' && livePerm.isPermanentlyDenied) {
+      setIsMicPermanentlyDenied(true);
+      setErrorMessage(
+        'Microphone permission is permanently denied. Please tap "Open Settings" to enable microphone access.'
+      );
+      return;
     }
 
     if (typeof window === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -266,8 +310,13 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
 
       if (isPermissionDenied) {
         console.warn('Microphone permission was denied:', errMsg || err);
+        const permCheck = await checkMicrophonePermission();
+        const permanentlyDenied = permCheck.isPermanentlyDenied || false;
+        setIsMicPermanentlyDenied(permanentlyDenied);
         setErrorMessage(
-          'Microphone permission was denied. Please allow microphone access in your browser or device settings to record audio notes.'
+          permanentlyDenied
+            ? 'Microphone permission is permanently denied. Please tap "Open Settings" to enable microphone access.'
+            : 'Microphone permission was denied. Please allow microphone access in your browser or device settings to record audio notes.'
         );
       } else if (isNotFound) {
         console.warn('No microphone device detected:', errMsg || err);
@@ -464,9 +513,23 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
       {/* Error Message Alert */}
       {errorMessage && (
         <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-xl flex items-start justify-between gap-2.5 text-xs text-rose-800 dark:text-rose-200 animate-in fade-in">
-          <div className="flex items-start gap-2 min-w-0">
-            <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
-            <span className="leading-snug">{errorMessage}</span>
+          <div className="flex-1 space-y-2 min-w-0">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+              <span className="leading-snug">{errorMessage}</span>
+            </div>
+            {isMicPermanentlyDenied && (
+              <div className="pl-6">
+                <button
+                  type="button"
+                  onClick={() => openNativeAppSettings()}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold rounded-lg text-xs inline-flex items-center gap-1 shadow-xs transition-all cursor-pointer"
+                >
+                  <Settings className="w-3 h-3" />
+                  <span>Open Settings</span>
+                </button>
+              </div>
+            )}
           </div>
           <button
             type="button"

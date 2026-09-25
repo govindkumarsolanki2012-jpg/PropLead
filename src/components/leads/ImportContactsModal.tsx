@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   X,
   Search,
@@ -14,11 +14,18 @@ import {
   Loader2,
   AlertCircle,
   Users,
+  Settings,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Contacts } from '@capacitor-community/contacts';
 import { Lead, RequirementType } from '../../types';
 import { normalizePhoneForMatch } from '../../utils/formatters';
+import {
+  checkContactsPermission,
+  requestContactsPermission,
+  openNativeAppSettings,
+  registerAppResumeListener,
+} from '../../utils/nativePermissions';
 
 export interface ContactItem {
   id: string;
@@ -52,11 +59,10 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
   // Native handling state
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [permissionDenied, setPermissionDenied] = useState<boolean>(false);
+  const [isPermanentlyDenied, setIsPermanentlyDenied] = useState<boolean>(false);
   const [permissionErrorMessage, setPermissionErrorMessage] = useState<string | null>(null);
   const [deviceHasNoContacts, setDeviceHasNoContacts] = useState<boolean>(false);
   const [previewLoaded, setPreviewLoaded] = useState<boolean>(false);
-
-  if (!isOpen) return null;
 
   // Set of existing phone numbers normalized to 10 digits
   const existingPhoneSet = new Set(
@@ -66,7 +72,7 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
     existingLeads.map((l) => l.name.trim().toLowerCase()).filter(Boolean)
   );
 
-  const checkIsDuplicate = (phone: string, name: string): boolean => {
+  const checkIsDuplicate = useCallback((phone: string, name: string): boolean => {
     const normPhone = normalizePhoneForMatch(phone);
     if (normPhone && existingPhoneSet.has(normPhone)) {
       return true;
@@ -75,163 +81,9 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
       return true;
     }
     return false;
-  };
+  }, [existingPhoneSet, existingNameSet]);
 
-  const handlePickDeviceContacts = async () => {
-    setIsLoading(true);
-    setPermissionDenied(false);
-    setPermissionErrorMessage(null);
-    setDeviceHasNoContacts(false);
-    setPreviewLoaded(false);
-
-    try {
-      const isNative = Capacitor.isNativePlatform();
-
-      if (isNative) {
-        // Step 1: Check existing permissions or request them
-        let permStatus = await Contacts.checkPermissions();
-
-        if (permStatus.contacts !== 'granted') {
-          permStatus = await Contacts.requestPermissions();
-        }
-
-        if (permStatus.contacts !== 'granted') {
-          setPermissionDenied(true);
-          setPermissionErrorMessage(
-            'Contacts permission was denied. PropLead requires contacts access to read and import your phone address book.'
-          );
-          setIsLoading(false);
-          return;
-        }
-
-        // Step 2: Permission granted -> Read contacts from Android device
-        const result = await Contacts.getContacts({
-          projection: {
-            name: true,
-            phones: true,
-            postalAddresses: true,
-          },
-        });
-
-        const rawContacts = result?.contacts || [];
-
-        if (rawContacts.length === 0) {
-          setDeviceHasNoContacts(true);
-          setContacts([]);
-          setSelectedIds(new Set());
-          setIsLoading(false);
-          return;
-        }
-
-        // Step 3: Parse and filter contacts
-        const parsedContacts: ContactItem[] = [];
-        const seenPhonesInDevice = new Set<string>();
-
-        for (let i = 0; i < rawContacts.length; i++) {
-          const rc = rawContacts[i];
-          const displayName =
-            rc.name?.display?.trim() ||
-            [rc.name?.given, rc.name?.middle, rc.name?.family].filter(Boolean).join(' ').trim() ||
-            '';
-
-          const phoneList = (rc.phones || [])
-            .map((p) => p.number?.trim())
-            .filter((num): num is string => Boolean(num));
-
-          const primaryPhone = phoneList[0] || '';
-          const normPhone = normalizePhoneForMatch(primaryPhone);
-
-          // Skip contact if neither name nor phone exists
-          if (!displayName && !primaryPhone) continue;
-
-          // Prevent listing identical phone numbers twice from address book
-          if (normPhone && seenPhonesInDevice.has(normPhone)) continue;
-          if (normPhone) seenPhonesInDevice.add(normPhone);
-
-          const isDuplicate = checkIsDuplicate(primaryPhone, displayName);
-          const locality =
-            rc.postalAddresses?.[0]?.neighborhood ||
-            rc.postalAddresses?.[0]?.city ||
-            undefined;
-
-          parsedContacts.push({
-            id: rc.contactId || `dev_${Date.now()}_${i}`,
-            name: displayName || 'Client',
-            phone: primaryPhone,
-            suggestedLocality: locality,
-            isExistingLead: isDuplicate,
-            rawContactId: rc.contactId,
-          });
-        }
-
-        if (parsedContacts.length === 0) {
-          setDeviceHasNoContacts(true);
-          setContacts([]);
-          setSelectedIds(new Set());
-        } else {
-          setContacts(parsedContacts);
-          // Pre-select non-duplicate contacts so the user can import quickly
-          const freshSelectableIds = new Set(
-            parsedContacts.filter((c) => !c.isExistingLead).map((c) => c.id)
-          );
-          setSelectedIds(freshSelectableIds);
-        }
-      } else if (typeof navigator !== 'undefined' && 'contacts' in navigator && 'ContactsManager' in window) {
-        // Step 1b: Modern mobile web Contact Picker API fallback
-        const props = ['name', 'tel'];
-        const picked = await (navigator as any).contacts.select(props, { multiple: true });
-
-        if (picked && picked.length > 0) {
-          const newItems: ContactItem[] = picked
-            .map((p: any, idx: number) => {
-              const name = Array.isArray(p.name) ? p.name[0] : p.name || 'Unknown Contact';
-              const phone = Array.isArray(p.tel) ? p.tel[0] : p.tel || '';
-              const cleanP = String(phone).replace(/\s+/g, '');
-              const cleanN = String(name).trim();
-              const isDuplicate = checkIsDuplicate(cleanP, cleanN);
-
-              return {
-                id: `web_${Date.now()}_${idx}`,
-                name: cleanN || 'Client',
-                phone: cleanP,
-                isExistingLead: isDuplicate,
-              };
-            })
-            .filter((c: ContactItem) => c.name || c.phone);
-
-          if (newItems.length > 0) {
-            setContacts(newItems);
-            setSelectedIds(new Set(newItems.filter((c) => !c.isExistingLead).map((c) => c.id)));
-          } else {
-            setDeviceHasNoContacts(true);
-          }
-        } else {
-          setDeviceHasNoContacts(true);
-        }
-      } else {
-        // Step 1c: Non-native web browser / AI Studio preview fallback
-        // Offer sample address book contacts so user can test the selection, duplicate detection, and import workflow
-        loadSampleDeviceContacts();
-      }
-    } catch (err: any) {
-      console.warn('Contact picker error or permission failure:', err);
-      const errStr = String(err?.message || err || '').toLowerCase();
-      if (errStr.includes('permission') || errStr.includes('denied')) {
-        setPermissionDenied(true);
-        setPermissionErrorMessage(
-          'Contacts permission was denied. Please allow contacts access to select from your phone.'
-        );
-      } else {
-        setPermissionErrorMessage(
-          err?.message || 'Could not load contacts from device. Please try again.'
-        );
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const loadSampleDeviceContacts = () => {
+  const loadSampleDeviceContacts = useCallback(() => {
     const sampleContacts = [
       { name: 'Rahul Sharma', phone: '+91 98200 11223', locality: 'Andheri West' },
       { name: 'Amit Verma', phone: '+91 98199 87654', locality: 'Bandra' },
@@ -255,6 +107,220 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
     setContacts(parsed);
     setSelectedIds(new Set(parsed.filter((c) => !c.isExistingLead).map((c) => c.id)));
     setPreviewLoaded(true);
+  }, [checkIsDuplicate]);
+
+  const fetchAndLoadContacts = useCallback(
+    async (isAutoCheck = false) => {
+      try {
+        const isNative = Capacitor.isNativePlatform();
+
+        if (isNative) {
+          // Step 1: Check live native Android permission state
+          const perm = await checkContactsPermission();
+
+          if (perm.state === 'granted') {
+            setPermissionDenied(false);
+            setIsPermanentlyDenied(false);
+            setPermissionErrorMessage(null);
+          } else if (isAutoCheck) {
+            // If automated check on open or resume and permission is not granted,
+            // update state silently without triggering an aggressive pop-up error
+            if (perm.state === 'denied') {
+              setPermissionDenied(true);
+              setIsPermanentlyDenied(true);
+              setPermissionErrorMessage(
+                'Contacts permission is denied. Please tap "Open Settings" to enable contacts access.'
+              );
+            }
+            return;
+          } else {
+            // Explicit user click -> Request permission
+            const reqPerm = await requestContactsPermission();
+            if (reqPerm.state !== 'granted') {
+              setPermissionDenied(true);
+              setIsPermanentlyDenied(reqPerm.isPermanentlyDenied || false);
+              setPermissionErrorMessage(
+                reqPerm.isPermanentlyDenied
+                  ? 'Contacts permission is permanently denied. Please tap "Open Settings" to enable contacts access in Android settings.'
+                  : 'Contacts permission was denied. PropLead requires contacts access to import phone numbers.'
+              );
+              return;
+            }
+            setPermissionDenied(false);
+            setIsPermanentlyDenied(false);
+            setPermissionErrorMessage(null);
+          }
+
+          setIsLoading(true);
+          setDeviceHasNoContacts(false);
+
+          // Step 2: Permission granted -> Read contacts from Android device
+          const result = await Contacts.getContacts({
+            projection: {
+              name: true,
+              phones: true,
+              postalAddresses: true,
+            },
+          });
+
+          const rawContacts = result?.contacts || [];
+
+          if (rawContacts.length === 0) {
+            setDeviceHasNoContacts(true);
+            setContacts([]);
+            setSelectedIds(new Set());
+            setIsLoading(false);
+            return;
+          }
+
+          const parsedContacts: ContactItem[] = [];
+          const seenPhonesInDevice = new Set<string>();
+
+          for (let i = 0; i < rawContacts.length; i++) {
+            const rc = rawContacts[i];
+            const displayName =
+              rc.name?.display?.trim() ||
+              [rc.name?.given, rc.name?.middle, rc.name?.family].filter(Boolean).join(' ').trim() ||
+              '';
+
+            const phoneList = (rc.phones || [])
+              .map((p) => p.number?.trim())
+              .filter((num): num is string => Boolean(num));
+
+            const primaryPhone = phoneList[0] || '';
+            const normPhone = normalizePhoneForMatch(primaryPhone);
+
+            if (!displayName && !primaryPhone) continue;
+            if (normPhone && seenPhonesInDevice.has(normPhone)) continue;
+            if (normPhone) seenPhonesInDevice.add(normPhone);
+
+            const isDuplicate = checkIsDuplicate(primaryPhone, displayName);
+            const locality =
+              rc.postalAddresses?.[0]?.neighborhood ||
+              rc.postalAddresses?.[0]?.city ||
+              undefined;
+
+            parsedContacts.push({
+              id: rc.contactId || `dev_${Date.now()}_${i}`,
+              name: displayName || 'Client',
+              phone: primaryPhone,
+              suggestedLocality: locality,
+              isExistingLead: isDuplicate,
+              rawContactId: rc.contactId,
+            });
+          }
+
+          if (parsedContacts.length === 0) {
+            setDeviceHasNoContacts(true);
+            setContacts([]);
+            setSelectedIds(new Set());
+          } else {
+            setContacts(parsedContacts);
+            const freshSelectableIds = new Set(
+              parsedContacts.filter((c) => !c.isExistingLead).map((c) => c.id)
+            );
+            setSelectedIds(freshSelectableIds);
+          }
+        } else if (isAutoCheck) {
+          // Web auto-check: do not auto-prompt web selector on open
+          return;
+        } else if (typeof navigator !== 'undefined' && 'contacts' in navigator && 'ContactsManager' in window) {
+          setIsLoading(true);
+          const props = ['name', 'tel'];
+          const picked = await (navigator as any).contacts.select(props, { multiple: true });
+
+          if (picked && picked.length > 0) {
+            const newItems: ContactItem[] = picked
+              .map((p: any, idx: number) => {
+                const name = Array.isArray(p.name) ? p.name[0] : p.name || 'Unknown Contact';
+                const phone = Array.isArray(p.tel) ? p.tel[0] : p.tel || '';
+                const cleanP = String(phone).replace(/\s+/g, '');
+                const cleanN = String(name).trim();
+                const isDuplicate = checkIsDuplicate(cleanP, cleanN);
+
+                return {
+                  id: `web_${Date.now()}_${idx}`,
+                  name: cleanN || 'Client',
+                  phone: cleanP,
+                  isExistingLead: isDuplicate,
+                };
+              })
+              .filter((c: ContactItem) => c.name || c.phone);
+
+            if (newItems.length > 0) {
+              setContacts(newItems);
+              setSelectedIds(new Set(newItems.filter((c) => !c.isExistingLead).map((c) => c.id)));
+            } else {
+              setDeviceHasNoContacts(true);
+            }
+          } else {
+            setDeviceHasNoContacts(true);
+          }
+        } else {
+          loadSampleDeviceContacts();
+        }
+      } catch (err: any) {
+        console.warn('[ImportContacts] Error fetching contacts:', err);
+        const errStr = String(err?.message || err || '').toLowerCase();
+        if (errStr.includes('permission') || errStr.includes('denied')) {
+          setPermissionDenied(true);
+          setIsPermanentlyDenied(true);
+          setPermissionErrorMessage(
+            'Contacts permission was denied. Please allow contacts access to select from your phone.'
+          );
+        } else {
+          setPermissionErrorMessage(err?.message || 'Could not load contacts from device. Please try again.');
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [checkIsDuplicate, loadSampleDeviceContacts]
+  );
+
+  // 1. Check live permission state upon modal open and auto-load if already granted
+  useEffect(() => {
+    if (isOpen) {
+      checkContactsPermission().then((perm) => {
+        if (perm.state === 'granted') {
+          setPermissionDenied(false);
+          setIsPermanentlyDenied(false);
+          setPermissionErrorMessage(null);
+          fetchAndLoadContacts(true);
+        } else if (perm.state === 'denied') {
+          setIsPermanentlyDenied(true);
+        }
+      });
+    }
+  }, [isOpen, fetchAndLoadContacts]);
+
+  // 2. App Resume listener: Re-check permissions automatically when returning from Android Settings
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const unsubscribe = registerAppResumeListener(() => {
+      checkContactsPermission().then((perm) => {
+        if (perm.state === 'granted') {
+          setPermissionDenied(false);
+          setIsPermanentlyDenied(false);
+          setPermissionErrorMessage(null);
+          // Automatically load contacts now that permission is granted in settings!
+          fetchAndLoadContacts(true);
+        } else if (perm.state === 'denied') {
+          setIsPermanentlyDenied(true);
+        }
+      });
+    });
+
+    return () => unsubscribe();
+  }, [isOpen, fetchAndLoadContacts]);
+
+  const handlePickDeviceContacts = () => {
+    fetchAndLoadContacts(false);
+  };
+
+  const handleOpenSettings = async () => {
+    await openNativeAppSettings();
   };
 
   const handleParsePasteText = () => {
@@ -468,14 +534,25 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
                     'Contacts permission was denied. PropLead needs access to your Android contacts to import them.'}
                 </div>
                 <div className="pt-1.5 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handlePickDeviceContacts}
-                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-xs transition-all cursor-pointer"
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    <span>Grant Permission Again</span>
-                  </button>
+                  {isPermanentlyDenied ? (
+                    <button
+                      type="button"
+                      onClick={handleOpenSettings}
+                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-xs transition-all cursor-pointer"
+                    >
+                      <Settings className="w-3 h-3" />
+                      <span>Open Settings</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handlePickDeviceContacts}
+                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold rounded-lg text-xs flex items-center gap-1 shadow-xs transition-all cursor-pointer"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Grant Permission Again</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

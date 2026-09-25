@@ -283,11 +283,6 @@ export function App() {
       if (Capacitor.isNativePlatform()) {
         CapApp.exitApp();
       } else {
-        try {
-          CapApp.exitApp();
-        } catch (e) {
-          // safe fallback
-        }
         showToast('Exiting PropLead...');
       }
       return;
@@ -367,11 +362,6 @@ export function App() {
     if (Capacitor.isNativePlatform()) {
       CapApp.exitApp();
     } else {
-      try {
-        CapApp.exitApp();
-      } catch (e) {
-        // safe fallback
-      }
       showToast('Exiting PropLead...');
     }
   }, [showToast]);
@@ -394,19 +384,21 @@ export function App() {
     let isCleanedUp = false;
 
     // 1. Capacitor native Android backButton listener
-    CapApp.addListener('backButton', () => {
-      triggerBack();
-    })
-      .then((handle) => {
-        if (isCleanedUp) {
-          handle.remove();
-        } else {
-          listenerHandle = handle;
-        }
+    if (Capacitor.isNativePlatform()) {
+      CapApp.addListener('backButton', () => {
+        triggerBack();
       })
-      .catch((err) => {
-        console.warn('Capacitor backButton listener unavailable:', err);
-      });
+        .then((handle) => {
+          if (isCleanedUp) {
+            handle.remove();
+          } else {
+            listenerHandle = handle;
+          }
+        })
+        .catch((err) => {
+          console.warn('Capacitor backButton listener unavailable:', err);
+        });
+    }
 
     // 2. Desktop keyboard Escape listener for testing and preview
     const handleKeyDown = (e: KeyboardEvent) => {

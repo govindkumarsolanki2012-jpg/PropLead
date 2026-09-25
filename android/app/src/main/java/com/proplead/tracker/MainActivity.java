@@ -10,9 +10,11 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(DocumentOpenerPlugin.class);
         registerPlugin(CsvDownloadPlugin.class);
         registerPlugin(PropLeadSocialLoginPlugin.class);
+        registerPlugin(AppSettingsPlugin.class);
         super.onCreate(savedInstanceState);
         if (bridge != null) {
             bridge.registerPlugin(PropLeadSocialLoginPlugin.class);
+            bridge.registerPlugin(AppSettingsPlugin.class);
         }
     }
 }

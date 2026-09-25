@@ -478,7 +478,8 @@ export async function fetchGooglePlayProduct(): Promise<GooglePlayProductResult>
         productType: PURCHASE_TYPE.SUBS,
       });
 
-      if (!res.products || res.products.length === 0) {
+      const allProducts = res.products || [];
+      if (allProducts.length === 0) {
         console.warn('[Google Play Billing] 0 products returned from Play Store, using configured plans');
         return {
           product: DEFAULT_PRODUCT_DETAILS,
@@ -486,10 +487,38 @@ export async function fetchGooglePlayProduct(): Promise<GooglePlayProductResult>
         };
       }
 
+      console.log(`[Google Play Billing] Querying product "${GOOGLE_PLAY_PRODUCT_ID}". Play Store returned ${allProducts.length} offer entry/entries.`);
+
+      // Log the structure returned by Google Play WITHOUT exposing sensitive tokens
+      for (const p of allProducts) {
+        const itemBasePlanId = (p as any).basePlanId || (p.identifier !== GOOGLE_PLAY_PRODUCT_ID ? p.identifier : undefined) || (p as any).planIdentifier || p.identifier;
+        console.log(`[Google Play Billing] Subscription Offer Details:`, {
+          productId: p.planIdentifier || GOOGLE_PLAY_PRODUCT_ID,
+          basePlanId: itemBasePlanId,
+          offerId: p.offerId ?? null,
+          offerTokenPresent: Boolean(p.offerToken) ? 'YES' : 'NO',
+          pricingPhasesCount: Array.isArray((p as any).pricingPhases) ? (p as any).pricingPhases.length : 1,
+          firstPricingPhaseFormattedPrice: p.priceString,
+          billingPeriod: p.subscriptionPeriod
+            ? `P${p.subscriptionPeriod.numberOfUnits}${p.subscriptionPeriod.unitString === 'year' ? 'Y' : (p.subscriptionPeriod.unitString === 'day' ? 'D' : (p.subscriptionPeriod.unitString === 'week' ? 'W' : 'M'))}`
+            : (itemBasePlanId === 'monthly' ? 'P1M' : 'P3M'),
+        });
+
+        // Dynamically update formatted prices from Play Store for both base plans
+        if (itemBasePlanId === 'monthly' && p.priceString) {
+          SUBSCRIPTION_PLANS.monthly.priceFormatted = p.priceString;
+          if (p.price) SUBSCRIPTION_PLANS.monthly.price = p.price;
+        } else if (itemBasePlanId === 'quarterly' && p.priceString) {
+          SUBSCRIPTION_PLANS.quarterly.priceFormatted = p.priceString;
+          if (p.price) SUBSCRIPTION_PLANS.quarterly.price = p.price;
+        }
+      }
+
       const nativeProd =
-        res.products.find(
-          (p) => p.identifier === GOOGLE_PLAY_PRODUCT_ID || (p as any).planIdentifier === GOOGLE_PLAY_PRODUCT_ID
-        ) || res.products[0];
+        allProducts.find((p) => {
+          const itemBasePlanId = (p as any).basePlanId || (p.identifier !== GOOGLE_PLAY_PRODUCT_ID ? p.identifier : undefined) || (p as any).planIdentifier;
+          return itemBasePlanId === 'quarterly';
+        }) || allProducts[0];
 
       const priceString = nativeProd?.priceString || DEFAULT_PRODUCT_DETAILS.priceFormatted;
       const priceMicros = nativeProd?.price
@@ -662,46 +691,69 @@ export async function launchGooglePlayPurchase(
     }
 
     // 2. Fetch available offer token strictly matching basePlanId ('monthly' | 'quarterly')
-    // Bug 4 Fix: monthly -> use only the offer token whose planIdentifier/basePlanId is monthly
-    // quarterly -> use only the offer token whose planIdentifier/basePlanId is quarterly
-    // Do NOT fall back to another base plan or to products[0].
     let offerToken: string | undefined;
+    let allProducts: any[] = [];
     try {
       const prodsRes = await NativePurchases.getProducts({
         productIdentifiers: [GOOGLE_PLAY_PRODUCT_ID],
         productType: PURCHASE_TYPE.SUBS,
       });
 
-      const allProducts = prodsRes.products || [];
-      console.log(`[Google Play Billing] Querying products for base plan "${basePlanId}". Found ${allProducts.length} product(s).`);
+      allProducts = prodsRes.products || [];
+      console.log(`[Google Play Billing] Querying products for base plan "${basePlanId}". Found ${allProducts.length} product offer(s).`);
 
+      // Log structure for every returned entry WITHOUT exposing sensitive tokens
       for (const p of allProducts) {
-        const prod = p as any;
-        if (prod.planIdentifier === basePlanId || prod.basePlanId === basePlanId) {
-          if (prod.offerToken) {
-            offerToken = prod.offerToken;
-            break;
-          }
-        }
-        if (Array.isArray(prod.subscriptionOfferDetails)) {
-          const matchOffer = prod.subscriptionOfferDetails.find((o: any) => o.basePlanId === basePlanId);
-          if (matchOffer?.offerToken) {
-            offerToken = matchOffer.offerToken;
-            break;
-          }
-        }
+        const itemBasePlanId = (p as any).basePlanId || (p.identifier !== GOOGLE_PLAY_PRODUCT_ID ? p.identifier : undefined) || (p as any).planIdentifier || p.identifier;
+        console.log(`[Google Play Billing] Subscription Offer Details:`, {
+          productId: p.planIdentifier || GOOGLE_PLAY_PRODUCT_ID,
+          basePlanId: itemBasePlanId,
+          offerId: p.offerId ?? null,
+          offerTokenPresent: Boolean(p.offerToken) ? 'YES' : 'NO',
+          pricingPhasesCount: Array.isArray((p as any).pricingPhases) ? (p as any).pricingPhases.length : 1,
+          firstPricingPhaseFormattedPrice: p.priceString,
+          billingPeriod: p.subscriptionPeriod
+            ? `P${p.subscriptionPeriod.numberOfUnits}${p.subscriptionPeriod.unitString === 'year' ? 'Y' : (p.subscriptionPeriod.unitString === 'day' ? 'D' : (p.subscriptionPeriod.unitString === 'week' ? 'W' : 'M'))}`
+            : (itemBasePlanId === 'monthly' ? 'P1M' : 'P3M'),
+        });
+      }
+
+      // Selection logic:
+      // For monthly: select subscriptionOfferDetails entry where basePlanId === "monthly"
+      // For quarterly: select subscriptionOfferDetails entry where basePlanId === "quarterly"
+      // Note: Do NOT require offerId to exist (offerId is null for standard base-plan entries).
+      // If multiple entries exist for the same base plan: prefer standard entry (null offerId) unless a specific offer is selected.
+      const matchingOffers = allProducts.filter((p) => {
+        const itemBasePlanId = (p as any).basePlanId || (p.identifier !== GOOGLE_PLAY_PRODUCT_ID ? p.identifier : undefined) || (p as any).planIdentifier;
+        return itemBasePlanId === basePlanId;
+      });
+
+      const selectedOffer =
+        matchingOffers.find((p) => !p.offerId && Boolean(p.offerToken)) ||
+        matchingOffers.find((p) => Boolean(p.offerToken)) ||
+        matchingOffers[0];
+
+      if (selectedOffer?.offerToken) {
+        offerToken = selectedOffer.offerToken;
       }
     } catch (queryErr: any) {
       console.warn('[Google Play Billing] Product pre-query notice:', queryErr);
     }
 
-    // Bug 4: If no matching offer token exists for the requested base plan, stop purchase and show a clear error
+    // If no matching offer token exists for the requested base plan, stop purchase and show diagnostic message
     if (!offerToken) {
-      console.warn(`[Google Play Billing] No matching offer token found for base plan "${basePlanId}". Stopping purchase.`);
+      const availableBasePlans = Array.from(
+        new Set(
+          allProducts
+            .map((p) => (p as any).basePlanId || (p.identifier !== GOOGLE_PLAY_PRODUCT_ID ? p.identifier : undefined) || (p as any).planIdentifier)
+            .filter(Boolean)
+        )
+      );
+      console.warn(`[Google Play Billing] No matching offer token found for base plan "${basePlanId}". Available base plans: [${availableBasePlans.join(', ')}]. Stopping purchase.`);
       return {
         success: false,
-        error: `OFFER_TOKEN_NOT_FOUND: No Google Play offer found for base plan ${basePlanId}`,
-        message: `Unable to find the Google Play offer for the ${selectedPlan.name}. Please ensure your Play Store app is updated and try again.`,
+        error: `OFFER_TOKEN_NOT_FOUND: Requested base plan "${basePlanId}" was not found in Google Play products. Available base plans: [${availableBasePlans.join(', ')}]`,
+        message: `Unable to find the Google Play offer for the ${selectedPlan.name} (requested base plan: "${basePlanId}", available from Play Store: [${availableBasePlans.join(', ')}]). Please ensure your Play Store app is updated and try again.`,
       };
     }
 
