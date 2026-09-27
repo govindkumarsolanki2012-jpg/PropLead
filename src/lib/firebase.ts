@@ -28,12 +28,14 @@ export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 // Initialize Firestore with offline persistence (single-tab manager prevents multi-lease clock drift errors)
+// and experimentalAutoDetectLongPolling to ensure resilient backend connection across web proxies and mobile networks
 let firestoreInstance: Firestore;
 try {
   firestoreInstance = initializeFirestore(app, {
     localCache: persistentLocalCache({
       tabManager: persistentSingleTabManager({}),
     }),
+    experimentalAutoDetectLongPolling: true,
   }, firebaseConfig.firestoreDatabaseId || undefined);
 } catch (e) {
   // If already initialized, retrieve default or custom database instance

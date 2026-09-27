@@ -39,6 +39,13 @@ interface VoiceNoteRecorderProps {
   onDeleteVoiceNote: (id: string) => void;
 }
 
+interface PendingRecording {
+  id: string;
+  dataUrl: string;
+  mimeType: string;
+  durationSeconds: number;
+}
+
 export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   leadId,
   voiceNotes,
@@ -46,13 +53,13 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   onDeleteVoiceNote,
 }) => {
   const [isRecording, setIsRecording] = useState<boolean>(false);
-  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [isStopping, setIsStopping] = useState<boolean>(false);
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [voiceTextNote, setVoiceTextNote] = useState<string>('');
+  const [pendingRecording, setPendingRecording] = useState<PendingRecording | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMicPermanentlyDenied, setIsMicPermanentlyDenied] = useState<boolean>(false);
-  const [showSaveButton, setShowSaveButton] = useState<boolean>(false);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
   const [playbackProgress, setPlaybackProgress] = useState<{
     currentTime: number;
@@ -103,8 +110,9 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
       isMicPermanentlyDenied,
       hasErrorMessage: Boolean(errorMessage),
       errorMessage,
+      pendingRecording: Boolean(pendingRecording),
     });
-  }, [isRecording, isMicPermanentlyDenied, errorMessage]);
+  }, [isRecording, isMicPermanentlyDenied, errorMessage, pendingRecording]);
 
   // Stop playback and stream cleanup on unmount
   useEffect(() => {
@@ -149,7 +157,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   const startRecording = async () => {
     setErrorMessage(null);
     canceledRef.current = false;
-    setShowSaveButton(false);
+    setPendingRecording(null);
     setSavedSuccess(false);
 
     // Pause any currently playing voice note
@@ -159,27 +167,31 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
       setPlaybackProgress(null);
     }
 
-    // Check live native microphone permission before attempting capture
-    let livePerm = await checkMicrophonePermission();
-    if (livePerm.state === 'denied' && livePerm.isPermanentlyDenied) {
-      setIsMicPermanentlyDenied(true);
-      setErrorMessage(
-        'Microphone permission is permanently denied. Please tap "Open Settings" to enable microphone access.'
-      );
-      return;
-    }
-
-    if (livePerm.state !== 'granted') {
-      const reqPerm = await requestMicrophonePermission();
-      if (reqPerm.state !== 'granted') {
-        setIsMicPermanentlyDenied(reqPerm.isPermanentlyDenied || false);
+    // 1. Check & request live native microphone permission before attempting capture
+    try {
+      let livePerm = await checkMicrophonePermission();
+      if (livePerm.state === 'denied' && livePerm.isPermanentlyDenied) {
+        setIsMicPermanentlyDenied(true);
         setErrorMessage(
-          reqPerm.isPermanentlyDenied
-            ? 'Microphone permission is permanently denied. Please tap "Open Settings" to enable microphone access.'
-            : 'Microphone permission was denied. PropLead needs microphone access to record voice memos.'
+          'Microphone permission is permanently denied. Please tap "Open Settings" to enable microphone access.'
         );
         return;
       }
+
+      if (livePerm.state !== 'granted') {
+        const reqPerm = await requestMicrophonePermission();
+        if (reqPerm.state !== 'granted') {
+          setIsMicPermanentlyDenied(reqPerm.isPermanentlyDenied || false);
+          setErrorMessage(
+            reqPerm.isPermanentlyDenied
+              ? 'Microphone permission is permanently denied. Please tap "Open Settings" to enable microphone access.'
+              : 'Microphone permission was denied. PropLead needs microphone access to record voice memos.'
+          );
+          return;
+        }
+      }
+    } catch (permErr) {
+      console.warn('[VoiceNoteRecorder] Notice checking microphone permission:', permErr);
     }
 
     if (typeof window === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -190,11 +202,12 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
     }
 
     try {
-      // 1. Request microphone stream with progressive fallback for device constraints
+      // 2. Request microphone stream with progressive fallback for device constraints
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       } catch (basicErr) {
+        console.warn('[VoiceNoteRecorder] Basic getUserMedia failed, trying with audio constraints:', basicErr);
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
@@ -213,7 +226,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
       try {
         recorder = options ? new MediaRecorder(stream, options) : new MediaRecorder(stream);
       } catch (mimeErr) {
-        console.warn('Could not initialize MediaRecorder with options, using default', mimeErr);
+        console.warn('[VoiceNoteRecorder] Could not initialize MediaRecorder with options, using default', mimeErr);
         recorder = new MediaRecorder(stream);
       }
 
@@ -232,7 +245,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
         // If recording was cancelled, discard
         if (canceledRef.current) {
           setIsRecording(false);
-          setIsSaving(false);
+          setIsStopping(false);
           setRecordingSeconds(0);
           return;
         }
@@ -248,7 +261,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
         if (audioBlob.size === 0) {
           setErrorMessage('No audio data was captured. Please speak clearly into your microphone.');
           setIsRecording(false);
-          setIsSaving(false);
+          setIsStopping(false);
           setRecordingSeconds(0);
           return;
         }
@@ -256,37 +269,26 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
         try {
           // Convert blob to persistent Base64 Data URL (playable across sessions)
           const dataUrl = await blobToDataUrl(audioBlob);
-
           const noteId = `vn_${Date.now()}`;
 
-          // Also persist into IndexedDB for safety
-          await saveAudioToIndexedDB(noteId, dataUrl, finalMime);
-
-          const newNote: VoiceNote = {
+          // Set pending recording so user can play and preview before saving
+          setPendingRecording({
             id: noteId,
-            leadId,
-            audioUrl: dataUrl,
-            durationSeconds: elapsedSeconds,
-            createdAt: new Date().toISOString(),
-            note: voiceTextNote.trim() || `Voice Memo (${formatAudioDuration(elapsedSeconds)})`,
+            dataUrl,
             mimeType: finalMime,
-          };
-
-          onAddVoiceNote(newNote);
-          setVoiceTextNote('');
-          setShowSaveButton(true);
-          setSavedSuccess(false);
+            durationSeconds: elapsedSeconds,
+          });
         } catch (saveErr) {
-          console.warn('Notice encoding/saving voice note:', saveErr);
-          setErrorMessage('Failed to save audio recording. Please try again.');
+          console.error('[VoiceNoteRecorder] Error encoding audio recording:', saveErr);
+          setErrorMessage('Failed to process audio recording. Please try again.');
         } finally {
           setIsRecording(false);
-          setIsSaving(false);
+          setIsStopping(false);
           setRecordingSeconds(0);
         }
       };
 
-      // Start recording with 250ms chunks to capture short notes accurately
+      // Start recording with 250ms timeslice to ensure continuous chunk delivery
       recorder.start(250);
       startTimeRef.current = Date.now();
       setIsRecording(true);
@@ -300,10 +302,12 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
       stopActiveStream();
       clearTimer();
       setIsRecording(false);
-      setIsSaving(false);
+      setIsStopping(false);
 
       const errName = err?.name || '';
       const errMsg = typeof err?.message === 'string' ? err.message : '';
+      console.error('[VoiceNoteRecorder] Recording start failed:', { errName, errMsg, err });
+
       const isNotFound =
         errName === 'NotFoundError' ||
         errName === 'DevicesNotFoundError' ||
@@ -314,10 +318,11 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
       const isPermissionDenied =
         errName === 'NotAllowedError' ||
         errName === 'PermissionDeniedError' ||
-        errMsg.toLowerCase().includes('permission');
+        errMsg.toLowerCase().includes('permission') ||
+        errMsg.toLowerCase().includes('allowed');
 
       if (isPermissionDenied) {
-        console.warn('Microphone permission was denied:', errMsg || err);
+        console.warn('[VoiceNoteRecorder] Microphone permission was denied:', errMsg || err);
         const permCheck = await checkMicrophonePermission();
         const permanentlyDenied = permCheck.isPermanentlyDenied || false;
         setIsMicPermanentlyDenied(permanentlyDenied);
@@ -327,15 +332,12 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
             : 'Microphone permission was denied. Please allow microphone access in your browser or device settings to record audio notes.'
         );
       } else if (isNotFound) {
-        console.warn('No microphone device detected:', errMsg || err);
         setErrorMessage(
           'No microphone detected on this device. You can upload an audio file or voice memo directly using the upload button next to Record.'
         );
       } else if (errName === 'NotReadableError' || errName === 'TrackStartError') {
-        console.warn('Microphone hardware in use:', errMsg || err);
         setErrorMessage('Microphone is in use by another application. Please free the audio device and try again.');
       } else {
-        console.warn('Audio recording access error:', errMsg || err);
         setErrorMessage(
           `Unable to access microphone: ${errMsg || 'Check audio permissions and try again.'}`
         );
@@ -343,24 +345,24 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
     }
   };
 
-  const stopAndSaveRecording = () => {
+  const stopRecording = () => {
     if (!isRecording) return;
-    setIsSaving(true);
+    setIsStopping(true);
     clearTimer();
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       try {
         mediaRecorderRef.current.stop();
       } catch (err) {
-        console.warn('Notice stopping MediaRecorder:', err);
+        console.error('[VoiceNoteRecorder] Error stopping MediaRecorder:', err);
         setErrorMessage('Failed to finalize audio recording.');
         setIsRecording(false);
-        setIsSaving(false);
+        setIsStopping(false);
         stopActiveStream();
       }
     } else {
       setIsRecording(false);
-      setIsSaving(false);
+      setIsStopping(false);
       stopActiveStream();
     }
   };
@@ -378,16 +380,53 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
     stopActiveStream();
     audioChunksRef.current = [];
     setIsRecording(false);
-    setIsSaving(false);
+    setIsStopping(false);
     setRecordingSeconds(0);
   };
 
-  const handleConfirmSave = () => {
-    setShowSaveButton(false);
-    setSavedSuccess(true);
-    setTimeout(() => {
-      setSavedSuccess(false);
-    }, 4000);
+  const discardPendingRecording = () => {
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current.src = '';
+    }
+    setPlayingId(null);
+    setPlaybackProgress(null);
+    setPendingRecording(null);
+  };
+
+  const savePendingRecording = async () => {
+    if (!pendingRecording || !pendingRecording.dataUrl) return;
+
+    try {
+      // 1. Save to IndexedDB for offline reliability
+      await saveAudioToIndexedDB(
+        pendingRecording.id,
+        pendingRecording.dataUrl,
+        pendingRecording.mimeType
+      );
+
+      // 2. Create VoiceNote attached to this lead
+      const newNote: VoiceNote = {
+        id: pendingRecording.id,
+        leadId,
+        audioUrl: pendingRecording.dataUrl,
+        durationSeconds: pendingRecording.durationSeconds,
+        createdAt: new Date().toISOString(),
+        note: voiceTextNote.trim() || `Voice Memo (${formatAudioDuration(pendingRecording.durationSeconds)})`,
+        mimeType: pendingRecording.mimeType,
+      };
+
+      onAddVoiceNote(newNote);
+      setVoiceTextNote('');
+      setPendingRecording(null);
+      setSavedSuccess(true);
+      setTimeout(() => {
+        setSavedSuccess(false);
+      }, 4000);
+    } catch (err) {
+      console.error('[VoiceNoteRecorder] Error saving pending voice note:', err);
+      setErrorMessage('Failed to save voice note. Please try again.');
+    }
   };
 
   const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -398,24 +437,16 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
       const dataUrl = await blobToDataUrl(file);
       const noteId = `vn_${Date.now()}`;
       const finalMime = file.type || 'audio/webm';
-      await saveAudioToIndexedDB(noteId, dataUrl, finalMime);
 
-      const newNote: VoiceNote = {
+      setPendingRecording({
         id: noteId,
-        leadId,
-        audioUrl: dataUrl,
-        durationSeconds: 0,
-        createdAt: new Date().toISOString(),
-        note: voiceTextNote.trim() || file.name.replace(/\.[^/.]+$/, ''),
+        dataUrl,
         mimeType: finalMime,
-      };
-
-      onAddVoiceNote(newNote);
-      setVoiceTextNote('');
-      setShowSaveButton(true);
-      setSavedSuccess(false);
+        durationSeconds: 0,
+      });
+      setVoiceTextNote(file.name.replace(/\.[^/.]+$/, ''));
     } catch (err) {
-      console.warn('Notice processing uploaded audio file:', err);
+      console.error('[VoiceNoteRecorder] Notice processing uploaded audio file:', err);
       setErrorMessage('Failed to process audio file.');
     } finally {
       e.target.value = '';
@@ -423,11 +454,11 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   };
 
   const togglePlay = useCallback(
-    async (note: VoiceNote) => {
+    async (noteId: string, audioUrl: string, durationSeconds: number) => {
       setErrorMessage(null);
 
       // If tapping on currently playing note -> toggle pause
-      if (playingId === note.id) {
+      if (playingId === noteId) {
         if (audioElementRef.current) {
           audioElementRef.current.pause();
         }
@@ -443,11 +474,11 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
         audioElementRef.current = null;
       }
 
-      let playableUrl = note.audioUrl;
+      let playableUrl = audioUrl;
 
       // If audioUrl is invalid or expired blob, check IndexedDB
       if (!isPlayableAudioUrl(playableUrl)) {
-        const storedUrl = await getAudioFromIndexedDB(note.id);
+        const storedUrl = await getAudioFromIndexedDB(noteId);
         if (storedUrl && isPlayableAudioUrl(storedUrl)) {
           playableUrl = storedUrl;
         }
@@ -481,21 +512,21 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
         };
 
         audio.onerror = (e) => {
-          console.warn('Audio element playback notice:', e);
+          console.warn('[VoiceNoteRecorder] Audio element playback notice:', e);
           setErrorMessage('Playback error: audio format not supported or data corrupted.');
           setPlayingId(null);
           setPlaybackProgress(null);
         };
 
-        setPlayingId(note.id);
+        setPlayingId(noteId);
         setPlaybackProgress({
           currentTime: 0,
-          duration: note.durationSeconds,
+          duration: durationSeconds,
         });
 
         await audio.play();
       } catch (playErr: any) {
-        console.warn('Playback notice for audio note:', playErr);
+        console.warn('[VoiceNoteRecorder] Playback notice for audio note:', playErr);
         setErrorMessage(`Playback failed: ${playErr.message || 'Please check device volume and audio permissions.'}`);
         setPlayingId(null);
         setPlaybackProgress(null);
@@ -565,6 +596,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
           )}
         </div>
 
+        {/* STATE 1: RECORDING IN PROGRESS */}
         {isRecording ? (
           <div className="space-y-2.5 p-3.5 bg-rose-50/80 dark:bg-rose-950/40 rounded-xl border border-rose-200 dark:border-rose-800 w-full max-w-full min-w-0">
             <div className="flex items-center justify-between min-w-0">
@@ -588,7 +620,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
               <button
                 type="button"
                 onClick={cancelRecording}
-                disabled={isSaving}
+                disabled={isStopping}
                 className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
@@ -596,25 +628,103 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
               </button>
               <button
                 type="button"
-                onClick={stopAndSaveRecording}
-                disabled={isSaving}
+                onClick={stopRecording}
+                disabled={isStopping}
                 className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer disabled:opacity-50"
               >
-                {isSaving ? (
+                {isStopping ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Saving Audio...</span>
+                    <span>Processing...</span>
                   </>
                 ) : (
                   <>
                     <Square className="w-3.5 h-3.5 fill-current" />
-                    <span>Stop & Save</span>
+                    <span>Stop Recording</span>
                   </>
                 )}
               </button>
             </div>
           </div>
+        ) : pendingRecording ? (
+          /* STATE 2: PENDING RECORDING PREVIEW (Allow playback before saving!) */
+          <div className="space-y-3 p-3.5 bg-emerald-50/70 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800 w-full max-w-full min-w-0 animate-in fade-in">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    togglePlay(
+                      pendingRecording.id,
+                      pendingRecording.dataUrl,
+                      pendingRecording.durationSeconds
+                    )
+                  }
+                  className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-all cursor-pointer ${
+                    playingId === pendingRecording.id
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-emerald-200 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-300'
+                  }`}
+                  aria-label={playingId === pendingRecording.id ? 'Pause preview' : 'Play preview'}
+                >
+                  {playingId === pendingRecording.id ? (
+                    <Pause className="w-4 h-4 fill-current" />
+                  ) : (
+                    <Play className="w-4 h-4 fill-current ml-0.5" />
+                  )}
+                </button>
+
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-bold text-emerald-950 dark:text-emerald-100 truncate">
+                    Ready to Save • {formatAudioDuration(pendingRecording.durationSeconds)}
+                  </div>
+                  <div className="text-[10px] text-emerald-700 dark:text-emerald-300">
+                    Tap play to review audio before attaching to lead
+                  </div>
+                </div>
+              </div>
+
+              {/* Progress or Wave */}
+              {playingId === pendingRecording.id && (
+                <div className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-emerald-200 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 text-[10px] font-bold shrink-0">
+                  <span className="w-1 h-3 bg-emerald-600 rounded-full animate-bounce" />
+                  <span className="w-1 h-4 bg-emerald-600 rounded-full animate-bounce [animation-delay:0.15s]" />
+                  <span className="w-1 h-2 bg-emerald-600 rounded-full animate-bounce [animation-delay:0.3s]" />
+                </div>
+              )}
+            </div>
+
+            {/* Optional label input */}
+            <input
+              type="text"
+              value={voiceTextNote}
+              onChange={(e) => setVoiceTextNote(e.target.value)}
+              placeholder="Optional label (e.g. Budget discussed, wife liked floor plan)..."
+              className="w-full px-3 py-2 text-xs rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
+            />
+
+            {/* Action buttons: Discard / Save */}
+            <div className="flex items-center justify-end gap-2 pt-1 border-t border-emerald-200/60 dark:border-emerald-800/60">
+              <button
+                type="button"
+                onClick={discardPendingRecording}
+                className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Retake</span>
+              </button>
+              <button
+                type="button"
+                onClick={savePendingRecording}
+                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Save Voice Note</span>
+              </button>
+            </div>
+          </div>
         ) : (
+          /* STATE 3: IDLE / READY TO RECORD */
           <div className="space-y-2.5 w-full max-w-full min-w-0">
             <div className="w-full max-w-full min-w-0 flex flex-col sm:flex-row sm:items-center gap-2">
               {/* Row 1 on mobile: Full width label input */}
@@ -654,20 +764,6 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
               Audio is saved locally and synced with this lead profile for playback anytime.
             </p>
 
-            {/* Simple Save button shown when upload/recording finishes successfully */}
-            {showSaveButton && (
-              <div className="pt-2 animate-in fade-in">
-                <button
-                  type="button"
-                  onClick={handleConfirmSave}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-xs inline-flex items-center gap-1.5 transition-all cursor-pointer"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Save</span>
-                </button>
-              </div>
-            )}
-
             {/* Simple Saved successfully message */}
             {savedSuccess && (
               <div className="pt-2 animate-in fade-in">
@@ -687,7 +783,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
           <Volume2 className="w-6 h-6 text-slate-300 dark:text-slate-600 mx-auto mb-1.5" />
           <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">No voice notes recorded yet</p>
           <p className="text-[11px] text-slate-400 mt-0.5">
-            Tap 'Record Voice Note' above to dictate client remarks while driving or on-site.
+            Tap 'Record Voice' above to dictate client remarks while driving or on-site.
           </p>
         </div>
       ) : (
@@ -713,7 +809,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     <button
                       type="button"
-                      onClick={() => togglePlay(vn)}
+                      onClick={() => togglePlay(vn.id, vn.audioUrl, vn.durationSeconds)}
                       disabled={!hasValidAudio}
                       className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 transition-all cursor-pointer ${
                         !hasValidAudio

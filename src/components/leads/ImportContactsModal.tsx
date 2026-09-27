@@ -113,7 +113,7 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
     });
 
     setContacts(parsed);
-    setSelectedIds(new Set(parsed.filter((c) => !c.isExistingLead).map((c) => c.id)));
+    setSelectedIds(new Set());
     setPreviewLoaded(true);
   }, [checkIsDuplicate]);
 
@@ -203,10 +203,7 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
             setSelectedIds(new Set());
           } else {
             setContacts(parsedContacts);
-            const freshSelectableIds = new Set(
-              parsedContacts.filter((c) => !c.isExistingLead).map((c) => c.id)
-            );
-            setSelectedIds(freshSelectableIds);
+            setSelectedIds(new Set());
           }
         } else if (isAutoCheck) {
           // Web auto-check: do not auto-prompt web selector on open
@@ -236,7 +233,7 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
 
             if (newItems.length > 0) {
               setContacts(newItems);
-              setSelectedIds(new Set(newItems.filter((c) => !c.isExistingLead).map((c) => c.id)));
+              setSelectedIds(new Set());
             } else {
               setDeviceHasNoContacts(true);
             }
@@ -268,8 +265,9 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
   const fetchRef = useRef(fetchAndLoadContacts);
   fetchRef.current = fetchAndLoadContacts;
 
-  // 1. Check live permission state upon modal open and auto-load if already granted
+  // 1. Reset selections and check live permission state upon modal open
   useEffect(() => {
+    setSelectedIds(new Set());
     if (!isOpen) {
       setSearch('');
       setShowPasteInput(false);
@@ -318,9 +316,6 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
 
     return () => unsubscribe();
   }, [isOpen]);
-
-  // Guard render: Modal must NEVER render DOM when closed
-  if (!isOpen) return null;
 
   const handlePickDeviceContacts = () => {
     fetchAndLoadContacts(false);
@@ -371,14 +366,6 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
 
     if (parsed.length > 0) {
       setContacts((prev) => [...prev, ...parsed]);
-      // Select non-duplicates
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        parsed.forEach((c) => {
-          if (!c.isExistingLead) next.add(c.id);
-        });
-        return next;
-      });
       setPasteText('');
       setShowPasteInput(false);
       setDeviceHasNoContacts(false);
@@ -405,14 +392,33 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
     setSelectedIds(next);
   };
 
-  const selectableFilteredContacts = filteredContacts.filter((c) => !c.isExistingLead);
+  const selectableFilteredContacts = useMemo(
+    () => filteredContacts.filter((c) => !c.isExistingLead),
+    [filteredContacts]
+  );
+
+  const selectedCountInFiltered = useMemo(
+    () => selectableFilteredContacts.filter((c) => selectedIds.has(c.id)).length,
+    [selectableFilteredContacts, selectedIds]
+  );
+
+  const isAllSelectableSelected = useMemo(() => {
+    return (
+      selectableFilteredContacts.length > 0 &&
+      selectedCountInFiltered === selectableFilteredContacts.length
+    );
+  }, [selectableFilteredContacts.length, selectedCountInFiltered]);
 
   const handleSelectAll = () => {
-    if (isImporting) return;
-    if (selectedIds.size === selectableFilteredContacts.length && selectableFilteredContacts.length > 0) {
-      setSelectedIds(new Set());
+    if (isImporting || selectableFilteredContacts.length === 0) return;
+    if (isAllSelectableSelected) {
+      const next = new Set(selectedIds);
+      selectableFilteredContacts.forEach((c) => next.delete(c.id));
+      setSelectedIds(next);
     } else {
-      setSelectedIds(new Set(selectableFilteredContacts.map((c) => c.id)));
+      const next = new Set(selectedIds);
+      selectableFilteredContacts.forEach((c) => next.add(c.id));
+      setSelectedIds(next);
     }
   };
 
@@ -490,6 +496,8 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
 
   const duplicateCount = contacts.filter((c) => c.isExistingLead).length;
   const newContactsCount = contacts.filter((c) => !c.isExistingLead).length;
+
+  if (!isOpen) return null;
 
   return (
     <div
@@ -662,13 +670,13 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
                 disabled={selectableFilteredContacts.length === 0}
                 className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-bold hover:text-emerald-600 disabled:opacity-50 cursor-pointer"
               >
-                {selectedIds.size === selectableFilteredContacts.length && selectableFilteredContacts.length > 0 ? (
+                {isAllSelectableSelected ? (
                   <CheckSquare className="w-4 h-4 text-emerald-600" />
                 ) : (
                   <Square className="w-4 h-4 text-slate-400" />
                 )}
                 <span>
-                  Select All ({selectedIds.size}/{selectableFilteredContacts.length} new)
+                  Select All ({selectedCountInFiltered}/{selectableFilteredContacts.length} new)
                 </span>
               </button>
 

@@ -576,7 +576,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
         ) : (
           <div className="space-y-2">
-            {todayFollowUps.map((lead) => (
+            {todayFollowUps.slice(0, 5).map((lead) => (
               <div
                 key={lead.id}
                 onClick={() => onOpenLeadDetail(lead)}
@@ -619,6 +619,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </div>
               </div>
             ))}
+
+            {todayFollowUps.length > 5 && (
+              <button
+                type="button"
+                onClick={() => onNavigateToLeadsWithFilter('today')}
+                className="w-full py-2.5 px-4 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-950/70 border border-emerald-200 dark:border-emerald-800/80 rounded-2xl text-xs font-bold text-emerald-700 dark:text-emerald-400 flex items-center justify-center gap-1.5 transition-all active:scale-[0.99] cursor-pointer shadow-2xs"
+              >
+                <span>View All {todayFollowUps.length} Follow-Ups</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            )}
           </div>
         )}
       </div>
