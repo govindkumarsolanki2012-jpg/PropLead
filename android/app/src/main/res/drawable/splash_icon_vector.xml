@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="288"
+    android:viewportHeight="288">
+
+    <!-- 288dp Android splash artboard. All visible artwork stays inside an
+         80dp centered emblem, well within the 192dp system safe circle. -->
+    <path android:pathData="M124,104H164C175.05,104 184,112.95 184,124V164C184,175.05 175.05,184 164,184H124C112.95,184 104,175.05 104,164V124C104,112.95 112.95,104 124,104Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="108"
+                android:startY="180"
+                android:endX="180"
+                android:endY="108">
+                <item android:offset="0" android:color="#059669" />
+                <item android:offset="1" android:color="#14B8A6" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- PropLead building mark -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M132,166V126C132,122.69 134.69,120 138,120H150C153.31,120 156,122.69 156,126V166H132Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M116,166V142C116,138.69 118.69,136 122,136H132V166H116Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M156,132H166C169.31,132 172,134.69 172,138V166H156V132Z" />
+    <path
+        android:fillColor="#FF10B981"
+        android:pathData="M138,128H150V132H138ZM138,138H150V142H138ZM138,148H150V152H138Z" />
+</vector>
