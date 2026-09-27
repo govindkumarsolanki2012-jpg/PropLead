@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Users,
-  Building2,
+  Building,
   CalendarCheck,
   CheckCircle2,
   ArrowRight,
@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Compass,
 } from 'lucide-react';
+import { PropLeadLogo } from '../common/PropLeadLogo';
 
 interface WelcomeOnboardingModalProps {
   isOpen: boolean;
@@ -88,11 +89,13 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
       >
         {/* Top Decorative Header */}
         <div className="relative px-6 pt-8 pb-6 bg-gradient-to-b from-emerald-50/80 via-teal-50/40 to-transparent dark:from-emerald-950/30 dark:via-slate-900 dark:to-transparent text-center">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white shadow-xl shadow-emerald-600/25 mb-4">
+          <div className="inline-flex items-center justify-center mb-4">
             {step === 1 && !isSubscribed ? (
-              <Building2 className="w-8 h-8" />
+              <PropLeadLogo className="w-16 h-16 rounded-2xl shadow-xl shadow-blue-600/25" />
             ) : (
-              <CheckCircle2 className="w-8 h-8" />
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white shadow-xl shadow-emerald-600/25">
+                <CheckCircle2 className="w-8 h-8" />
+              </div>
             )}
           </div>
 
@@ -176,7 +179,7 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
               {/* Benefit 2 */}
               <div className="flex items-start gap-3.5 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/60">
                 <div className="w-9 h-9 rounded-xl bg-teal-100 dark:bg-teal-950 text-teal-600 dark:text-teal-400 flex items-center justify-center shrink-0 mt-0.5">
-                  <Building2 className="w-4 h-4" />
+                  <Building className="w-4 h-4" />
                 </div>
                 <div>
                   <h3 className="text-xs font-bold text-slate-900 dark:text-white">

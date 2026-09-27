@@ -675,10 +675,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div
             ref={pipelineScrollRef}
             id="deal-pipeline-stages-track"
-            className="flex items-stretch gap-2.5 overflow-x-auto pb-1.5 pt-0.5 px-0.5 scroll-smooth snap-x snap-mandatory overscroll-x-contain touch-pan-x"
+            className="flex items-stretch gap-2.5 overflow-x-auto pb-1.5 pt-0.5 px-0.5 scroll-smooth snap-x snap-mandatory overscroll-x-contain"
             style={{
               scrollbarWidth: 'thin',
               WebkitOverflowScrolling: 'touch',
+              touchAction: 'pan-x pan-y',
             }}
           >
             {pipelineStages.map((stage) => (

@@ -1,7 +1,18 @@
 import { getDoc, doc, collection, getDocs, writeBatch } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, auth } from '../lib/firebase';
 import { Lead, Property, UserProfile } from '../types';
-import { getStoredLeads, getStoredProperties, getStoredProfile } from './storage';
+import {
+  getStoredLeads,
+  getStoredProperties,
+  getStoredProfile,
+  saveStoredLeads,
+  saveStoredProperties,
+  saveStoredProfile,
+  getLegacyStoredProfile,
+  getLegacyStoredLeads,
+  getLegacyStoredProperties,
+  clearLegacyStoredData,
+} from './storage';
 
 export interface MigrationResult {
   migrated: boolean;
@@ -46,8 +57,12 @@ function cleanFirestorePayload<T extends Record<string, any>>(obj: T): Record<st
 /**
  * Safely migrates existing device localStorage leads, properties, and profile
  * to the authenticated agent's Firestore cloud container.
- * Guaranteed zero data loss and prevents duplicate imports.
- * Filters out and purges any legacy demo data from ever reaching or staying in Firestore.
+ * 
+ * Strict Multi-Account Isolation:
+ * - Validates caller-supplied UID strictly against auth.currentUser.uid.
+ * - Migrates legacy global cache ONLY if legacy profile ownership is proven (profile.id === auth.currentUser.uid).
+ * - If ownership cannot be proven, unowned legacy cache is completely ignored and NEVER uploaded to another account.
+ * - Writes ONLY to /users/{auth.currentUser.uid} paths.
  */
 export async function syncLocalDataToFirestore(
   userId: string,
@@ -55,8 +70,15 @@ export async function syncLocalDataToFirestore(
   userName?: string | null,
   userPhone?: string | null
 ): Promise<MigrationResult> {
-  if (!userId) {
-    return { migrated: false, leadsUploaded: 0, propertiesUploaded: 0, error: 'No userId provided' };
+  // 1. Verify caller UID matches authenticated user UID
+  const currentAuthUser = auth.currentUser;
+  if (!currentAuthUser || !userId || currentAuthUser.uid !== userId) {
+    return {
+      migrated: false,
+      leadsUploaded: 0,
+      propertiesUploaded: 0,
+      error: 'Unauthenticated or UID mismatch',
+    };
   }
 
   const migrationKey = `proplead_migrated_v1_${userId}`;
@@ -71,24 +93,55 @@ export async function syncLocalDataToFirestore(
       };
     }
 
-    // 1. Check if user profile already exists in Firestore
+    // 2. Check if user profile already exists in Firestore
     const userDocRef = doc(db, 'users', userId);
     const userSnap = await getDoc(userDocRef);
     const isGenuinelyNewUser = !userSnap.exists();
 
-    // 2. Check if Firestore already has leads for this user
+    // 3. Check if Firestore already has leads for this user
     const leadsColl = collection(db, 'users', userId, 'leads');
     const existingLeadsSnap = await getDocs(leadsColl);
     const existingLeadIds = new Set(existingLeadsSnap.docs.map((d) => d.id));
 
-    // 3. Check if Firestore already has properties for this user
+    // 4. Check if Firestore already has properties for this user
     const propsColl = collection(db, 'users', userId, 'properties');
     const existingPropsSnap = await getDocs(propsColl);
     const existingPropIds = new Set(existingPropsSnap.docs.map((d) => d.id));
 
-    const localProfile = getStoredProfile();
-    const localLeads = getStoredLeads();
-    const localProperties = getStoredProperties();
+    // 5. Evaluate local caches (UID-scoped cache first, and legacy cache only if proven)
+    const localProfile = getStoredProfile(userId);
+    const localLeads = getStoredLeads(userId);
+    const localProperties = getStoredProperties(userId);
+
+    // Check legacy global cache ownership
+    const legacyProfile = getLegacyStoredProfile();
+    const isLegacyOwnershipProven = Boolean(
+      legacyProfile &&
+      legacyProfile.id &&
+      legacyProfile.id === userId &&
+      legacyProfile.id !== 'usr_001'
+    );
+
+    let candidateProfile: UserProfile = localProfile;
+    let candidateLeads: Lead[] = localLeads;
+    let candidateProps: Property[] = localProperties;
+
+    // If legacy ownership is definitively proven, merge legacy items
+    if (isLegacyOwnershipProven && legacyProfile) {
+      candidateProfile = { ...legacyProfile, ...localProfile };
+      const legacyLeads = getLegacyStoredLeads();
+      const legacyProps = getLegacyStoredProperties();
+
+      const combinedLeadMap = new Map<string, Lead>();
+      legacyLeads.forEach((l) => combinedLeadMap.set(l.id, l));
+      localLeads.forEach((l) => combinedLeadMap.set(l.id, l));
+      candidateLeads = Array.from(combinedLeadMap.values());
+
+      const combinedPropMap = new Map<string, Property>();
+      legacyProps.forEach((p) => combinedPropMap.set(p.id, p));
+      localProperties.forEach((p) => combinedPropMap.set(p.id, p));
+      candidateProps = Array.from(combinedPropMap.values());
+    }
 
     const batch = writeBatch(db);
     let batchOperations = 0;
@@ -113,25 +166,22 @@ export async function syncLocalDataToFirestore(
 
     // A. Migrate/Initialize Profile ONLY if not already in Firestore
     if (isGenuinelyNewUser) {
-      const isDemoName = localProfile.name === 'Rajesh Sharma' || localProfile.name === 'Vikram Malhotra';
-      const isDemoPhone = localProfile.phone === '9820123456';
-      const cleanName = userName || (!isDemoName ? localProfile.name : '') || (userEmail ? userEmail.split('@')[0] : 'Property Agent');
-      const cleanPhone = userPhone || (!isDemoPhone ? localProfile.phone : '') || '';
+      const isDemoName = candidateProfile.name === 'Rajesh Sharma' || candidateProfile.name === 'Vikram Malhotra';
+      const isDemoPhone = candidateProfile.phone === '9820123456';
+      const cleanName = userName || (!isDemoName ? candidateProfile.name : '') || (userEmail ? userEmail.split('@')[0] : 'Property Agent');
+      const cleanPhone = userPhone || (!isDemoPhone ? candidateProfile.phone : '') || '';
 
-      // Bug 1 Fix: Client-side new-user provisioning must NOT write protected entitlement fields
-      // that Firestore security rules reject (isSubscribed, subscriptionStatus, etc.).
-      // Only write safe profile attributes and allowed initial trial markers (trialStatus: 'not_started', trialEverStarted: false).
       const safeProfile: Record<string, any> = {
         id: userId,
         name: cleanName,
         phone: cleanPhone,
-        email: userEmail || localProfile.email || '',
-        agencyName: localProfile.agencyName || '',
-        city: localProfile.city || '',
-        reraNumber: localProfile.reraNumber || '',
-        language: localProfile.language || 'en',
-        darkMode: Boolean(localProfile.darkMode),
-        notificationsEnabled: localProfile.notificationsEnabled ?? true,
+        email: userEmail || candidateProfile.email || '',
+        agencyName: candidateProfile.agencyName || '',
+        city: candidateProfile.city || '',
+        reraNumber: candidateProfile.reraNumber || '',
+        language: candidateProfile.language || 'en',
+        darkMode: Boolean(candidateProfile.darkMode),
+        notificationsEnabled: candidateProfile.notificationsEnabled ?? true,
         isOnboarded: true,
         onboardingCompleted: false,
         hasCompletedOnboarding: false,
@@ -142,14 +192,11 @@ export async function syncLocalDataToFirestore(
       };
       batch.set(userDocRef, cleanFirestorePayload(safeProfile), { merge: true });
       batchOperations++;
-    } else {
-      // Safe preservation for existing users: NEVER reset or overwrite existing trial dates or subscription fields from client.
-      // Entitlements and trial status are strictly managed by trusted backend logic.
     }
 
     // B. Migrate Leads (only real user-created leads, never demo data)
-    const validLocalLeads = localLeads.filter((l) => l && !DEMO_LEAD_IDS.has(l.id));
-    for (const lead of validLocalLeads) {
+    const validLeads = candidateLeads.filter((l) => l && !DEMO_LEAD_IDS.has(l.id));
+    for (const lead of validLeads) {
       if (!existingLeadIds.has(lead.id)) {
         const leadRef = doc(db, 'users', userId, 'leads', lead.id);
         batch.set(leadRef, cleanFirestorePayload(lead), { merge: true });
@@ -159,8 +206,8 @@ export async function syncLocalDataToFirestore(
     }
 
     // C. Migrate Properties (only real user-created properties, never demo data)
-    const validLocalProperties = localProperties.filter((p) => p && !DEMO_PROP_IDS.has(p.id));
-    for (const property of validLocalProperties) {
+    const validProps = candidateProps.filter((p) => p && !DEMO_PROP_IDS.has(p.id));
+    for (const property of validProps) {
       if (!existingPropIds.has(property.id)) {
         const propRef = doc(db, 'users', userId, 'properties', property.id);
         batch.set(propRef, cleanFirestorePayload(property), { merge: true });
@@ -171,6 +218,14 @@ export async function syncLocalDataToFirestore(
 
     if (batchOperations > 0) {
       await batch.commit();
+    }
+
+    // If legacy ownership was proven and migrated, save into UID-scoped cache and remove legacy keys
+    if (isLegacyOwnershipProven) {
+      saveStoredProfile(candidateProfile, userId);
+      saveStoredLeads(validLeads, userId);
+      saveStoredProperties(validProps, userId);
+      clearLegacyStoredData();
     }
 
     if (typeof window !== 'undefined') {

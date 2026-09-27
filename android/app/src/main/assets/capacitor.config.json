@@ -1,6 +1,6 @@
 {
 	"appId": "com.proplead.tracker",
-	"appName": "PropLead",
+	"appName": "PropLead for Agents",
 	"webDir": "dist",
 	"backgroundColor": "#ffffff",
 	"server": {

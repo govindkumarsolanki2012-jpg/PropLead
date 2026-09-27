@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="fgHouseGrad" x1="300" y1="180" x2="600" y2="750" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="60%" stop-color="#F6FCF8" />
+      <stop offset="100%" stop-color="#E1F3E7" />
+    </linearGradient>
+    <linearGradient id="fgBar1Grad" x1="340" y1="580" x2="440" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4ADE80" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="fgBar2Grad" x1="460" y1="510" x2="560" y2="730" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4ADE80" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="fgBar3Grad" x1="580" y1="440" x2="680" y2="690" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4ADE80" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="fgArrowGrad" x1="260" y1="780" x2="840" y2="400" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#84CC16" />
+      <stop offset="35%" stop-color="#A3E635" />
+      <stop offset="75%" stop-color="#4ADE80" />
+      <stop offset="100%" stop-color="#86EFAC" />
+    </linearGradient>
+    <linearGradient id="fgWindowGrad" x1="440" y1="340" x2="560" y2="470" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#DCFCE7" />
+    </linearGradient>
+    <linearGradient id="fgAvatarGrad" x1="600" y1="680" x2="720" y2="880" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" />
+      <stop offset="100%" stop-color="#D1FAE5" />
+    </linearGradient>
+  </defs>
+
+  <g transform="scale(0.72) translate(199, 199)">
+    <!-- Chimney -->
+    <path d="M 648 248 L 730 248 L 730 380 L 648 300 Z" fill="#E8F8EE" />
+    
+    <!-- House Body -->
+    <path d="M 512 172 
+             L 772 384 C 794 402 788 438 760 448 C 738 456 714 444 700 428 
+             L 700 740 C 700 762 682 780 660 780 
+             L 364 780 C 342 780 324 762 324 740 
+             L 324 428 
+             C 310 444 286 456 264 448 C 236 438 230 402 252 384 
+             Z" 
+          fill="url(#fgHouseGrad)" stroke="#FFFFFF" stroke-width="12" stroke-linejoin="round" />
+
+    <!-- 4-Pane Window -->
+    <g transform="translate(438, 350)">
+      <rect x="0" y="0" width="64" height="64" rx="14" fill="url(#fgWindowGrad)" stroke="#FFFFFF" stroke-width="8" />
+      <rect x="82" y="0" width="64" height="64" rx="14" fill="url(#fgWindowGrad)" stroke="#FFFFFF" stroke-width="8" />
+      <rect x="0" y="82" width="64" height="64" rx="14" fill="url(#fgWindowGrad)" stroke="#FFFFFF" stroke-width="8" />
+      <rect x="82" y="82" width="64" height="64" rx="14" fill="url(#fgWindowGrad)" stroke="#FFFFFF" stroke-width="8" />
+    </g>
+
+    <!-- Bars -->
+    <rect x="342" y="590" width="102" height="168" rx="24" fill="url(#fgBar1Grad)" stroke="#BBF7D0" stroke-width="6" />
+    <rect x="460" y="520" width="104" height="238" rx="24" fill="url(#fgBar2Grad)" stroke="#BBF7D0" stroke-width="6" />
+    <rect x="580" y="450" width="102" height="308" rx="24" fill="url(#fgBar3Grad)" stroke="#BBF7D0" stroke-width="6" />
+
+    <!-- Lime Arrow -->
+    <path d="M 256 786 
+             C 410 790 580 720 740 500 
+             L 708 474 
+             L 856 384 
+             L 858 554 
+             L 818 522 
+             C 670 706 480 804 256 786 Z" 
+          fill="url(#fgArrowGrad)" stroke="#FFFFFF" stroke-width="10" stroke-linejoin="round" />
+
+    <!-- Clipboard & Avatar -->
+    <rect x="700" y="660" width="184" height="226" rx="28" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="6" />
+    <rect x="740" y="632" width="104" height="42" rx="14" fill="#059669" stroke="#34D399" stroke-width="4" />
+    <circle cx="792" cy="652" r="8" fill="#FFFFFF" />
+
+    <path d="M 724 722 L 736 734 L 758 710" stroke="#059669" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+    <rect x="778" y="716" width="86" height="12" rx="6" fill="#059669" />
+    <path d="M 724 772 L 736 784 L 758 760" stroke="#059669" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+    <rect x="778" y="766" width="86" height="12" rx="6" fill="#059669" />
+    <path d="M 724 822 L 736 834 L 758 810" stroke="#059669" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+    <rect x="778" y="816" width="86" height="12" rx="6" fill="#059669" />
+
+    <circle cx="642" cy="746" r="44" fill="url(#fgAvatarGrad)" stroke="#FFFFFF" stroke-width="8" />
+    <path d="M 556 888 C 556 824 594 798 642 798 C 690 798 728 824 728 888 Z" fill="url(#fgAvatarGrad)" stroke="#FFFFFF" stroke-width="8" />
+  </g>
+</svg>

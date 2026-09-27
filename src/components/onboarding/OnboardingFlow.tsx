@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Building2, Sparkles, Phone, ArrowRight, CheckCircle2, ShieldCheck, Clock, Check, Users, MessageSquare } from 'lucide-react';
+import { Sparkles, Phone, ArrowRight, CheckCircle2, ShieldCheck, Clock, Check, Users, MessageSquare } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { signInWithGoogle } from '../../services/firebaseService';
+import { PropLeadLogo } from '../common/PropLeadLogo';
 
 interface OnboardingFlowProps {
   onComplete: (profile: Partial<UserProfile>) => void;
@@ -88,9 +89,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
       {step === 2 && (
         <div className="flex-1 flex flex-col justify-between py-6">
           <div className="flex justify-center pt-8">
-            <div className="w-16 h-16 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-lg">
-              <Building2 className="w-8 h-8" />
-            </div>
+            <PropLeadLogo className="w-16 h-16 rounded-2xl shadow-xl shadow-blue-600/20" />
           </div>
 
           <div className="text-center my-auto px-2">

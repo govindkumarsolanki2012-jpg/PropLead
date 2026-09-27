@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Shield, ExternalLink, Lock, CheckCircle2, Mail } from 'lucide-react';
+import { X, Shield, ExternalLink, Lock, CheckCircle2, Mail, Globe } from 'lucide-react';
 
 interface PrivacyPolicyModalProps {
   isOpen: boolean;
@@ -7,15 +7,17 @@ interface PrivacyPolicyModalProps {
   policyUrl?: string;
 }
 
+const PUBLIC_PRIVACY_URL = 'https://proplead-36803800158.asia-south1.run.app/privacy-policy';
+
 export const PrivacyPolicyModal: React.FC<PrivacyPolicyModalProps> = ({
   isOpen,
   onClose,
-  policyUrl = window.location.origin + '/privacy-policy',
+  policyUrl = PUBLIC_PRIVACY_URL,
 }) => {
   if (!isOpen) return null;
 
   const handleOpenExternal = () => {
-    window.open(policyUrl, '_blank', 'noopener,noreferrer');
+    window.open(policyUrl || PUBLIC_PRIVACY_URL, '_blank', 'noopener,noreferrer');
   };
 
   return (
@@ -74,6 +76,29 @@ export const PrivacyPolicyModal: React.FC<PrivacyPolicyModalProps> = ({
             <p className="text-xs text-emerald-900/90 dark:text-emerald-200/90">
               PropLead is purpose-built for Indian real estate agents, brokers, and consultants. We strictly guarantee that <strong>your client contacts, lead requirements, property inventory, private owner details, and notes are 100% private to you</strong>. We NEVER sell, rent, or share your business data with property portals, telemarketers, or third-party advertisers.
             </p>
+          </div>
+
+          {/* Public Privacy Policy Section */}
+          <div className="p-4 bg-slate-100 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Globe className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <div>
+                <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                  PUBLIC PRIVACY POLICY
+                </h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Available publicly without sign-in
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleOpenExternal}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs inline-flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Open Public Privacy Policy</span>
+            </button>
           </div>
 
           <section className="space-y-2">

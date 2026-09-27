@@ -97,7 +97,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   // Notification Settings State
   const [showNotificationsPage, setShowNotificationsPage] = useState<boolean>(false);
   const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(() => {
-    return profile?.notificationSettings || getStoredNotificationSettings();
+    return profile?.notificationSettings || getStoredNotificationSettings(profile?.id);
   });
   const [permissionState, setPermissionState] = useState<{ granted: boolean; display: string }>({
     granted: true,
@@ -133,30 +133,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       [key]: nextValue,
     };
     setNotificationSettings(updated);
-    saveStoredNotificationSettings(updated);
+    saveStoredNotificationSettings(updated, profile?.id);
     onUpdateProfile({
       ...profile,
       notificationSettings: updated,
     });
 
     if (key === 'followUpReminders' && !nextValue) {
-      await cancelAllFollowUpNotifications(leads);
+      await cancelAllFollowUpNotifications(leads, profile?.id);
     } else if (key === 'propertyVisitReminders' && !nextValue) {
-      await cancelAllPropertyVisitNotifications(leads);
+      await cancelAllPropertyVisitNotifications(leads, profile?.id);
     } else if (key === 'dailySummary' && !nextValue) {
       await cancelDailySummaryNotification();
     } else {
-      await syncAllLeadNotifications(leads);
+      await syncAllLeadNotifications(leads, profile?.id);
     }
   };
 
   const handleRequestPermission = async () => {
     setIsRequestingPerm(true);
     try {
-      const res = await requestNotificationPermission();
-      setPermissionState(res);
-      if (res.granted) {
-        await syncAllLeadNotifications(leads);
+      const granted = await requestNotificationPermission(profile?.id);
+      const permRes = await checkNotificationPermission();
+      setPermissionState(permRes);
+      if (granted) {
+        await syncAllLeadNotifications(leads, profile?.id);
       }
     } finally {
       setIsRequestingPerm(false);

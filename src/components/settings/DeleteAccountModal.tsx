@@ -10,6 +10,7 @@ import {
 import { auth } from '../../lib/firebase';
 import { openGooglePlayManageSubscriptions, getBillingApiUrl } from '../../utils/billing';
 import { clearUserScopedStorage } from '../../utils/storage';
+import { clearUserAudioFromIndexedDB } from '../../utils/audioStorage';
 import { cancelAllUserNotifications } from '../../utils/notifications';
 import { deleteCurrentUserAccount, signOutUser } from '../../services/firebaseService';
 import { Lead } from '../../types';
@@ -101,6 +102,11 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
 
       // 5. Clear all user-scoped and local storage
       clearUserScopedStorage(uid);
+      try {
+        await clearUserAudioFromIndexedDB(uid);
+      } catch (audioErr) {
+        console.warn('[Account Deletion] Audio cleanup notice:', audioErr);
+      }
       try {
         localStorage.clear();
       } catch {}

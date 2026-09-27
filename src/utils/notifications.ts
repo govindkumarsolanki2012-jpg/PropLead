@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications, Channel, ActionPerformed } from '@capacitor/local-notifications';
 import { Lead, NotificationSettings, FollowUpType } from '../types';
+import { auth } from '../lib/firebase';
 
 export const FOLLOWUP_CHANNEL_ID = 'proplead_followups';
 export const FOLLOWUP_CHANNEL_NAME = 'PropLead Follow-ups';
@@ -17,9 +18,27 @@ export const NOTIFICATION_SMALL_ICON = 'ic_stat_proplead';
 export const NOTIFICATION_ICON_COLOR = '#059669';
 export const DAILY_SUMMARY_NOTIFICATION_ID = 888123456;
 
-const NOTIFICATION_SETTINGS_STORAGE_KEY = 'proplead_notification_settings_v1';
-const SCHEDULED_NOTIFICATIONS_REGISTRY_KEY = 'proplead_scheduled_notifications_registry_v1';
-const NOTIFICATION_PERM_PROMPTED_KEY = 'proplead_notification_perm_prompted_v1';
+function resolveAuthUid(passedUid?: string | null): string | null {
+  if (passedUid && typeof passedUid === 'string' && passedUid.trim().length > 0) {
+    return passedUid.trim();
+  }
+  return auth?.currentUser?.uid || null;
+}
+
+const getNotificationSettingsKey = (uid?: string | null) => {
+  const effectiveUid = resolveAuthUid(uid);
+  return effectiveUid ? `proplead_notification_settings_v1_${effectiveUid}` : 'proplead_notification_settings_v1';
+};
+
+const getScheduledNotificationsRegistryKey = (uid?: string | null) => {
+  const effectiveUid = resolveAuthUid(uid);
+  return effectiveUid ? `proplead_scheduled_notifications_registry_v1_${effectiveUid}` : 'proplead_scheduled_notifications_registry_v1';
+};
+
+const getNotificationPermPromptedKey = (uid?: string | null) => {
+  const effectiveUid = resolveAuthUid(uid);
+  return effectiveUid ? `proplead_notification_perm_prompted_v1_${effectiveUid}` : 'proplead_notification_perm_prompted_v1';
+};
 
 export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
   followUpReminders: true,
@@ -75,9 +94,10 @@ export function getVisitExactId(leadId: string): number {
 /**
  * Retrieve saved NotificationSettings from localStorage with fallback defaults.
  */
-export function getStoredNotificationSettings(): NotificationSettings {
+export function getStoredNotificationSettings(uid?: string | null): NotificationSettings {
   try {
-    const raw = localStorage.getItem(NOTIFICATION_SETTINGS_STORAGE_KEY);
+    const key = getNotificationSettingsKey(uid);
+    const raw = localStorage.getItem(key);
     if (raw) {
       const parsed = JSON.parse(raw);
       return {
@@ -95,9 +115,10 @@ export function getStoredNotificationSettings(): NotificationSettings {
 /**
  * Persist NotificationSettings to localStorage.
  */
-export function saveStoredNotificationSettings(settings: NotificationSettings): void {
+export function saveStoredNotificationSettings(settings: NotificationSettings, uid?: string | null): void {
   try {
-    localStorage.setItem(NOTIFICATION_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+    const key = getNotificationSettingsKey(uid);
+    localStorage.setItem(key, JSON.stringify(settings));
   } catch (e) {
     console.warn('Failed to save notification settings:', e);
   }
@@ -106,17 +127,19 @@ export function saveStoredNotificationSettings(settings: NotificationSettings): 
 /**
  * Local registry to track scheduled IDs per lead.
  */
-function getActiveScheduledRegistry(): Record<string, number[]> {
+function getActiveScheduledRegistry(uid?: string | null): Record<string, number[]> {
   try {
-    const raw = localStorage.getItem(SCHEDULED_NOTIFICATIONS_REGISTRY_KEY);
+    const key = getScheduledNotificationsRegistryKey(uid);
+    const raw = localStorage.getItem(key);
     if (raw) return JSON.parse(raw);
   } catch {}
   return {};
 }
 
-function saveActiveScheduledRegistry(registry: Record<string, number[]>): void {
+function saveActiveScheduledRegistry(registry: Record<string, number[]>, uid?: string | null): void {
   try {
-    localStorage.setItem(SCHEDULED_NOTIFICATIONS_REGISTRY_KEY, JSON.stringify(registry));
+    const key = getScheduledNotificationsRegistryKey(uid);
+    localStorage.setItem(key, JSON.stringify(registry));
   } catch {}
 }
 
@@ -204,22 +227,18 @@ export function formatNotificationBody(primary: string, secondary?: string): str
  * Extract requirement summary for a follow-up lead (e.g. '2BHK requirement', 'Villa requirement')
  */
 export function getLeadRequirementSummary(lead: Lead): string {
-  // If lead has bhk specified (e.g. "2 BHK", "3 BHK", "1 BHK")
   const bhk = sanitizeNotificationText(lead.bhk);
   if (bhk && bhk.toLowerCase() !== 'any') {
-    // Format "2 BHK" -> "2BHK requirement"
     const compactBhk = bhk.replace(/\s+/g, '');
     return `${compactBhk} requirement`;
   }
 
-  // If lead has propertyType specified (e.g. "flat", "villa", "plot")
   const propertyType = sanitizeNotificationText(lead.propertyType);
   if (propertyType) {
     const formattedType = propertyType.charAt(0).toUpperCase() + propertyType.slice(1);
     return `${formattedType} requirement`;
   }
 
-  // If nextFollowUpNote is short and informative
   const note = sanitizeNotificationText(lead.nextFollowUpNote);
   if (note && note.length <= 35 && !/^(call|follow up|visit)$/i.test(note)) {
     return note;
@@ -248,198 +267,95 @@ export function getLeadLocationSummary(lead: Lead): string {
     return note;
   }
 
-  return 'Site visit location';
-}
-
-export type NotificationActivityType =
-  | 'call'
-  | 'whatsapp'
-  | 'site_visit'
-  | 'meeting'
-  | 'document_collection'
-  | 'generic';
-
-/**
- * Resolves the activity type for a lead follow-up.
- * Determines type from:
- * 1. Explicitly passed parameter (FollowUpType or boolean)
- * 2. lead.nextFollowUpType if saved
- * 3. Recent activities on lead (e.g. metadata.followUpType or type === 'site_visit')
- * 4. lead.status === 'site_visit_scheduled'
- * 5. Inspection of nextFollowUpNote keywords
- * 6. Fallback: 'generic'
- */
-export function resolveActivityType(
-  lead: Lead,
-  explicitType?: FollowUpType | boolean | string
-): NotificationActivityType {
-  // 1. Explicit type passed directly
-  if (typeof explicitType === 'string') {
-    const norm = explicitType.toLowerCase().trim();
-    if (norm === 'call' || norm === 'phone' || norm === 'phone_call') return 'call';
-    if (norm === 'whatsapp' || norm === 'wa' || norm === 'message') return 'whatsapp';
-    if (norm === 'site_visit' || norm === 'visit') return 'site_visit';
-    if (norm === 'meeting' || norm === 'client_meeting') return 'meeting';
-    if (norm === 'document_collection' || norm === 'docs_token' || norm === 'token' || norm === 'docs') return 'document_collection';
-  } else if (explicitType === true) {
-    return 'site_visit';
-  }
-
-  // 2. Saved nextFollowUpType on the lead record
-  if (lead.nextFollowUpType) {
-    const norm = lead.nextFollowUpType.toLowerCase().trim();
-    if (norm === 'call') return 'call';
-    if (norm === 'whatsapp') return 'whatsapp';
-    if (norm === 'site_visit') return 'site_visit';
-    if (norm === 'meeting') return 'meeting';
-    if (norm === 'document_collection') return 'document_collection';
-  }
-
-  // 3. Status check
-  if (lead.status === 'site_visit_scheduled') {
-    return 'site_visit';
-  }
-
-  // 4. Check recent activity logs for saved followUpType
-  if (lead.activities && lead.activities.length > 0) {
-    const recent = lead.activities.find(
-      (a) =>
-        a.type === 'site_visit' ||
-        a.type === 'followup_created' ||
-        (a.type as string) === 'followup_scheduled'
-    );
-    if (recent) {
-      if (recent.metadata?.followUpType) {
-        const norm = String(recent.metadata.followUpType).toLowerCase();
-        if (norm === 'call') return 'call';
-        if (norm === 'whatsapp') return 'whatsapp';
-        if (norm === 'site_visit') return 'site_visit';
-        if (norm === 'meeting') return 'meeting';
-        if (norm === 'document_collection') return 'document_collection';
-      }
-      if (recent.type === 'site_visit') {
-        return 'site_visit';
-      }
-      if (recent.description) {
-        const desc = recent.description.toLowerCase();
-        if (/\b(site visit|property visit|site)\b/i.test(desc)) return 'site_visit';
-        if (/\b(whatsapp|message|chat)\b/i.test(desc)) return 'whatsapp';
-        if (/\b(call|phone)\b/i.test(desc)) return 'call';
-        if (/\b(meeting|meet)\b/i.test(desc)) return 'meeting';
-        if (/\b(doc|token|docs|document)\b/i.test(desc)) return 'document_collection';
-      }
-    }
-  }
-
-  // 5. Note keyword heuristics
-  const note = (lead.nextFollowUpNote || '').toLowerCase();
-  if (note) {
-    if (/\b(site visit|property visit|site)\b/i.test(note)) return 'site_visit';
-    if (/\b(whatsapp|wa discussion|chat)\b/i.test(note)) return 'whatsapp';
-    if (/\b(call|phone)\b/i.test(note)) return 'call';
-    if (/\b(meeting|meet|client meeting)\b/i.test(note)) return 'meeting';
-    if (/\b(doc|token|docs|document|cheque)\b/i.test(note)) return 'document_collection';
-  }
-
-  // 6. Generic follow-up
-  return 'generic';
+  return 'Location details';
 }
 
 /**
- * Title mapping for 30 minutes before exact time
- */
-export function get30mNotificationTitle(activityType: NotificationActivityType): string {
-  switch (activityType) {
-    case 'call':
-      return 'Call in 30 min';
-    case 'whatsapp':
-      return 'WhatsApp in 30 min';
-    case 'site_visit':
-      return 'Property visit in 30 min';
-    case 'meeting':
-      return 'Meeting in 30 min';
-    case 'document_collection':
-      return 'Docs/Token in 30 min';
-    case 'generic':
-    default:
-      return 'Follow-up in 30 min';
-  }
-}
-
-/**
- * Title mapping for exact time
- * Note: The word "now" is used ONLY for Phone Call ("Call now") and WhatsApp ("WhatsApp now").
- * Site visit, Meeting, Docs/Token, and Generic use "reminder".
- */
-export function getExactNotificationTitle(activityType: NotificationActivityType): string {
-  switch (activityType) {
-    case 'call':
-      return 'Call now';
-    case 'whatsapp':
-      return 'WhatsApp now';
-    case 'site_visit':
-      return 'Property visit reminder';
-    case 'meeting':
-      return 'Meeting reminder';
-    case 'document_collection':
-      return 'Docs/Token reminder';
-    case 'generic':
-    default:
-      return 'Follow-up reminder';
-  }
-}
-
-/**
- * Body fallback text when reminderNote is empty
- */
-export function getBodyFallback(activityType: NotificationActivityType): string {
-  switch (activityType) {
-    case 'call':
-      return 'Call client';
-    case 'whatsapp':
-      return 'Message client';
-    case 'site_visit':
-      return 'Site visit';
-    case 'meeting':
-      return 'Client meeting';
-    case 'document_collection':
-      return 'Collect documents / token';
-    case 'generic':
-    default:
-      return 'Follow-up';
-  }
-}
-
-/**
- * Builds notification body according to the Body Rules:
- * Prefer: clientName + " • " + reminderNote
- * If reminderNote is empty, use the activity type fallback.
- *
- * Examples:
- * "govind • Collect documents"
- * "govind • Client meeting"
- * "govind • Madhurawada site visit"
+ * Format the full notification body for a lead reminder.
  */
 export function formatFollowUpNotificationBody(
   clientName: string,
-  reminderNote: string | undefined | null,
-  activityType: NotificationActivityType
+  userNote?: string | null,
+  activityType?: FollowUpType
 ): string {
-  const client = sanitizeNotificationText(clientName) || 'Client';
-  let cleanNote = sanitizeNotificationText(reminderNote);
-  // Treat auto-generated legacy boilerplate like "Follow-up call with <name>" as empty so clean fallback is used
-  if (
-    cleanNote &&
-    /^(follow-up call|whatsapp discussion|site visit|client meeting|follow-up regarding property requirements)\s+with\s+/i.test(cleanNote)
-  ) {
-    cleanNote = '';
+  const cleanName = sanitizeNotificationText(clientName) || 'Client';
+  const cleanNote = sanitizeNotificationText(userNote);
+
+  if (cleanNote) {
+    return formatNotificationBody(cleanName, cleanNote);
   }
-  const secondary = cleanNote || getBodyFallback(activityType);
-  return `${client} • ${secondary}`;
+
+  if (activityType === 'site_visit') {
+    return formatNotificationBody(cleanName, 'Property site visit');
+  }
+  if (activityType === 'meeting') {
+    return formatNotificationBody(cleanName, 'Client meeting');
+  }
+  if (activityType === 'whatsapp') {
+    return formatNotificationBody(cleanName, 'WhatsApp follow-up');
+  }
+  return formatNotificationBody(cleanName, 'Follow-up call');
 }
 
 /**
- * Initialize Android notification channel and tap listeners.
+ * Determine the 30m notification title based on activity type.
+ */
+export function get30mNotificationTitle(activityType?: FollowUpType): string {
+  if (activityType === 'site_visit') {
+    return 'Property visit in 30 minutes';
+  }
+  if (activityType === 'meeting') {
+    return 'Meeting in 30 minutes';
+  }
+  if (activityType === 'whatsapp') {
+    return 'WhatsApp follow-up in 30 minutes';
+  }
+  return 'Follow-up in 30 minutes';
+}
+
+/**
+ * Determine the exact-time notification title based on activity type.
+ */
+export function getExactNotificationTitle(activityType?: FollowUpType): string {
+  if (activityType === 'site_visit') {
+    return 'Property visit now';
+  }
+  if (activityType === 'meeting') {
+    return 'Client meeting now';
+  }
+  if (activityType === 'whatsapp') {
+    return 'Send WhatsApp follow-up';
+  }
+  return 'Follow-up due now';
+}
+
+/**
+ * Helper to resolve whether a reminder is a site visit or generic follow-up.
+ */
+export function resolveActivityType(
+  lead: Lead,
+  activityTypeOrIsVisit?: FollowUpType | boolean
+): FollowUpType {
+  if (typeof activityTypeOrIsVisit === 'string') {
+    return activityTypeOrIsVisit;
+  }
+  if (activityTypeOrIsVisit === true) {
+    return 'site_visit';
+  }
+  if (lead.nextFollowUpType) {
+    return lead.nextFollowUpType;
+  }
+  if (lead.status === 'site_visit_scheduled') {
+    return 'site_visit';
+  }
+  if (lead.nextFollowUpNote && /visit/i.test(lead.nextFollowUpNote)) {
+    return 'site_visit';
+  }
+  return 'call';
+}
+
+/**
+ * Initialize Notification channels & click action listener on app launch.
  */
 export async function initLocalNotifications(onAction?: NotificationActionListener): Promise<void> {
   if (onAction) {
@@ -452,31 +368,30 @@ export async function initLocalNotifications(onAction?: NotificationActionListen
 
   try {
     if (!isChannelInitialized) {
-      // 1. Delete legacy generic channel if present
-      try {
-        await LocalNotifications.deleteChannel({ id: 'proplead_reminders' });
-      } catch {
-        // Ignore if channel does not exist
-      }
-
-      // 2. PropLead Follow-ups channel (High importance for alerts, clean sound/vibration)
+      // 1. Follow-ups Channel (HIGH importance)
       const followUpChannel: Channel = {
         id: FOLLOWUP_CHANNEL_ID,
         name: FOLLOWUP_CHANNEL_NAME,
-        description: 'Client follow-up reminders and scheduled calls',
-        importance: 4, // High importance (heads-up banner where Android allows)
-        visibility: 1, // Public visibility on lockscreen
+        description: 'Time-critical reminders for lead follow-ups and calls',
+        importance: 4, // HIGH: makes sound and appears as heads-up
+        visibility: 1, // PUBLIC: show on lockscreen
+        sound: 'default',
         vibration: true,
+        lights: true,
+        lightColor: '#059669',
       };
 
-      // 3. PropLead Property Visits channel (High importance for site visits)
+      // 2. Property Visits Channel (HIGH importance)
       const visitsChannel: Channel = {
         id: VISITS_CHANNEL_ID,
         name: VISITS_CHANNEL_NAME,
-        description: 'Site visit reminders and property tours',
-        importance: 4, // High importance (heads-up banner where Android allows)
-        visibility: 1, // Public visibility on lockscreen
+        description: 'Scheduled property visits and client meetings',
+        importance: 4, // HIGH
+        visibility: 1,
+        sound: 'default',
         vibration: true,
+        lights: true,
+        lightColor: '#0284C7',
       };
 
       await LocalNotifications.createChannel(followUpChannel);
@@ -484,101 +399,92 @@ export async function initLocalNotifications(onAction?: NotificationActionListen
       isChannelInitialized = true;
     }
 
-    // Set up tap listener once
-    await LocalNotifications.removeAllListeners();
-    await LocalNotifications.addListener('localNotificationActionPerformed', (notificationAction: ActionPerformed) => {
-      const extra = (notificationAction.notification.extra as NotificationPayloadExtra) || {};
+    // Set up click action listener
+    LocalNotifications.removeAllListeners();
+    LocalNotifications.addListener('localNotificationActionPerformed', (notification: ActionPerformed) => {
+      const extra = (notification?.notification?.extra || {}) as NotificationPayloadExtra;
       if (globalActionListener) {
         globalActionListener(extra);
       }
     });
   } catch (err) {
-    console.warn('LocalNotifications initialization note:', err);
+    console.warn('Failed to initialize local notification channels:', err);
   }
 }
 
 /**
- * Check current notification permissions.
+ * Request notification permissions from device OS with graceful handling.
  */
-export async function checkNotificationPermission(): Promise<{
-  granted: boolean;
-  display: string;
-}> {
+export async function requestNotificationPermission(uid?: string | null): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      return {
-        granted: window.Notification.permission === 'granted',
-        display: window.Notification.permission,
-      };
-    }
-    return { granted: true, display: 'granted' };
-  }
-
-  try {
-    const status = await LocalNotifications.checkPermissions();
-    return {
-      granted: status.display === 'granted',
-      display: status.display,
-    };
-  } catch (err) {
-    console.warn('Failed to check notification permission:', err);
-    return { granted: false, display: 'denied' };
-  }
-}
-
-/**
- * Request notification permissions (Android 13+ POST_NOTIFICATIONS).
- */
-export async function requestNotificationPermission(): Promise<{
-  granted: boolean;
-  display: string;
-}> {
-  try {
-    localStorage.setItem(NOTIFICATION_PERM_PROMPTED_KEY, 'true');
-  } catch {}
-
-  if (!Capacitor.isNativePlatform()) {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
+    if ('Notification' in window) {
       try {
-        const res = await window.Notification.requestPermission();
-        return { granted: res === 'granted', display: res };
+        const perm = await Notification.requestPermission();
+        return perm === 'granted';
       } catch {
-        return { granted: false, display: 'denied' };
+        return false;
       }
     }
-    return { granted: true, display: 'granted' };
+    return true;
   }
 
   try {
-    const status = await LocalNotifications.requestPermissions();
-    return {
-      granted: status.display === 'granted',
-      display: status.display,
-    };
+    const result = await LocalNotifications.requestPermissions();
+    setNotificationPermissionPrompted(uid);
+    return result.display === 'granted';
   } catch (err) {
-    console.warn('Failed to request notification permission:', err);
-    return { granted: false, display: 'denied' };
-  }
-}
-
-/**
- * Check if the user was already prompted for notification permissions.
- */
-export function wasNotificationPermissionPrompted(): boolean {
-  try {
-    return localStorage.getItem(NOTIFICATION_PERM_PROMPTED_KEY) === 'true';
-  } catch {
+    console.warn('Error requesting notification permissions:', err);
     return false;
   }
 }
 
 /**
+ * Check current notification permission status.
+ */
+export async function checkNotificationPermission(): Promise<{ granted: boolean; display: string }> {
+  if (!Capacitor.isNativePlatform()) {
+    if ('Notification' in window) {
+      const granted = Notification.permission === 'granted';
+      return { granted, display: Notification.permission };
+    }
+    return { granted: true, display: 'granted' };
+  }
+
+  try {
+    const perm = await LocalNotifications.checkPermissions();
+    return {
+      granted: perm.display === 'granted',
+      display: perm.display,
+    };
+  } catch (err) {
+    console.warn('Error checking notification permissions:', err);
+    return { granted: false, display: 'prompt' };
+  }
+}
+
+export function wasNotificationPermissionPrompted(uid?: string | null): boolean {
+  try {
+    const key = getNotificationPermPromptedKey(uid);
+    return localStorage.getItem(key) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function setNotificationPermissionPrompted(uid?: string | null): void {
+  try {
+    const key = getNotificationPermPromptedKey(uid);
+    localStorage.setItem(key, 'true');
+  } catch {}
+}
+
+/**
  * Cancel all scheduled notifications associated with a specific lead.
  */
-export async function cancelNotificationsForLead(leadId: string): Promise<void> {
+export async function cancelNotificationsForLead(leadId: string, uid?: string | null): Promise<void> {
   if (!leadId) return;
 
-  const registry = getActiveScheduledRegistry();
+  const registry = getActiveScheduledRegistry(uid);
   const registeredIds = registry[leadId] || [];
 
   // Combine deterministic IDs with registered IDs
@@ -603,17 +509,17 @@ export async function cancelNotificationsForLead(leadId: string): Promise<void> 
   }
 
   delete registry[leadId];
-  saveActiveScheduledRegistry(registry);
+  saveActiveScheduledRegistry(registry, uid);
 }
 
 /**
  * Cancel all follow-up notifications across all leads.
  */
-export async function cancelAllFollowUpNotifications(leads: Lead[]): Promise<void> {
+export async function cancelAllFollowUpNotifications(leads: Lead[], uid?: string | null): Promise<void> {
   for (const lead of leads) {
     const isVisit = lead.status === 'site_visit_scheduled' || (lead.nextFollowUpNote && /visit/i.test(lead.nextFollowUpNote));
     if (!isVisit) {
-      await cancelNotificationsForLead(lead.id);
+      await cancelNotificationsForLead(lead.id, uid);
     }
   }
 }
@@ -621,11 +527,11 @@ export async function cancelAllFollowUpNotifications(leads: Lead[]): Promise<voi
 /**
  * Cancel all property visit notifications across all leads.
  */
-export async function cancelAllPropertyVisitNotifications(leads: Lead[]): Promise<void> {
+export async function cancelAllPropertyVisitNotifications(leads: Lead[], uid?: string | null): Promise<void> {
   for (const lead of leads) {
     const isVisit = lead.status === 'site_visit_scheduled' || (lead.nextFollowUpNote && /visit/i.test(lead.nextFollowUpNote));
     if (isVisit) {
-      await cancelNotificationsForLead(lead.id);
+      await cancelNotificationsForLead(lead.id, uid);
     }
   }
 }
@@ -646,9 +552,9 @@ export async function cancelDailySummaryNotification(): Promise<void> {
 }
 
 /**
- * Cancel all pending and scheduled notifications for the user on account deletion.
+ * Cancel all pending and scheduled notifications for the user on logout or account deletion.
  */
-export async function cancelAllUserNotifications(leads?: Lead[]): Promise<void> {
+export async function cancelAllUserNotifications(leads?: Lead[], uid?: string | null): Promise<void> {
   try {
     if (Capacitor.isNativePlatform()) {
       try {
@@ -663,17 +569,17 @@ export async function cancelAllUserNotifications(leads?: Lead[]): Promise<void> 
       }
     }
 
-    // Cancel by lead ID for all registered notifications
-    const registry = getActiveScheduledRegistry();
+    // Cancel by lead ID for all registered notifications in registry
+    const registry = getActiveScheduledRegistry(uid);
     for (const leadId of Object.keys(registry)) {
-      await cancelNotificationsForLead(leadId);
+      await cancelNotificationsForLead(leadId, uid);
     }
 
     // Also cancel for any provided leads array
     if (leads && leads.length > 0) {
       for (const lead of leads) {
         if (lead?.id) {
-          await cancelNotificationsForLead(lead.id);
+          await cancelNotificationsForLead(lead.id, uid);
         }
       }
     }
@@ -681,8 +587,8 @@ export async function cancelAllUserNotifications(leads?: Lead[]): Promise<void> 
     // Cancel daily summary notification
     await cancelDailySummaryNotification();
 
-    // Clear registry cache
-    saveActiveScheduledRegistry({});
+    // Clear registry cache for this UID
+    saveActiveScheduledRegistry({}, uid);
   } catch (err) {
     console.warn('Error cancelling all user notifications:', err);
   }
@@ -690,26 +596,16 @@ export async function cancelAllUserNotifications(leads?: Lead[]): Promise<void> 
 
 /**
  * Schedule notifications for a lead's follow-up or property visit.
- *
- * Follow-up:
- * 1. 30 minutes before: "Follow-up in 30 minutes" / "{lead.name} needs a follow-up at {time}"
- * 2. Exact time: "Follow up now" / "Call {lead.name}"
- *
- * Property Visit:
- * 1. 30 minutes before: "Property visit in 30 minutes" / "Visit with {lead.name} at {time}"
- * 2. Exact time: "Property visit now" / "Visit with {lead.name}"
- *
- * Overdue:
- * Single overdue notification scheduled 30m after exact time.
  */
 export async function scheduleFollowUpNotifications(
   lead: Lead,
-  activityTypeOrIsVisit?: FollowUpType | boolean
+  activityTypeOrIsVisit?: FollowUpType | boolean,
+  uid?: string | null
 ): Promise<void> {
   if (!lead || !lead.id) return;
 
   // Always cancel any previously scheduled notifications first to prevent duplicates or stale times
-  await cancelNotificationsForLead(lead.id);
+  await cancelNotificationsForLead(lead.id, uid);
 
   if (!lead.nextFollowUpDate || !lead.nextFollowUpTime) {
     return;
@@ -718,7 +614,7 @@ export async function scheduleFollowUpNotifications(
   const activityType = resolveActivityType(lead, activityTypeOrIsVisit);
   const isVisit = activityType === 'site_visit';
 
-  const settings = getStoredNotificationSettings();
+  const settings = getStoredNotificationSettings(uid);
 
   // Check category toggles
   if (isVisit && !settings.propertyVisitReminders) {
@@ -746,17 +642,13 @@ export async function scheduleFollowUpNotifications(
   const leadDisplayName = sanitizeNotificationText(lead.name) || 'Client';
   const targetChannelId = isVisit ? VISITS_CHANNEL_ID : FOLLOWUP_CHANNEL_ID;
 
-  // Notification body follows the professional body rules:
-  // Prefer: clientName + " • " + reminderNote
-  // If reminderNote is empty, use the activity type fallback
   const notificationBody = formatFollowUpNotificationBody(
     leadDisplayName,
     lead.nextFollowUpNote,
     activityType
   );
 
-  // 1. 30-minute reminder (only if at least 30 minutes in future)
-  // Priority: DEFAULT importance for advance notification
+  // 1. 30-minute reminder
   if (thirtyMinBefore > now) {
     const id = isVisit ? getVisit30mId(lead.id) : getFollowUp30mId(lead.id);
     const title = get30mNotificationTitle(activityType);
@@ -784,7 +676,6 @@ export async function scheduleFollowUpNotifications(
   }
 
   // 2. Exact-time reminder
-  // Priority: HIGH importance for immediate action
   const exactId = isVisit ? getVisitExactId(lead.id) : getFollowUpExactId(lead.id);
   const exactTitle = getExactNotificationTitle(activityType);
 
@@ -809,7 +700,7 @@ export async function scheduleFollowUpNotifications(
   });
   scheduledIds.push(exactId);
 
-  // 3. Overdue follow-up reminder (scheduled 30m after exact time, cancelled when completed/edited)
+  // 3. Overdue follow-up reminder
   if (!isVisit) {
     const overdueId = getFollowUpOverdueId(lead.id);
     notificationsToSchedule.push({
@@ -840,9 +731,9 @@ export async function scheduleFollowUpNotifications(
           notifications: notificationsToSchedule,
         });
       }
-      const registry = getActiveScheduledRegistry();
+      const registry = getActiveScheduledRegistry(uid);
       registry[lead.id] = scheduledIds;
-      saveActiveScheduledRegistry(registry);
+      saveActiveScheduledRegistry(registry, uid);
     } catch (err) {
       console.warn('Failed to schedule local notifications:', err);
     }
@@ -850,14 +741,10 @@ export async function scheduleFollowUpNotifications(
 }
 
 /**
- * Schedule or update the single morning Daily Summary notification at 9:00 AM.
- * Example:
- * Title: "PropLead Daily Follow-ups"
- * Body: "You have 5 follow-ups today"
- * If zero follow-ups: cancels notification to avoid spam.
+ * Schedule or update the morning Daily Summary notification at 9:00 AM.
  */
-export async function scheduleDailySummaryNotification(leads: Lead[]): Promise<void> {
-  const settings = getStoredNotificationSettings();
+export async function scheduleDailySummaryNotification(leads: Lead[], uid?: string | null): Promise<void> {
+  const settings = getStoredNotificationSettings(uid);
   if (!settings.dailySummary) {
     await cancelDailySummaryNotification();
     return;
@@ -867,25 +754,21 @@ export async function scheduleDailySummaryNotification(leads: Lead[]): Promise<v
   const targetDate = new Date();
   targetDate.setHours(9, 0, 0, 0);
 
-  // If already past 9:00 AM today, schedule for 9:00 AM tomorrow
   if (now.getTime() >= targetDate.getTime()) {
     targetDate.setDate(targetDate.getDate() + 1);
   }
 
-  // Format target date as YYYY-MM-DD
   const year = targetDate.getFullYear();
   const month = String(targetDate.getMonth() + 1).padStart(2, '0');
   const day = String(targetDate.getDate()).padStart(2, '0');
   const targetDayStr = `${year}-${month}-${day}`;
 
-  // Count leads with follow-up scheduled for the target day
   const matchingLeads = leads.filter(
     (l) => l.nextFollowUpDate === targetDayStr && l.status !== 'closed' && l.status !== 'lost'
   );
   const count = matchingLeads.length;
 
   if (count === 0) {
-    // Zero follow-ups: do not show unnecessary notifications
     await cancelDailySummaryNotification();
     return;
   }
@@ -895,7 +778,6 @@ export async function scheduleDailySummaryNotification(leads: Lead[]): Promise<v
 
   try {
     if (Capacitor.isNativePlatform()) {
-      // Cancel previous summary first to avoid duplicates
       await LocalNotifications.cancel({
         notifications: [{ id: DAILY_SUMMARY_NOTIFICATION_ID }],
       });
@@ -928,23 +810,22 @@ export async function scheduleDailySummaryNotification(leads: Lead[]): Promise<v
 }
 
 /**
- * Synchronize notifications for all leads (called on app startup or settings toggle).
+ * Synchronize notifications for all leads.
  */
-export async function syncAllLeadNotifications(leads: Lead[]): Promise<void> {
-  const settings = getStoredNotificationSettings();
+export async function syncAllLeadNotifications(leads: Lead[], uid?: string | null): Promise<void> {
+  const settings = getStoredNotificationSettings(uid);
 
   for (const lead of leads) {
     if (lead.nextFollowUpDate && lead.nextFollowUpTime && lead.status !== 'closed' && lead.status !== 'lost') {
-      await scheduleFollowUpNotifications(lead);
+      await scheduleFollowUpNotifications(lead, undefined, uid);
     } else {
-      await cancelNotificationsForLead(lead.id);
+      await cancelNotificationsForLead(lead.id, uid);
     }
   }
 
   if (settings.dailySummary) {
-    await scheduleDailySummaryNotification(leads);
+    await scheduleDailySummaryNotification(leads, uid);
   } else {
     await cancelDailySummaryNotification();
   }
 }
-

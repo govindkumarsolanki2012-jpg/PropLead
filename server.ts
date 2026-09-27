@@ -2983,76 +2983,184 @@ async function startServer() {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Privacy Policy - PropLead Real Estate CRM</title>
-  <meta name="description" content="Official Privacy Policy for PropLead CRM for real estate agents and brokers." />
+  <title>Privacy Policy - PropLead for Agents</title>
+  <meta name="description" content="Official Privacy Policy for PropLead for Agents real estate CRM app (com.proplead.tracker)." />
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #1e293b; background: #f8fafc; margin: 0; padding: 0; }
-    .header { background: #065f46; color: #ffffff; padding: 2.5rem 1.5rem; text-align: center; }
-    .header h1 { margin: 0 0 0.5rem; font-size: 1.85rem; font-weight: 800; letter-spacing: -0.02em; }
+    :root {
+      --primary: #065f46;
+      --primary-light: #ecfdf5;
+      --primary-border: #a7f3d0;
+      --slate-900: #0f172a;
+      --slate-800: #1e293b;
+      --slate-700: #334155;
+      --slate-600: #475569;
+      --slate-500: #64748b;
+      --slate-200: #e2e8f0;
+      --slate-100: #f1f5f9;
+      --slate-50: #f8fafc;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: var(--slate-800); background: var(--slate-50); margin: 0; padding: 0; }
+    .header { background: var(--primary); color: #ffffff; padding: 3rem 1.5rem; text-align: center; }
+    .header h1 { margin: 0 0 0.5rem; font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; }
     .header p { margin: 0; opacity: 0.9; font-size: 0.95rem; }
-    .container { max-width: 820px; margin: -1.5rem auto 3rem; background: #ffffff; padding: 2rem 2.5rem; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e2e8f0; }
-    .pledge { background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 12px; padding: 1.25rem 1.5rem; margin-bottom: 2rem; }
-    .pledge h3 { margin: 0 0 0.5rem; color: #065f46; font-size: 1.05rem; }
-    .pledge p { margin: 0; font-size: 0.92rem; color: #047857; }
-    h2 { font-size: 1.2rem; color: #0f172a; margin-top: 1.75rem; margin-bottom: 0.5rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.4rem; }
-    p, li { font-size: 0.92rem; color: #334155; }
-    ul { padding-left: 1.4rem; margin: 0.5rem 0; }
-    li { margin-bottom: 0.35rem; }
-    .footer { text-align: center; font-size: 0.82rem; color: #64748b; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #e2e8f0; }
-    a { color: #059669; text-decoration: underline; }
+    .container { max-width: 860px; margin: -2rem auto 3rem; background: #ffffff; padding: 2.5rem 3rem; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.06); border: 1px solid var(--slate-200); }
+    .pledge { background: var(--primary-light); border: 1px solid var(--primary-border); border-radius: 14px; padding: 1.5rem; margin-bottom: 2rem; }
+    .pledge h3 { margin: 0 0 0.5rem; color: var(--primary); font-size: 1.1rem; }
+    .pledge p { margin: 0; font-size: 0.95rem; color: #047857; }
+    h2 { font-size: 1.25rem; color: var(--slate-900); margin-top: 2rem; margin-bottom: 0.75rem; border-bottom: 2px solid var(--slate-100); padding-bottom: 0.4rem; }
+    h3 { font-size: 1.05rem; color: var(--slate-900); margin-top: 1.25rem; margin-bottom: 0.5rem; }
+    p, li { font-size: 0.95rem; color: var(--slate-700); }
+    ul, ol { padding-left: 1.5rem; margin: 0.5rem 0 1rem 0; }
+    li { margin-bottom: 0.4rem; }
+    .meta-box { background: var(--slate-100); border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 2rem; font-size: 0.9rem; color: var(--slate-600); display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between; }
+    .legal-notice { background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; padding: 1rem 1.25rem; margin-top: 2rem; font-size: 0.88rem; color: #92400e; }
+    .footer { text-align: center; font-size: 0.85rem; color: var(--slate-500); margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--slate-200); }
+    a { color: #059669; text-decoration: underline; font-weight: 600; }
+    code { background: var(--slate-100); padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.88rem; color: var(--slate-900); }
+    @media (max-width: 640px) {
+      .container { padding: 1.5rem; margin: -1rem 1rem 2rem; border-radius: 12px; }
+      .header { padding: 2rem 1rem; }
+    }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>PropLead Privacy Policy</h1>
-    <p>Dedicated CRM for Real Estate Agents & Brokers • Effective: September 2026</p>
+    <h1>Privacy Policy</h1>
+    <p>PropLead for Agents &bull; Package ID: com.proplead.tracker</p>
   </div>
   <div class="container">
-    <div class="pledge">
-      <h3>🔒 Broker Client Data Protection Guarantee</h3>
-      <p>PropLead strictly respects the privacy of your real estate business. <strong>We NEVER sell, rent, monetize, or share your client contacts, buyer requirements, property inventory, private owner details, or conversation notes with third parties, property portals, or advertisers.</strong> Your business data is exclusively yours.</p>
+    <div class="meta-box">
+      <div><strong>App Name:</strong> PropLead for Agents</div>
+      <div><strong>Platform:</strong> Android (Capacitor / React)</div>
+      <div><strong>Target Audience:</strong> Property Agents &amp; Brokers in India</div>
+      <div><strong>Effective Date:</strong> September 27, 2026</div>
     </div>
 
-    <h2>1. Information We Collect</h2>
-    <p>To provide lead tracking, smart matching, and follow-up reminders, we collect:</p>
+    <div class="pledge">
+      <h3>🔒 Broker Client Data Protection Guarantee</h3>
+      <p>PropLead for Agents strictly respects the privacy and confidentiality of your real estate business. <strong>We NEVER sell, rent, monetize, or share your client contacts, buyer requirements, property inventory, private owner details, WhatsApp notes, or voice recordings with third parties, property portals, or advertisers.</strong> Your business data is exclusively yours.</p>
+    </div>
+
+    <h2>1. Introduction</h2>
+    <p>Welcome to <strong>PropLead for Agents</strong> (<code>com.proplead.tracker</code>). We are committed to protecting the privacy of independent real estate agents, brokers, and property consultants across India. This Privacy Policy outlines how we collect, use, store, and safeguard your personal and business data when you use our mobile application and cloud services.</p>
+
+    <h2>2. Information We Collect</h2>
+    <p>To provide lead tracking, smart matching, client follow-ups, and property inventory management, PropLead collects the following categories of information:</p>
     <ul>
-      <li><strong>Account Details:</strong> Your name, agency name, phone number, city, RERA number, and registered Google account email.</li>
-      <li><strong>Lead & Client Records:</strong> Client names, phone numbers, WhatsApp numbers, property preferences (budget, BHK, localities), and notes entered by you.</li>
-      <li><strong>Property Inventory:</strong> Listings, pricing, photos, and confidential owner contact details entered by you.</li>
-      <li><strong>Voice Notes & Documents:</strong> Audio memos and document attachments uploaded to lead files.</li>
-      <li><strong>Subscription Records:</strong> Google Play subscription purchase status, base plan, and expiry date.</li>
+      <li><strong>Firebase UID:</strong> A unique user identifier generated by Firebase Authentication when you sign in.</li>
+      <li><strong>Google Account Profile Information:</strong> Your Google account display name and email address used for authentication.</li>
+      <li><strong>Agency &amp; Business Details:</strong> Business name, agency name, city, RERA registration number, and operating locations entered by you.</li>
+      <li><strong>Customer &amp; Lead Records:</strong> Client/buyer names, phone numbers, WhatsApp contact numbers, budget ranges, preferred BHK, preferred localities, lead source, priority level, and pipeline status entered by you.</li>
+      <li><strong>Lead Notes &amp; Follow-Up Information:</strong> Custom notes, site visit schedules, meeting dates, and follow-up reminders.</li>
+      <li><strong>WhatsApp-Related Activity:</strong> Manually recorded WhatsApp notes, chat launch triggers, and template interactions initiated by you. <em>Note: PropLead does not read, intercept, or access your WhatsApp messages or private chat contents.</em></li>
+      <li><strong>Property Listings:</strong> Property titles, transaction types (sale/rent/lease), property types (flat, villa, plot, commercial), pricing, super built-up and carpet area, furnishing status, floor number, facing direction, and property status.</li>
+      <li><strong>Property Owner Contact Details:</strong> Confidential owner names, phone numbers, WhatsApp numbers, exact door/flat numbers, and private internal notes (e.g., keys location, bottom price).</li>
+      <li><strong>Property Photos &amp; Lead Documents:</strong> Images and document attachments uploaded by you.</li>
+      <li><strong>Voice Recordings:</strong> Audio memos recorded via the device microphone and stored locally or in cloud storage.</li>
+      <li><strong>Notification Preferences &amp; Schedules:</strong> Reminder settings and scheduled-notification registries.</li>
+      <li><strong>Subscription Status:</strong> Pro subscription entitlements, base plans, expiry dates, purchase tokens, and order IDs.</li>
+      <li><strong>Device &amp; Platform Information:</strong> Device operating system type, app version, and platform identifiers.</li>
+      <li><strong>Diagnostics &amp; Error Logs:</strong> System crash reports and error logs generated during app execution to ensure stability.</li>
     </ul>
 
-    <h2>2. Purpose of Data Processing</h2>
-    <p>Your data is processed solely to provide app functionality:</p>
+    <h2>3. Information Users Enter</h2>
+    <p>The core functionality of PropLead depends on data actively entered or uploaded by you, including:</p>
     <ul>
-      <li>Managing your buyer/tenant leads and scheduling follow-up notifications.</li>
-      <li>Matching buyer requirements with your active property listings.</li>
-      <li>Backing up and synchronizing your records across devices via Google Cloud / Firebase.</li>
-      <li>Verifying Pro subscription entitlements via Google Play.</li>
+      <li>Client contact records, buyer requirements, and CRM notes.</li>
+      <li>Property inventory specifications, pricing, and confidential owner contacts.</li>
+      <li>Profile details, RERA numbers, and agent preferences.</li>
     </ul>
 
-    <h2>3. Device Permissions</h2>
+    <h2>4. Device Permissions</h2>
+    <p>PropLead requests sensitive device permissions strictly on an as-needed basis when you interact with specific features:</p>
     <ul>
-      <li><strong>Contacts (Read):</strong> Used strictly when you explicitly choose to import phone contacts as leads. We never access your contacts in the background or upload them elsewhere.</li>
-      <li><strong>Microphone / Record Audio:</strong> Used solely when you record voice notes on a specific lead. Recordings are saved only inside that lead's record.</li>
-      <li><strong>Notifications:</strong> Used solely to alert you of scheduled follow-ups and site visits at the times you set.</li>
+      <li><strong>Contacts (Read):</strong> Used solely when you explicitly tap to import phone contacts as leads. Contacts are never accessed in the background or uploaded without your action.</li>
+      <li><strong>Microphone / Record Audio:</strong> Used exclusively when you record voice memos for a specific lead.</li>
+      <li><strong>Notifications:</strong> Used solely to alert you of scheduled follow-ups, client meetings, and site visits at the times you configure.</li>
+      <li><strong>Camera &amp; Photo/File Picker:</strong> Used when you capture or select property photos and lead document attachments.</li>
+      <li><strong>Internet &amp; Network Access:</strong> Required for syncing records with cloud storage and verifying Pro subscriptions.</li>
     </ul>
 
-    <h2>4. Data Storage & Security</h2>
-    <p>All data is hosted on Google Cloud infrastructure and Firebase Firestore. Each user's database records are strictly isolated using server-side security rules so that only your verified Google authentication credentials can access your business data. All network communication is encrypted with TLS/HTTPS.</p>
+    <h2>5. How Information Is Used</h2>
+    <p>Collected information is processed exclusively to provide and improve app functionality:</p>
+    <ul>
+      <li>Maintaining your authenticated session and secure account access.</li>
+      <li>Managing buyer and tenant leads, filtering pipelines, and triggering follow-up reminders.</li>
+      <li>Matching buyer property requirements with your active property inventory.</li>
+      <li>Synchronizing your business data across your devices via cloud storage.</li>
+      <li>Processing Pro subscription billing through Google Play.</li>
+      <li>Diagnosing crashes and ensuring reliable app performance.</li>
+    </ul>
 
-    <h2>5. Data Retention & Deletion Rights</h2>
-    <p>You have full ownership of your data at all times. You can export your leads to CSV via Settings. You may also permanently delete your account and erase all leads, properties, and backups directly inside the PropLead app (<em>Settings &gt; Account &gt; Delete Account &amp; Data</em>) or through our <a href="/account-deletion">Account Deletion Web Portal</a>.</p>
+    <h2>6. Local Device Storage</h2>
+    <p>PropLead utilizes secure local device storage to ensure offline availability and responsive performance:</p>
+    <ul>
+      <li><strong>localStorage:</strong> Stores UID-scoped user profile data, leads, properties, templates, and preferences (e.g., <code>proplead_leads_v1_{uid}</code>). Cached local data is strictly isolated per Firebase UID.</li>
+      <li><strong>IndexedDB:</strong> Stores local copies of voice memo recordings keyed by UID (e.g., <code>{uid}:{voiceNoteId}</code>).</li>
+    </ul>
 
-    <h2>6. Google Play Subscriptions</h2>
-    <p>PropLead Pro subscriptions are billed through Google Play. Deleting your PropLead account or uninstalling the app does not automatically cancel active recurring subscriptions in Google Play. Users can manage or cancel their subscription at any time at: <a href="https://play.google.com/store/account/subscriptions" target="_blank" rel="noopener noreferrer">https://play.google.com/store/account/subscriptions</a>.</p>
+    <h2>7. Cloud Storage and Processing</h2>
+    <p>Cloud backups, Firestore document databases, and Firebase Storage media are hosted on secure Google Cloud infrastructure. All network traffic is encrypted using TLS/HTTPS.</p>
 
-    <h2>7. Contact Information</h2>
-    <p>For questions or privacy inquiries, please contact the PropLead team at: <a href="mailto:brightcore733@gmail.com">brightcore733@gmail.com</a>.</p>
+    <h2>8. Firebase and Google Services</h2>
+    <p>PropLead integrates trusted Google Firebase and Cloud services:</p>
+    <ul>
+      <li><strong>Firebase Authentication:</strong> Manages secure user sign-in and identity tokens. (<a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google Privacy Policy</a>)</li>
+      <li><strong>Cloud Firestore:</strong> Stores user profiles, leads, and properties behind secure per-user rules.</li>
+      <li><strong>Firebase Storage:</strong> Secures uploaded property photos and lead document attachments under user-specific storage paths.</li>
+      <li><strong>Google Cloud Run:</strong> Powers backend API processing and subscription verification.</li>
+    </ul>
+
+    <h2>9. Google Play Billing</h2>
+    <p>Pro subscriptions are processed securely via <strong>Google Play Billing</strong>. PropLead receives purchase tokens, order IDs, and subscription expiry dates from Google Play to unlock Pro features. We do not store credit card or financial payment details on our servers.</p>
+
+    <h2>10. Data Sharing</h2>
+    <p><strong>We do not sell, trade, or rent your personal or business data to any third party.</strong> Data is shared only with trusted Google Cloud infrastructure services necessary to operate the application (Firebase Authentication, Firestore, Firebase Storage, and Cloud Run), or when required by applicable Indian law.</p>
+
+    <h2>11. Data Retention</h2>
+    <p>Your data remains stored in your personal cloud database for as long as your account is active. When you request account deletion, all cloud records, voice memos, attachments, and authentication records are permanently erased.</p>
+
+    <h2>12. Data Security</h2>
+    <p>We implement robust technical and organizational security measures, including Firebase Security Rules enforcing per-user data isolation, TLS encryption in transit, and secure token verification.</p>
+
+    <h2>13. User Choices and Controls</h2>
+    <p>You maintain full control over your data. You can export your leads to CSV via the Settings menu, update your profile details, or delete individual leads and properties at any time.</p>
+
+    <h2>14. Account and Data Deletion</h2>
+    <p>You have the right to permanently delete your account and all associated data at any time:</p>
+    <ul>
+      <li><strong>In-App Deletion (Recommended):</strong> Open PropLead, go to <em>Settings &gt; Account &amp; Security &gt; Delete Account &amp; All Data</em>, type <code>DELETE</code>, and confirm. Your profile, leads, properties, templates, voice notes, and cloud files are erased immediately.</li>
+      <li><strong>Web Deletion Portal:</strong> Visit our <a href="/account-deletion">Account Deletion Web Portal</a> to submit a deletion request.</li>
+      <li><strong>Google Play Subscriptions:</strong> Please note that deleting your PropLead account does not automatically cancel active recurring subscriptions in Google Play. You must cancel active subscriptions directly via <a href="https://play.google.com/store/account/subscriptions" target="_blank" rel="noopener noreferrer">Google Play Subscriptions</a>.</li>
+    </ul>
+
+    <h2>15. Children’s Privacy</h2>
+    <p>PropLead for Agents is a professional productivity tool designed exclusively for licensed real estate agents and property professionals. We do not knowingly collect personal information from individuals under the age of 18.</p>
+
+    <h2>16. Cross-Border Processing</h2>
+    <p>Depending on your location and Google Cloud regional infrastructure settings, data processed by Firebase and Google Cloud may be stored and processed in server regions utilized by Google Cloud Platform.</p>
+
+    <h2>17. Changes to This Privacy Policy</h2>
+    <p>We may update this Privacy Policy from time to time. Any changes will be posted on this page with an updated effective date. Continued use of the app after changes constitutes acceptance of the revised policy.</p>
+
+    <h2>18. Contact Information</h2>
+    <p>If you have any questions, concerns, or requests regarding this Privacy Policy or your data, please contact our support team:</p>
+    <ul>
+      <li><strong>Support Email:</strong> <a href="mailto:brightcore733@gmail.com">brightcore733@gmail.com</a></li>
+    </ul>
+
+    <h2>19. Effective Date</h2>
+    <p>This Privacy Policy is effective as of <strong>September 27, 2026</strong>.</p>
+
+    <h2>20. Last Updated Date</h2>
+    <p>This Privacy Policy was last updated on <strong>September 27, 2026</strong>.</p>
+
+    <div class="legal-notice">
+      <strong>Legal Review Notice:</strong> This privacy policy is provided for informational and compliance purposes for Google Play Console submission. It should be reviewed by qualified legal counsel to ensure alignment with applicable local laws and regulations prior to commercial launch.
+    </div>
 
     <div class="footer">
-      &copy; 2026 PropLead Real Estate CRM. All rights reserved.
+      &copy; 2026 PropLead for Agents (com.proplead.tracker). All rights reserved.
     </div>
   </div>
 </body>

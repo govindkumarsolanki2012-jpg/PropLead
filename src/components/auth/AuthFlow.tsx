@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-  Building2,
   ShieldCheck,
   CheckCircle2,
   AlertCircle,
@@ -10,6 +9,7 @@ import {
   Home,
   Cloud,
 } from 'lucide-react';
+import { PropLeadLogo } from '../common/PropLeadLogo';
 import { signInWithGoogle } from '../../services/firebaseService';
 import {
   reportGoogleAuthDiagnostic,
@@ -101,8 +101,8 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
       <div className="flex-1 flex flex-col justify-center max-w-sm mx-auto w-full py-6">
         {/* Brand Header */}
         <div className="flex flex-col items-center text-center mb-8">
-          <div className="w-18 h-18 rounded-3xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-xl shadow-emerald-600/25 mb-4">
-            <Building2 className="w-9 h-9" />
+          <div className="relative mb-4">
+            <PropLeadLogo className="w-18 h-18 rounded-3xl shadow-xl shadow-blue-600/20" />
           </div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-white">
             PropLead for Agents

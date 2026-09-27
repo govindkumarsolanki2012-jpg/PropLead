@@ -6,33 +6,65 @@
     android:viewportWidth="288"
     android:viewportHeight="288">
 
-    <!-- 288dp Android splash artboard. All visible artwork stays inside an
-         80dp centered emblem, well within the 192dp system safe circle. -->
-    <path android:pathData="M124,104H164C175.05,104 184,112.95 184,124V164C184,175.05 175.05,184 164,184H124C112.95,184 104,175.05 104,164V124C104,112.95 112.95,104 124,104Z">
+    <!-- 288dp Android splash artboard. The emblem stays inside a centered 160dp bounding box, perfectly within the 192dp system safe circle. -->
+    
+    <!-- 1. Background Squircle -->
+    <path android:pathData="M84,64H204C215.05,64 224,72.95 224,84V204C224,215.05 215.05,224 204,224H84C72.95,224 64,215.05 64,204V84C64,72.95 72.95,64 84,64Z">
         <aapt:attr name="android:fillColor">
             <gradient
                 android:type="linear"
-                android:startX="108"
-                android:startY="180"
-                android:endX="180"
-                android:endY="108">
-                <item android:offset="0" android:color="#059669" />
-                <item android:offset="1" android:color="#14B8A6" />
+                android:startX="64"
+                android:startY="64"
+                android:endX="224"
+                android:endY="224">
+                <item android:offset="0" android:color="#00A2FF" />
+                <item android:offset="0.5" android:color="#0077FF" />
+                <item android:offset="1" android:color="#0055EE" />
             </gradient>
         </aapt:attr>
     </path>
 
-    <!-- PropLead building mark -->
+    <!-- 2. House Chimney -->
+    <path
+        android:fillColor="#EBF3FC"
+        android:pathData="M165,102H178V124L165,111Z" />
+
+    <!-- 3. House Gable & Body Outline -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M132,166V126C132,122.69 134.69,120 138,120H150C153.31,120 156,122.69 156,126V166H132Z" />
+        android:pathData="M144,90L186,124C189.5,127 188.5,133 184,134.5C180.5,136 176.5,134 174,131.5V181C174,184.5 171,187.5 167.5,187.5H120.5C117,187.5 114,184.5 114,181V131.5C111.5,134 107.5,136 104,134.5C99.5,133 98.5,127 102,124Z" />
+
+    <!-- 4. 4-Pane Window -->
+    <path
+        android:fillColor="#BAE6FD"
+        android:pathData="M132,118H142V128H132ZM146,118H156V128H146ZM132,132H142V142H132ZM146,132H156V142H146Z" />
+
+    <!-- 5. Ascending Blue Chart Columns -->
+    <path
+        android:fillColor="#0284C7"
+        android:pathData="M117,157H133V184H117ZM136,146H152V184H136ZM155,135H171V184H155Z" />
+
+    <!-- 6. Vibrant Green Growth Arrow -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M103,188C128,189 155,178 180,143L175,139L199,124L199,152L193,147C169,176 139,191 103,188Z" />
+
+    <!-- 7. Checklist Board & Blue Clip -->
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M116,166V142C116,138.69 118.69,136 122,136H132V166H116Z" />
+        android:pathData="M174,168H203C207.5,168 211,171.5 211,176V204C211,208.5 207.5,212 203,212H174C169.5,212 166,208.5 166,204V176C166,171.5 169.5,168 174,168Z" />
     <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M156,132H166C169.31,132 172,134.69 172,138V166H156V132Z" />
+        android:fillColor="#0284C7"
+        android:pathData="M180,163H197C199,163 201,165 201,167V170H176V167C176,165 178,163 180,163Z" />
     <path
-        android:fillColor="#FF10B981"
-        android:pathData="M138,128H150V132H138ZM138,138H150V142H138ZM138,148H150V152H138Z" />
+        android:fillColor="#0077FF"
+        android:pathData="M178,177H200V179H178ZM178,186H200V188H178ZM178,195H200V197H178Z" />
+
+    <!-- 8. Agent Avatar Bust -->
+    <path
+        android:fillColor="#DCEBFA"
+        android:pathData="M165,181A7,7 0 1,0 165,167A7,7 0 1,0 165,181Z" />
+    <path
+        android:fillColor="#DCEBFA"
+        android:pathData="M151,204C151,194 157,190 165,190C173,190 179,194 179,204Z" />
 </vector>

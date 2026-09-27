@@ -372,12 +372,28 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
     }
   };
 
-  const filteredContacts = contacts.filter(
-    (c) =>
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.phone.includes(search) ||
-      c.suggestedLocality?.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredContacts = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return contacts;
+
+    const qDigits = q.replace(/\D/g, '');
+
+    return contacts.filter((c) => {
+      const nameMatch = c.name.toLowerCase().includes(q);
+      const localityMatch = c.suggestedLocality?.toLowerCase().includes(q) || false;
+
+      const cleanPhone = c.phone.replace(/\D/g, '');
+      const phoneCleanedQuery = c.phone.toLowerCase().replace(/[\s\-()]/g, '');
+      const searchCleanedQuery = q.replace(/[\s\-()]/g, '');
+
+      const phoneMatch =
+        (qDigits.length > 0 && cleanPhone.includes(qDigits)) ||
+        phoneCleanedQuery.includes(searchCleanedQuery) ||
+        c.phone.includes(search);
+
+      return nameMatch || localityMatch || phoneMatch;
+    });
+  }, [contacts, search]);
 
   const toggleSelect = (contact: ContactItem) => {
     if (contact.isExistingLead || isImporting) {
@@ -766,7 +782,7 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
             </div>
           ) : filteredContacts.length === 0 ? (
             <div className="text-center py-8 text-xs text-slate-400">
-              No contacts match "{search}".
+              No contacts found
             </div>
           ) : (
             filteredContacts.map((contact) => {

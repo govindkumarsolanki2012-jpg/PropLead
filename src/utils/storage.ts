@@ -5,14 +5,34 @@ import { formatBudgetRange } from './formatters';
 import { Capacitor } from '@capacitor/core';
 import { showAppToast } from './toast';
 import { CsvDownload } from './csvDownload';
+import { auth } from '../lib/firebase';
 
-const STORAGE_KEYS = {
+/**
+ * UID-scoped storage keys builder.
+ * Guarantees zero account data bleeding between different Firebase accounts.
+ */
+export const getUserStorageKeys = (uid: string) => ({
+  LEADS: `proplead_leads_v1_${uid}`,
+  PROPERTIES: `proplead_properties_v1_${uid}`,
+  PROFILE: `proplead_profile_v1_${uid}`,
+  TEMPLATES: `proplead_templates_v1_${uid}`,
+  ONBOARDED: `proplead_onboarded_v1_${uid}`,
+  MIGRATED: `proplead_migrated_v1_${uid}`,
+  TRIAL: `proplead_trial_v1_${uid}`,
+  SUB_STATUS: `proplead_sub_status_${uid}`,
+});
+
+/**
+ * Legacy global storage keys.
+ * ONLY referenced for safe, ownership-verified legacy migration.
+ */
+export const LEGACY_STORAGE_KEYS = {
   LEADS: 'proplead_leads_v1',
   PROPERTIES: 'proplead_properties_v1',
   PROFILE: 'proplead_profile_v1',
   TEMPLATES: 'proplead_templates_v1',
   IS_LOGGED_IN: 'proplead_is_logged_in_v1',
-};
+} as const;
 
 // Known legacy demo IDs to prevent old cached demo items from showing up
 const DEMO_LEAD_IDS = new Set([
@@ -22,9 +42,33 @@ const DEMO_PROP_IDS = new Set([
   'prop_201', 'prop_202', 'prop_203', 'prop_204', 'prop_205', 'prop_206', 'prop_207', 'prop_208'
 ]);
 
-export function getStoredProperties(): Property[] {
+/**
+ * Helper to resolve the authenticated Firebase UID.
+ * Never trusts unauthenticated, spoofed, or mismatched UIDs.
+ */
+function resolveAuthUid(passedUid?: string | null): string | null {
+  const currentAuthUid = auth?.currentUser?.uid || null;
+  if (!currentAuthUid) {
+    return null;
+  }
+  if (passedUid && typeof passedUid === 'string' && passedUid.trim().length > 0) {
+    if (passedUid.trim() !== currentAuthUid) {
+      console.warn('[storage] Passed UID does not match current authenticated Firebase UID');
+      return null;
+    }
+    return currentAuthUid;
+  }
+  return currentAuthUid;
+}
+
+export function getStoredProperties(uid?: string | null): Property[] {
+  const effectiveUid = resolveAuthUid(uid);
+  if (!effectiveUid || typeof window === 'undefined') {
+    return [];
+  }
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.PROPERTIES);
+    const key = getUserStorageKeys(effectiveUid).PROPERTIES;
+    const raw = localStorage.getItem(key);
     if (!raw) {
       return [];
     }
@@ -32,7 +76,7 @@ export function getStoredProperties(): Property[] {
     if (!Array.isArray(parsed)) return [];
     const cleaned = parsed.filter(p => p && !DEMO_PROP_IDS.has(p.id));
     if (cleaned.length !== parsed.length) {
-      localStorage.setItem(STORAGE_KEYS.PROPERTIES, JSON.stringify(cleaned));
+      localStorage.setItem(key, JSON.stringify(cleaned));
     }
     return cleaned;
   } catch (err) {
@@ -41,17 +85,27 @@ export function getStoredProperties(): Property[] {
   }
 }
 
-export function saveStoredProperties(properties: Property[]): void {
+export function saveStoredProperties(properties: Property[], uid?: string | null): void {
+  const effectiveUid = resolveAuthUid(uid);
+  if (!effectiveUid || typeof window === 'undefined') {
+    return;
+  }
   try {
-    localStorage.setItem(STORAGE_KEYS.PROPERTIES, JSON.stringify(properties));
+    const key = getUserStorageKeys(effectiveUid).PROPERTIES;
+    localStorage.setItem(key, JSON.stringify(properties));
   } catch (err) {
     console.warn('Notice saving properties to storage:', err);
   }
 }
 
-export function getStoredLeads(): Lead[] {
+export function getStoredLeads(uid?: string | null): Lead[] {
+  const effectiveUid = resolveAuthUid(uid);
+  if (!effectiveUid || typeof window === 'undefined') {
+    return [];
+  }
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.LEADS);
+    const key = getUserStorageKeys(effectiveUid).LEADS;
+    const raw = localStorage.getItem(key);
     if (!raw) {
       return [];
     }
@@ -59,7 +113,7 @@ export function getStoredLeads(): Lead[] {
     if (!Array.isArray(parsed)) return [];
     const cleaned = parsed.filter(l => l && !DEMO_LEAD_IDS.has(l.id));
     if (cleaned.length !== parsed.length) {
-      localStorage.setItem(STORAGE_KEYS.LEADS, JSON.stringify(cleaned));
+      localStorage.setItem(key, JSON.stringify(cleaned));
     }
     return cleaned;
   } catch (err) {
@@ -68,24 +122,34 @@ export function getStoredLeads(): Lead[] {
   }
 }
 
-export function saveStoredLeads(leads: Lead[]): void {
+export function saveStoredLeads(leads: Lead[], uid?: string | null): void {
+  const effectiveUid = resolveAuthUid(uid);
+  if (!effectiveUid || typeof window === 'undefined') {
+    return;
+  }
   try {
-    localStorage.setItem(STORAGE_KEYS.LEADS, JSON.stringify(leads));
+    const key = getUserStorageKeys(effectiveUid).LEADS;
+    localStorage.setItem(key, JSON.stringify(leads));
   } catch (err) {
     console.warn('Notice saving leads to storage:', err);
   }
 }
 
-export function getStoredProfile(): UserProfile {
+export function getStoredProfile(uid?: string | null): UserProfile {
+  const effectiveUid = resolveAuthUid(uid);
+  if (!effectiveUid || typeof window === 'undefined') {
+    return INITIAL_USER_PROFILE;
+  }
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.PROFILE);
+    const key = getUserStorageKeys(effectiveUid).PROFILE;
+    const raw = localStorage.getItem(key);
     if (!raw) {
       return INITIAL_USER_PROFILE;
     }
     const parsed: UserProfile = JSON.parse(raw);
     // If the profile was previously seeded with the demo agent 'Rajesh Sharma'
     if (parsed && (parsed.id === 'usr_001' || (parsed.name === 'Rajesh Sharma' && parsed.phone === '9820123456'))) {
-      localStorage.removeItem(STORAGE_KEYS.PROFILE);
+      localStorage.removeItem(key);
       return INITIAL_USER_PROFILE;
     }
     return parsed || INITIAL_USER_PROFILE;
@@ -95,73 +159,153 @@ export function getStoredProfile(): UserProfile {
   }
 }
 
-export function saveStoredProfile(profile: UserProfile): void {
+export function saveStoredProfile(profile: UserProfile, uid?: string | null): void {
+  const effectiveUid = resolveAuthUid(uid);
+  if (!effectiveUid || typeof window === 'undefined') {
+    return;
+  }
   try {
-    localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile));
+    const key = getUserStorageKeys(effectiveUid).PROFILE;
+    localStorage.setItem(key, JSON.stringify(profile));
   } catch (err) {
     console.warn('Notice saving profile to storage:', err);
   }
 }
 
-export function getStoredTemplates(): WhatsAppTemplate[] {
+export function getStoredTemplates(uid?: string | null): WhatsAppTemplate[] {
+  const effectiveUid = resolveAuthUid(uid);
+  if (!effectiveUid || typeof window === 'undefined') {
+    return WHATSAPP_TEMPLATES;
+  }
+  try {
+    const key = getUserStorageKeys(effectiveUid).TEMPLATES;
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Notice loading templates from storage:', err);
+  }
   return WHATSAPP_TEMPLATES;
 }
 
-export function saveStoredTemplates(templates: WhatsAppTemplate[]): void {
+export function saveStoredTemplates(templates: WhatsAppTemplate[], uid?: string | null): void {
+  const effectiveUid = resolveAuthUid(uid);
+  if (!effectiveUid || typeof window === 'undefined') {
+    return;
+  }
   try {
-    localStorage.setItem(STORAGE_KEYS.TEMPLATES, JSON.stringify(templates));
+    const key = getUserStorageKeys(effectiveUid).TEMPLATES;
+    localStorage.setItem(key, JSON.stringify(templates));
   } catch (err) {
     console.warn('Notice saving templates to storage:', err);
   }
 }
 
-export function clearAllData(): void {
+/**
+ * Controlled legacy storage readers.
+ * Used exclusively for safe migration where ownership can be proven.
+ */
+export function getLegacyStoredProfile(): UserProfile | null {
   try {
-    localStorage.removeItem(STORAGE_KEYS.LEADS);
-    localStorage.removeItem(STORAGE_KEYS.PROPERTIES);
-    localStorage.removeItem(STORAGE_KEYS.PROFILE);
-    localStorage.removeItem(STORAGE_KEYS.IS_LOGGED_IN);
+    if (typeof window === 'undefined') return null;
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEYS.PROFILE);
+    if (!raw) return null;
+    const parsed: UserProfile = JSON.parse(raw);
+    if (parsed && (parsed.id === 'usr_001' || (parsed.name === 'Rajesh Sharma' && parsed.phone === '9820123456'))) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function getLegacyStoredLeads(): Lead[] {
+  try {
+    if (typeof window === 'undefined') return [];
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEYS.LEADS);
+    if (!raw) return [];
+    const parsed: Lead[] = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(l => l && !DEMO_LEAD_IDS.has(l.id));
+  } catch {
+    return [];
+  }
+}
+
+export function getLegacyStoredProperties(): Property[] {
+  try {
+    if (typeof window === 'undefined') return [];
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEYS.PROPERTIES);
+    if (!raw) return [];
+    const parsed: Property[] = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(p => p && !DEMO_PROP_IDS.has(p.id));
+  } catch {
+    return [];
+  }
+}
+
+export function clearLegacyStoredData(): void {
+  try {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem(LEGACY_STORAGE_KEYS.LEADS);
+    localStorage.removeItem(LEGACY_STORAGE_KEYS.PROPERTIES);
+    localStorage.removeItem(LEGACY_STORAGE_KEYS.PROFILE);
+    localStorage.removeItem(LEGACY_STORAGE_KEYS.TEMPLATES);
+    localStorage.removeItem(LEGACY_STORAGE_KEYS.IS_LOGGED_IN);
   } catch (err) {
-    console.warn('Notice clearing local storage:', err);
+    console.warn('Notice clearing legacy storage:', err);
   }
 }
 
 /**
- * Clears user-scoped local storage during account deletion without touching
- * unrelated application settings (e.g. language preferences).
+ * Clears user-scoped local storage for a specific UID without touching
+ * another account's cache or unrelated device preferences (e.g. language).
  */
 export function clearUserScopedStorage(userId?: string): void {
+  if (typeof window === 'undefined') return;
+  const targetUid = resolveAuthUid(userId);
+
   try {
-    localStorage.removeItem(STORAGE_KEYS.LEADS);
-    localStorage.removeItem(STORAGE_KEYS.PROPERTIES);
-    localStorage.removeItem(STORAGE_KEYS.PROFILE);
-    localStorage.removeItem(STORAGE_KEYS.TEMPLATES);
-    localStorage.removeItem(STORAGE_KEYS.IS_LOGGED_IN);
+    if (targetUid) {
+      const keys = getUserStorageKeys(targetUid);
+      localStorage.removeItem(keys.LEADS);
+      localStorage.removeItem(keys.PROPERTIES);
+      localStorage.removeItem(keys.PROFILE);
+      localStorage.removeItem(keys.TEMPLATES);
+      localStorage.removeItem(keys.ONBOARDED);
+      localStorage.removeItem(keys.MIGRATED);
+      localStorage.removeItem(`proplead_migrated_${targetUid}`);
+      localStorage.removeItem(keys.TRIAL);
+      localStorage.removeItem(keys.SUB_STATUS);
+      localStorage.removeItem(`proplead_notification_settings_v1_${targetUid}`);
+      localStorage.removeItem(`proplead_scheduled_notifications_registry_v1_${targetUid}`);
+      localStorage.removeItem(`proplead_notification_perm_prompted_v1_${targetUid}`);
+      localStorage.removeItem(`proplead_sync_${targetUid}`);
 
-    if (userId) {
-      localStorage.removeItem(`proplead_onboarded_v1_${userId}`);
-      localStorage.removeItem(`proplead_migrated_${userId}`);
-      localStorage.removeItem(`proplead_trial_v1_${userId}`);
-      localStorage.removeItem(`proplead_sub_status_${userId}`);
-    }
-
-    // Clean any user-scoped keys dynamically
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-      const key = localStorage.key(i);
-      if (
-        key &&
-        (key.startsWith('proplead_onboarded_') ||
-          key.startsWith('proplead_migrated_') ||
-          key.startsWith('proplead_sub_') ||
-          key.startsWith('proplead_trial_') ||
-          key.startsWith('proplead_sync_'))
-      ) {
-        localStorage.removeItem(key);
+      // Scan and clean any key ending with _${targetUid}
+      const suffix = `_${targetUid}`;
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && (key.endsWith(suffix) || key.includes(suffix))) {
+          localStorage.removeItem(key);
+        }
       }
     }
+
+    localStorage.removeItem(LEGACY_STORAGE_KEYS.IS_LOGGED_IN);
   } catch (err) {
     console.warn('Error clearing user-scoped storage:', err);
   }
+}
+
+export function clearAllData(userId?: string): void {
+  clearUserScopedStorage(userId);
 }
 
 /**
@@ -249,7 +393,6 @@ export async function exportLeadsToCSV(
         mimeType: 'text/csv',
       });
 
-      // Requirement 11: If user cancels the Save As screen, do nothing and do not show a success message
       if (result.canceled) {
         return { success: false, message: 'Canceled by user' };
       }
@@ -267,7 +410,6 @@ export async function exportLeadsToCSV(
         nativeErr?.message?.includes('canceled') ||
         nativeErr?.message?.includes('CANCELED')
       ) {
-        // User canceled: do nothing and do not show a success message
         return { success: false, message: 'Canceled by user' };
       }
       const errMsg = nativeErr?.message || 'Failed to save CSV.';

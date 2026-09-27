@@ -1,7 +1,8 @@
 import React from 'react';
-import { Building2, Search, Plus, Sparkles, X, Settings } from 'lucide-react';
+import { Search, Plus, Sparkles, X, Settings } from 'lucide-react';
 import { UserProfile, TabType } from '../../types';
 import { useTranslation } from '../../context/LanguageContext';
+import { PropLeadLogo } from '../common/PropLeadLogo';
 
 interface HeaderProps {
   profile: UserProfile;
@@ -55,11 +56,8 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="flex items-center justify-between gap-1.5 sm:gap-2.5 w-full max-w-2xl mx-auto min-w-0">
         {/* Brand & Agency */}
         <div id="header-brand-section" className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1 mr-0.5 sm:mr-1">
-          <div
-            id="header-brand-logo"
-            className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-emerald-600 dark:bg-emerald-500 text-white flex items-center justify-center shadow-xs flex-shrink-0"
-          >
-            <Building2 className="w-4 h-4 sm:w-5 sm:h-5" />
+          <div id="header-brand-logo" className="flex-shrink-0">
+            <PropLeadLogo className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl shadow-xs" />
           </div>
           <div className="min-w-0 flex-1 overflow-hidden">
             <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">

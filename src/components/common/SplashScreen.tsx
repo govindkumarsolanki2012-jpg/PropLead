@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Building2 } from 'lucide-react';
+import { PropLeadLogo } from './PropLeadLogo';
 
 interface SplashScreenProps {
   className?: string;
@@ -22,10 +22,8 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ className = '' }) =>
       {/* Stable final-size logo and brand. No entrance motion or responsive resizing. */}
       <div className="flex flex-col items-center justify-center text-center px-4">
         <div className="relative flex items-center justify-center">
-          <div className="absolute -inset-2 bg-emerald-500/15 dark:bg-emerald-500/20 rounded-3xl blur-md" />
-          <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-tr from-emerald-600 via-emerald-500 to-teal-500 text-white flex items-center justify-center shadow-xl shadow-emerald-600/25">
-            <Building2 className="w-10 h-10 drop-shadow-xs" />
-          </div>
+          <div className="absolute -inset-2 bg-blue-500/15 dark:bg-blue-500/20 rounded-3xl blur-md" />
+          <PropLeadLogo className="w-20 h-20 rounded-2xl shadow-xl shadow-blue-600/20" />
         </div>
 
         <div className="mt-5 flex flex-col items-center">

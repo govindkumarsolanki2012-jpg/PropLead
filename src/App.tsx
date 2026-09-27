@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { App as CapApp } from '@capacitor/app';
-import { Capacitor, PluginListenerHandle } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
 import { MobileFrame } from './components/layout/MobileFrame';
 import { Header } from './components/layout/Header';
 import { BottomNav } from './components/layout/BottomNav';
@@ -33,6 +33,7 @@ import { SharePropertyModal } from './components/properties/SharePropertyModal';
 import { WelcomeOnboardingModal } from './components/auth/WelcomeOnboardingModal';
 
 // Storage & Types
+import { WHATSAPP_TEMPLATES } from './utils/whatsapp';
 import {
   getStoredProfile,
   saveStoredProfile,
@@ -42,8 +43,9 @@ import {
   saveStoredProperties,
   getStoredTemplates,
   saveStoredTemplates,
-  clearAllData,
+  clearUserScopedStorage,
 } from './utils/storage';
+import { clearUserAudioFromIndexedDB } from './utils/audioStorage';
 import { Lead, Property, UserProfile, WhatsAppTemplate, FollowUpType, TabType, SubscriptionStatus } from './types';
 import { INITIAL_USER_PROFILE } from './data/initialData';
 import { formatRelativeDate, normalizePhoneForMatch } from './utils/formatters';
@@ -70,31 +72,17 @@ import {
   saveUserProfile,
 } from './services/firebaseService';
 import { syncLocalDataToFirestore } from './utils/migration';
-import { FirebaseUser } from './lib/firebase';
+import { FirebaseUser, auth } from './lib/firebase';
 import {
   initLocalNotifications,
   scheduleFollowUpNotifications,
   cancelNotificationsForLead,
+  cancelAllUserNotifications,
   scheduleDailySummaryNotification,
   syncAllLeadNotifications,
   requestNotificationPermission,
   wasNotificationPermissionPrompted,
 } from './utils/notifications';
-
-const checkHasActiveSession = (): boolean => {
-  try {
-    if (typeof window === 'undefined') return false;
-    if (localStorage.getItem('proplead_is_logged_in_v1') === 'true') return true;
-    const raw = localStorage.getItem('proplead_profile_v1');
-    if (raw) {
-      const p = JSON.parse(raw);
-      if (p && (p.isOnboarded || p.email || (p.id && p.id !== 'usr_001'))) {
-        return true;
-      }
-    }
-  } catch {}
-  return false;
-};
 
 export function App() {
   // Single fast branded splash shown once after the native Android splash
@@ -112,6 +100,7 @@ export function App() {
   const [isAuthResolved, setIsAuthResolved] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(() => getCurrentUser());
   const firestoreCleanupRef = useRef<(() => void) | null>(null);
+  const activeAuthUidRef = useRef<string | null>(null);
 
   // Account deletion standalone success notice state
   const [accountDeletedNotice, setAccountDeletedNotice] = useState<{
@@ -144,11 +133,12 @@ export function App() {
     }
   }, [accountDeletedNotice]);
 
-  const isUserAuthenticated = Boolean(currentUser) || (!isAuthResolved && checkHasActiveSession());
-  const [profile, setProfile] = useState<UserProfile>(getStoredProfile());
-  const [leads, setLeads] = useState<Lead[]>(getStoredLeads());
-  const [properties, setProperties] = useState<Property[]>(getStoredProperties());
-  const [templates, setTemplates] = useState<WhatsAppTemplate[]>(getStoredTemplates());
+  // Auth is authoritative: protected content renders only if authenticated by Firebase
+  const isUserAuthenticated = Boolean(currentUser);
+  const [profile, setProfile] = useState<UserProfile>(INITIAL_USER_PROFILE);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [templates, setTemplates] = useState<WhatsAppTemplate[]>(WHATSAPP_TEMPLATES);
   const [isCloudSynced, setIsCloudSynced] = useState<boolean>(false);
 
   // Tab navigation state & history (Dashboard/home is root)
@@ -163,7 +153,6 @@ export function App() {
     setCurrentTab(newTab);
     setTabHistory((prev) => {
       if (newTab === 'home') {
-        // Navigating to home resets the history stack so Dashboard is the root
         return ['home'];
       }
       if (prev[prev.length - 1] === newTab) {
@@ -186,7 +175,7 @@ export function App() {
   }, [currentTab]);
 
   const handleSearchFocus = useCallback(() => {
-    // When the user taps the search bar on Dashboard or any tab, do NOT automatically navigate away
+    // Keep focus in place
   }, []);
 
   // Modal states for Leads
@@ -289,7 +278,7 @@ export function App() {
       return;
     }
 
-    // 1. Open modal -> Android Back -> close the modal first (topmost/nested child modals first)
+    // 1. Open modal -> Android Back -> close the modal first
     if (s.editLead) {
       setEditLead(null);
       return;
@@ -302,16 +291,20 @@ export function App() {
       setSharePropertyData(null);
       return;
     }
-    if (s.whatsAppLead) {
-      setWhatsAppLead(null);
-      return;
-    }
     if (s.scheduleLead) {
       setScheduleLead(null);
       return;
     }
-    if (s.isSubscriptionOpen && s.isFeatureLockedOpen) {
-      setIsSubscriptionOpen(false);
+    if (s.whatsAppLead) {
+      setWhatsAppLead(null);
+      return;
+    }
+    if (s.detailLead) {
+      setDetailLead(null);
+      return;
+    }
+    if (s.detailProperty) {
+      setDetailProperty(null);
       return;
     }
     if (s.isQuickAddOpen) {
@@ -326,97 +319,58 @@ export function App() {
       setIsImportContactsOpen(false);
       return;
     }
-    if (s.isSubscriptionOpen) {
-      setIsSubscriptionOpen(false);
-      return;
-    }
     if (s.isFeatureLockedOpen) {
       setIsFeatureLockedOpen(false);
       return;
     }
-    if (s.detailLead) {
-      setDetailLead(null);
+    if (s.isSubscriptionOpen) {
+      setIsSubscriptionOpen(false);
       return;
     }
-    if (s.detailProperty) {
-      setDetailProperty(null);
-      return;
-    }
-
-    // 2. Nested screen -> Android Back -> return to previous screen
-    if (s.tabHistory.length > 1) {
-      const newHistory = s.tabHistory.slice(0, -1);
-      const previousTab = newHistory[newHistory.length - 1] || 'home';
-      setTabHistory(newHistory);
-      setCurrentTab(previousTab);
+    if (s.isWelcomeOnboardingOpen) {
+      setIsWelcomeOnboardingOpen(false);
       return;
     }
 
-    // 3. If currently on a non-home tab but stack is 1 or empty -> return to Dashboard
+    // 2. Tab Navigation History
     if (s.currentTab !== 'home') {
-      setTabHistory(['home']);
-      setCurrentTab('home');
+      if (s.tabHistory.length > 1) {
+        const newHistory = [...s.tabHistory];
+        newHistory.pop();
+        const prevTab = newHistory[newHistory.length - 1] || 'home';
+        setTabHistory(newHistory);
+        setCurrentTab(prevTab);
+      } else {
+        setCurrentTab('home');
+        setTabHistory(['home']);
+      }
       return;
     }
 
-    // 4. Press Back again on Dashboard/root -> exit the app
+    // 3. User is on Dashboard (home) -> Exit app
     if (Capacitor.isNativePlatform()) {
       CapApp.exitApp();
     } else {
-      showToast('Exiting PropLead...');
+      showToast('Press Back again to exit');
     }
   }, [showToast]);
 
-  const lastBackTimeRef = useRef<number>(0);
-
-  const triggerBack = useCallback(() => {
-    const now = Date.now();
-    // 250ms throttle prevents rapid duplicate firings from same physical press
-    if (now - lastBackTimeRef.current < 250) {
-      return;
-    }
-    lastBackTimeRef.current = now;
-    handleBack();
-  }, [handleBack]);
-
-  // Single Capacitor and hardware/keyboard back-button listener
+  // Register single Capacitor back button listener
   useEffect(() => {
-    let listenerHandle: PluginListenerHandle | null = null;
-    let isCleanedUp = false;
-
-    // 1. Capacitor native Android backButton listener
+    let handle: any = null;
     if (Capacitor.isNativePlatform()) {
       CapApp.addListener('backButton', () => {
-        triggerBack();
-      })
-        .then((handle) => {
-          if (isCleanedUp) {
-            handle.remove();
-          } else {
-            listenerHandle = handle;
-          }
-        })
-        .catch((err) => {
-          console.warn('Capacitor backButton listener unavailable:', err);
-        });
+        handleBack();
+      }).then((h) => {
+        handle = h;
+      });
     }
-
-    // 2. Desktop keyboard Escape listener for testing and preview
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        triggerBack();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-
     return () => {
-      isCleanedUp = true;
-      if (listenerHandle) {
-        listenerHandle.remove();
+      if (handle && handle.remove) {
+        handle.remove();
       }
-      window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [triggerBack]);
+  }, [handleBack]);
 
   // 1. Firebase Auth listener and Firestore real-time synchronization
   useEffect(() => {
@@ -447,145 +401,168 @@ export function App() {
     firestoreCleanupRef.current = cleanupFirestoreListeners;
 
     const unsubAuth = subscribeToAuth(async (user) => {
-      // Whenever auth state transitions (including to null or another user), clean up existing Firestore listeners
+      // 1. Immediately tear down existing listeners
       cleanupFirestoreListeners();
 
-      setCurrentUser(user);
-      setIsAuthResolved(true);
-
-      if (user) {
-        try {
-          localStorage.setItem('proplead_is_logged_in_v1', 'true');
-        } catch {}
-        setIsCloudSynced(true);
-        // Safely migrate/initialize user data in Firestore with user phone
-        const syncRes = await syncLocalDataToFirestore(user.uid, user.email, user.displayName, user.phoneNumber);
-
-        // Detect if this account was just created brand-new for onboarding
-        if (syncRes.isNewUser) {
-          const completedInStorage = localStorage.getItem(`proplead_onboarded_v1_${user.uid}`) === 'true';
-          if (!completedInStorage) {
-            setIsWelcomeOnboardingOpen(true);
-          }
-        }
-
-        // Subscribe to real-time user profile in Firestore
-        unsubProfile = subscribeUserProfile(user.uid, (firestoreProfile) => {
-          if (firestoreProfile) {
-            setProfile((prev) => {
-              let effectiveTrialEndDate = firestoreProfile.trialEndDate || prev.trialEndDate;
-              const effectiveTrialStartDate = firestoreProfile.trialStartDate || prev.trialStartDate;
-              if (effectiveTrialStartDate && effectiveTrialEndDate) {
-                const sTime = new Date(effectiveTrialStartDate).getTime();
-                const eTime = new Date(effectiveTrialEndDate).getTime();
-                if (!isNaN(sTime) && !isNaN(eTime) && eTime > sTime + 7 * 86400000) {
-                  effectiveTrialEndDate = new Date(sTime + 7 * 86400000).toISOString();
-                }
-              }
-
-              const merged: UserProfile = {
-                ...prev,
-                ...firestoreProfile,
-                subscriptionStatus: firestoreProfile.subscriptionStatus || prev.subscriptionStatus,
-                isSubscribed: firestoreProfile.isSubscribed !== undefined ? firestoreProfile.isSubscribed : prev.isSubscribed,
-                subscriptionProductId: firestoreProfile.subscriptionProductId || prev.subscriptionProductId,
-                subscriptionBasePlan: firestoreProfile.subscriptionBasePlan || prev.subscriptionBasePlan,
-                subscriptionBasePlanId: firestoreProfile.subscriptionBasePlanId || prev.subscriptionBasePlanId,
-                subscriptionExpiryDate: firestoreProfile.subscriptionExpiryDate || prev.subscriptionExpiryDate,
-                subscriptionExpiryTime: firestoreProfile.subscriptionExpiryTime || prev.subscriptionExpiryTime,
-                trialEndDate: effectiveTrialEndDate,
-                trialStartDate: effectiveTrialStartDate,
-                onboardingCompleted:
-                  firestoreProfile.onboardingCompleted !== undefined
-                    ? firestoreProfile.onboardingCompleted
-                    : prev.onboardingCompleted,
-                isOnboarded: true,
-              };
-              saveStoredProfile(merged);
-              return merged;
-            });
-          }
-        });
-
-        // Subscribe to real-time subscription entitlement record in Firestore (/subscriptions/{userId})
-        unsubSubscription = subscribeSubscriptionRecordFromFirestore(user.uid, (subRecord) => {
-          if (subRecord) {
-            const rawSubStatus = (subRecord.subscriptionStatus || '').toLowerCase();
-            const subExpiry = subRecord.subscriptionExpiryTime || subRecord.subscriptionExpiryDate || subRecord.expiryDate;
-            const subExpiryMs = subExpiry ? new Date(subExpiry).getTime() : NaN;
-            // A paid subscription must only be treated as unexpired when a valid expiry timestamp exists and is in the future
-            const isUnexpired = Boolean(
-              subExpiry && !isNaN(subExpiryMs) && subExpiryMs > Date.now()
-            );
-            const isSubActive =
-              rawSubStatus === 'active' ||
-              rawSubStatus === 'canceled_but_active' ||
-              (rawSubStatus === 'payment_issue' && isUnexpired);
-
-            if (isSubActive && isUnexpired) {
-              setProfile((prev) => {
-                const effectiveStatus: SubscriptionStatus =
-                  rawSubStatus === 'canceled_but_active'
-                    ? 'CANCELED_BUT_ACTIVE'
-                    : (rawSubStatus === 'payment_issue' ? 'PAYMENT_ISSUE' : 'ACTIVE');
-                const merged: UserProfile = {
-                  ...prev,
-                  subscriptionStatus: effectiveStatus,
-                  isSubscribed: true,
-                  subscriptionProductId: subRecord.subscriptionProductId || prev.subscriptionProductId || 'property_agent_pro',
-                  subscriptionBasePlan: subRecord.subscriptionBasePlanId || subRecord.subscriptionBasePlan || prev.subscriptionBasePlan || 'quarterly',
-                  subscriptionBasePlanId: subRecord.subscriptionBasePlanId || prev.subscriptionBasePlanId || 'quarterly',
-                  planId: subRecord.subscriptionBasePlanId || prev.planId || 'quarterly',
-                  subscriptionExpiryDate: subExpiry || prev.subscriptionExpiryDate,
-                  subscriptionExpiryTime: subExpiry || prev.subscriptionExpiryTime,
-                  expiryDate: subExpiry || prev.expiryDate,
-                  autoRenewing: subRecord.autoRenewing !== undefined ? subRecord.autoRenewing : prev.autoRenewing,
-                  lastVerifiedAt: subRecord.lastVerifiedAt || prev.lastVerifiedAt,
-                  purchaseToken: subRecord.purchaseToken || prev.purchaseToken,
-                };
-                saveStoredProfile(merged);
-                return merged;
-              });
-            } else if (rawSubStatus === 'expired' || (!isUnexpired && !isNaN(subExpiryMs) && subExpiryMs <= Date.now())) {
-              setProfile((prev) => {
-                const merged: UserProfile = {
-                  ...prev,
-                  subscriptionStatus: 'EXPIRED',
-                  isSubscribed: false,
-                  subscriptionExpiryDate: subExpiry || prev.subscriptionExpiryDate,
-                  subscriptionExpiryTime: subExpiry || prev.subscriptionExpiryTime,
-                  expiryDate: subExpiry || prev.expiryDate,
-                  autoRenewing: false,
-                };
-                saveStoredProfile(merged);
-                return merged;
-              });
-            }
-          }
-        });
-
-        // Subscribe to real-time leads in Firestore
-        unsubLeads = subscribeLeadsFromFirestore(user.uid, (firestoreLeads) => {
-          if (firestoreLeads) {
-            setLeads(firestoreLeads);
-            saveStoredLeads(firestoreLeads);
-          }
-        });
-
-        // Subscribe to real-time properties in Firestore
-        unsubProps = subscribePropertiesFromFirestore(user.uid, (firestoreProps) => {
-          if (firestoreProps) {
-            setProperties(firestoreProps);
-            saveStoredProperties(firestoreProps);
-          }
-        });
-      } else {
+      if (!user) {
+        activeAuthUidRef.current = null;
+        setCurrentUser(null);
+        setIsAuthResolved(true);
         setIsCloudSynced(false);
-        // Reset in-memory sensitive data when not authenticated
         setLeads([]);
         setProperties([]);
         setProfile(INITIAL_USER_PROFILE);
+        setTemplates(WHATSAPP_TEMPLATES);
+        return;
       }
+
+      // Capture current authenticated UID to lock callbacks
+      const activeUid = user.uid;
+      activeAuthUidRef.current = activeUid;
+      setCurrentUser(user);
+      setIsAuthResolved(true);
+      setIsCloudSynced(true);
+
+      // Load ONLY this UID's local cache
+      const cachedProfile = getStoredProfile(activeUid);
+      const cachedLeads = getStoredLeads(activeUid);
+      const cachedProperties = getStoredProperties(activeUid);
+      const cachedTemplates = getStoredTemplates(activeUid);
+
+      setProfile(cachedProfile);
+      setLeads(cachedLeads);
+      setProperties(cachedProperties);
+      setTemplates(cachedTemplates);
+
+      // Safely migrate/initialize user data in Firestore with user phone
+      const syncRes = await syncLocalDataToFirestore(activeUid, user.email, user.displayName, user.phoneNumber);
+
+      // Guard against fast account switching
+      if (activeAuthUidRef.current !== activeUid || auth.currentUser?.uid !== activeUid) {
+        return;
+      }
+
+      // Detect if this account was just created brand-new for onboarding
+      if (syncRes.isNewUser) {
+        const completedInStorage = localStorage.getItem(`proplead_onboarded_v1_${activeUid}`) === 'true';
+        if (!completedInStorage) {
+          setIsWelcomeOnboardingOpen(true);
+        }
+      }
+
+      // Subscribe to real-time user profile in Firestore
+      unsubProfile = subscribeUserProfile(activeUid, (firestoreProfile) => {
+        if (activeAuthUidRef.current !== activeUid) return;
+        if (firestoreProfile) {
+          setProfile((prev) => {
+            let effectiveTrialEndDate = firestoreProfile.trialEndDate || prev.trialEndDate;
+            const effectiveTrialStartDate = firestoreProfile.trialStartDate || prev.trialStartDate;
+            if (effectiveTrialStartDate && effectiveTrialEndDate) {
+              const sTime = new Date(effectiveTrialStartDate).getTime();
+              const eTime = new Date(effectiveTrialEndDate).getTime();
+              if (!isNaN(sTime) && !isNaN(eTime) && eTime > sTime + 7 * 86400000) {
+                effectiveTrialEndDate = new Date(sTime + 7 * 86400000).toISOString();
+              }
+            }
+
+            const merged: UserProfile = {
+              ...prev,
+              ...firestoreProfile,
+              subscriptionStatus: firestoreProfile.subscriptionStatus || prev.subscriptionStatus,
+              isSubscribed: firestoreProfile.isSubscribed !== undefined ? firestoreProfile.isSubscribed : prev.isSubscribed,
+              subscriptionProductId: firestoreProfile.subscriptionProductId || prev.subscriptionProductId,
+              subscriptionBasePlan: firestoreProfile.subscriptionBasePlan || prev.subscriptionBasePlan,
+              subscriptionBasePlanId: firestoreProfile.subscriptionBasePlanId || prev.subscriptionBasePlanId,
+              subscriptionExpiryDate: firestoreProfile.subscriptionExpiryDate || prev.subscriptionExpiryDate,
+              subscriptionExpiryTime: firestoreProfile.subscriptionExpiryTime || prev.subscriptionExpiryTime,
+              trialEndDate: effectiveTrialEndDate,
+              trialStartDate: effectiveTrialStartDate,
+              onboardingCompleted:
+                firestoreProfile.onboardingCompleted !== undefined
+                  ? firestoreProfile.onboardingCompleted
+                  : prev.onboardingCompleted,
+              isOnboarded: true,
+            };
+            saveStoredProfile(merged, activeUid);
+            return merged;
+          });
+        }
+      });
+
+      // Subscribe to real-time subscription entitlement record in Firestore
+      unsubSubscription = subscribeSubscriptionRecordFromFirestore(activeUid, (subRecord) => {
+        if (activeAuthUidRef.current !== activeUid) return;
+        if (subRecord) {
+          const rawSubStatus = (subRecord.subscriptionStatus || '').toLowerCase();
+          const subExpiry = subRecord.subscriptionExpiryTime || subRecord.subscriptionExpiryDate || subRecord.expiryDate;
+          const subExpiryMs = subExpiry ? new Date(subExpiry).getTime() : NaN;
+          const isUnexpired = Boolean(
+            subExpiry && !isNaN(subExpiryMs) && subExpiryMs > Date.now()
+          );
+          const isSubActive =
+            rawSubStatus === 'active' ||
+            rawSubStatus === 'canceled_but_active' ||
+            (rawSubStatus === 'payment_issue' && isUnexpired);
+
+          if (isSubActive && isUnexpired) {
+            setProfile((prev) => {
+              const effectiveStatus: SubscriptionStatus =
+                rawSubStatus === 'canceled_but_active'
+                  ? 'CANCELED_BUT_ACTIVE'
+                  : (rawSubStatus === 'payment_issue' ? 'PAYMENT_ISSUE' : 'ACTIVE');
+              const merged: UserProfile = {
+                ...prev,
+                subscriptionStatus: effectiveStatus,
+                isSubscribed: true,
+                subscriptionProductId: subRecord.subscriptionProductId || prev.subscriptionProductId || 'property_agent_pro',
+                subscriptionBasePlan: subRecord.subscriptionBasePlanId || subRecord.subscriptionBasePlan || prev.subscriptionBasePlan || 'quarterly',
+                subscriptionBasePlanId: subRecord.subscriptionBasePlanId || prev.subscriptionBasePlanId || 'quarterly',
+                planId: subRecord.subscriptionBasePlanId || prev.planId || 'quarterly',
+                subscriptionExpiryDate: subExpiry || prev.subscriptionExpiryDate,
+                subscriptionExpiryTime: subExpiry || prev.subscriptionExpiryTime,
+                expiryDate: subExpiry || prev.expiryDate,
+                autoRenewing: subRecord.autoRenewing !== undefined ? subRecord.autoRenewing : prev.autoRenewing,
+                lastVerifiedAt: subRecord.lastVerifiedAt || prev.lastVerifiedAt,
+                purchaseToken: subRecord.purchaseToken || prev.purchaseToken,
+              };
+              saveStoredProfile(merged, activeUid);
+              return merged;
+            });
+          } else if (rawSubStatus === 'expired' || (!isUnexpired && !isNaN(subExpiryMs) && subExpiryMs <= Date.now())) {
+            setProfile((prev) => {
+              const merged: UserProfile = {
+                ...prev,
+                subscriptionStatus: 'EXPIRED',
+                isSubscribed: false,
+                subscriptionExpiryDate: subExpiry || prev.subscriptionExpiryDate,
+                subscriptionExpiryTime: subExpiry || prev.subscriptionExpiryTime,
+                expiryDate: subExpiry || prev.expiryDate,
+                autoRenewing: false,
+              };
+              saveStoredProfile(merged, activeUid);
+              return merged;
+            });
+          }
+        }
+      });
+
+      // Subscribe to real-time leads in Firestore
+      unsubLeads = subscribeLeadsFromFirestore(activeUid, (firestoreLeads) => {
+        if (activeAuthUidRef.current !== activeUid) return;
+        if (firestoreLeads) {
+          setLeads(firestoreLeads);
+          saveStoredLeads(firestoreLeads, activeUid);
+        }
+      });
+
+      // Subscribe to real-time properties in Firestore
+      unsubProps = subscribePropertiesFromFirestore(activeUid, (firestoreProps) => {
+        if (activeAuthUidRef.current !== activeUid) return;
+        if (firestoreProps) {
+          setProperties(firestoreProps);
+          saveStoredProperties(firestoreProps, activeUid);
+        }
+      });
     });
 
     return () => {
@@ -602,11 +579,12 @@ export function App() {
   useEffect(() => {
     const syncSubscription = async () => {
       if (!currentUser) return;
+      const targetUid = currentUser.uid;
       try {
         const token = await currentUser.getIdToken();
         if (!token) return;
 
-        const endpoint = getBillingApiUrl(`/api/billing/subscription-status?userId=${encodeURIComponent(currentUser.uid)}`);
+        const endpoint = getBillingApiUrl(`/api/billing/subscription-status?userId=${encodeURIComponent(targetUid)}`);
         const res = await fetch(endpoint, {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -620,7 +598,7 @@ export function App() {
           } catch {
             return;
           }
-          if (data && data.subscriptionStatus) {
+          if (data && data.subscriptionStatus && activeAuthUidRef.current === targetUid) {
             if (data.serverTimestamp || data.serverNow) {
               setAuthoritativeServerTime(data.serverTimestamp || data.serverNow);
             }
@@ -629,8 +607,6 @@ export function App() {
             const expMs = resolvedExp ? new Date(resolvedExp).getTime() : NaN;
             const hasFutureExpiry = !isNaN(expMs) && expMs > Date.now();
 
-            // Bug 7 & Bug 6 Fix: Use authoritative backend state.
-            // If backend says inactive/expired, isSubscribed must be set to false.
             let isSub = false;
             if (rawStat === 'ACTIVE' || rawStat === 'CANCELED_BUT_ACTIVE') {
               isSub = hasFutureExpiry;
@@ -653,7 +629,7 @@ export function App() {
                 trialEndDate: data.trialEndDate ?? prev.trialEndDate,
                 serverTimestamp: data.serverTimestamp || data.serverNow || prev.serverTimestamp,
                 trialDaysRemaining: data.trialDaysRemaining ?? prev.trialDaysRemaining,
-                isSubscribed: isSub, // Bug 7: Authoritative backend state, never sticky!
+                isSubscribed: isSub,
                 subscriptionExpiryDate: resolvedExp ?? prev.subscriptionExpiryDate,
                 subscriptionExpiryTime: resolvedExp ?? prev.subscriptionExpiryTime,
                 expiryDate: resolvedExp ?? prev.expiryDate,
@@ -663,7 +639,7 @@ export function App() {
                 autoRenewing: data.autoRenewing ?? prev.autoRenewing,
                 paymentIssueMessage: data.paymentIssueMessage,
               };
-              saveStoredProfile(updated);
+              saveStoredProfile(updated, targetUid);
               return updated;
             });
           }
@@ -671,15 +647,15 @@ export function App() {
 
         // On native device, check if there's an active Google Play purchase to restore
         if (Capacitor.isNativePlatform()) {
-          checkAndRestoreGooglePlayEntitlement(currentUser.uid)
+          checkAndRestoreGooglePlayEntitlement(targetUid)
             .then((restoredUpdates) => {
-              if (restoredUpdates) {
+              if (restoredUpdates && activeAuthUidRef.current === targetUid) {
                 setProfile((prev) => {
                   const updated: UserProfile = {
                     ...prev,
                     ...restoredUpdates,
                   };
-                  saveStoredProfile(updated);
+                  saveStoredProfile(updated, targetUid);
                   return updated;
                 });
               }
@@ -740,7 +716,7 @@ export function App() {
         }
 
         // 2. Try cached stored leads from localStorage
-        const storedList = getStoredLeads();
+        const storedList = getStoredLeads(auth.currentUser?.uid);
         const storedMatch = storedList.find((l) => l.id === targetId);
         if (storedMatch) {
           setIsQuickAddOpen(false);
@@ -767,14 +743,14 @@ export function App() {
       }
     });
 
-    if (Capacitor.isNativePlatform() && !wasNotificationPermissionPrompted()) {
-      requestNotificationPermission().then((res) => {
-        if (res.granted) {
-          syncAllLeadNotifications(leadsRef.current || []);
+    if (Capacitor.isNativePlatform() && !wasNotificationPermissionPrompted(currentUser?.uid)) {
+      requestNotificationPermission(currentUser?.uid).then((res) => {
+        if (res) {
+          syncAllLeadNotifications(leadsRef.current || [], currentUser?.uid);
         }
       });
     }
-  }, []);
+  }, [currentUser?.uid]);
 
   // Deep-link: If cold-start was waiting for Firestore/state sync, open lead when leads update
   useEffect(() => {
@@ -796,11 +772,11 @@ export function App() {
   // Initial synchronization for notifications once leads are ready
   const hasInitialNotificationSyncRef = useRef(false);
   useEffect(() => {
-    if (!hasInitialNotificationSyncRef.current && leads.length > 0) {
+    if (!hasInitialNotificationSyncRef.current && leads.length > 0 && currentUser?.uid) {
       hasInitialNotificationSyncRef.current = true;
-      syncAllLeadNotifications(leads);
+      syncAllLeadNotifications(leads, currentUser.uid);
     }
-  }, [leads]);
+  }, [leads, currentUser?.uid]);
 
   // Guarded actions for locked state / Pro access
   const guardLockedFeature = useCallback(
@@ -819,19 +795,18 @@ export function App() {
   const handleSaveLead = (newLead: Lead) => {
     const updated = [newLead, ...leads];
     setLeads(updated);
-    saveStoredLeads(updated);
+    saveStoredLeads(updated, currentUser?.uid);
     if (currentUser?.uid) {
       addLeadToFirestore(currentUser.uid, newLead).catch((e) => console.warn('Firestore add lead error:', e));
     }
     if (newLead.nextFollowUpDate && newLead.nextFollowUpTime) {
-      scheduleFollowUpNotifications(newLead);
+      scheduleFollowUpNotifications(newLead, undefined, currentUser?.uid);
     }
-    scheduleDailySummaryNotification(updated);
+    scheduleDailySummaryNotification(updated, currentUser?.uid);
     showToast(`Lead "${newLead.name}" added successfully! 🚀`);
   };
 
   const handleUpdateLead = (updatedLead: Lead) => {
-    // Pro access check: If trial is expired and subscription is not active, block follow-up modifications
     if (!hasProAccess(profile)) {
       const existing = leads.find((l) => l.id === updatedLead.id);
       const followUpModified =
@@ -848,7 +823,7 @@ export function App() {
 
     const updated = leads.map((l) => (l.id === updatedLead.id ? updatedLead : l));
     setLeads(updated);
-    saveStoredLeads(updated);
+    saveStoredLeads(updated, currentUser?.uid);
     if (currentUser?.uid) {
       updateLeadInFirestore(currentUser.uid, updatedLead).catch((e) => console.warn('Firestore update lead error:', e));
     }
@@ -857,24 +832,24 @@ export function App() {
     }
 
     if (updatedLead.nextFollowUpDate && updatedLead.nextFollowUpTime) {
-      scheduleFollowUpNotifications(updatedLead);
+      scheduleFollowUpNotifications(updatedLead, undefined, currentUser?.uid);
     } else {
-      cancelNotificationsForLead(updatedLead.id);
+      cancelNotificationsForLead(updatedLead.id, currentUser?.uid);
     }
-    scheduleDailySummaryNotification(updated);
+    scheduleDailySummaryNotification(updated, currentUser?.uid);
 
     showToast('Lead details updated.');
   };
 
   const handleDeleteLead = async (leadId: string): Promise<void> => {
-    cancelNotificationsForLead(leadId);
+    cancelNotificationsForLead(leadId, currentUser?.uid);
     if (currentUser?.uid) {
       await deleteLeadFromFirestore(currentUser.uid, leadId);
     }
     const updated = leads.filter((l) => l.id !== leadId);
     setLeads(updated);
-    saveStoredLeads(updated);
-    scheduleDailySummaryNotification(updated);
+    saveStoredLeads(updated, currentUser?.uid);
+    scheduleDailySummaryNotification(updated, currentUser?.uid);
     if (detailLead && detailLead.id === leadId) {
       setDetailLead(null);
     }
@@ -884,7 +859,7 @@ export function App() {
   const handleDeleteBulkLeads = async (leadIds: string[]): Promise<void> => {
     if (!leadIds || leadIds.length === 0) return;
     for (const id of leadIds) {
-      cancelNotificationsForLead(id);
+      cancelNotificationsForLead(id, currentUser?.uid);
     }
     if (currentUser?.uid) {
       await batchDeleteLeadsFromFirestore(currentUser.uid, leadIds);
@@ -892,8 +867,8 @@ export function App() {
     const idSet = new Set(leadIds);
     const updated = leads.filter((l) => !idSet.has(l.id));
     setLeads(updated);
-    saveStoredLeads(updated);
-    scheduleDailySummaryNotification(updated);
+    saveStoredLeads(updated, currentUser?.uid);
+    scheduleDailySummaryNotification(updated, currentUser?.uid);
     if (detailLead && idSet.has(detailLead.id)) {
       setDetailLead(null);
     }
@@ -926,7 +901,7 @@ export function App() {
 
     const updated = [...nonDuplicates, ...leads];
     setLeads(updated);
-    saveStoredLeads(updated);
+    saveStoredLeads(updated, currentUser?.uid);
     if (currentUser?.uid) {
       batchAddLeadsToFirestore(currentUser.uid, nonDuplicates).catch((e) => console.warn('Firestore batch leads error:', e));
     }
@@ -946,14 +921,14 @@ export function App() {
       }
       const updated = [newProperty, ...properties];
       setProperties(updated);
-      saveStoredProperties(updated);
+      saveStoredProperties(updated, currentUser?.uid);
       showToast(`Property "${newProperty.title}" added to inventory! 🏠`);
       return true;
     } catch (err: any) {
       console.warn('Firestore add property offline/fallback:', err);
       const updated = [newProperty, ...properties];
       setProperties(updated);
-      saveStoredProperties(updated);
+      saveStoredProperties(updated, currentUser?.uid);
       showToast(`Property "${newProperty.title}" saved locally.`);
       return true;
     }
@@ -966,7 +941,7 @@ export function App() {
       }
       const updated = properties.map((p) => (p.id === updatedProperty.id ? updatedProperty : p));
       setProperties(updated);
-      saveStoredProperties(updated);
+      saveStoredProperties(updated, currentUser?.uid);
       if (detailProperty && detailProperty.id === updatedProperty.id) {
         setDetailProperty(updatedProperty);
       }
@@ -976,7 +951,7 @@ export function App() {
       console.warn('Firestore update property offline/fallback:', err);
       const updated = properties.map((p) => (p.id === updatedProperty.id ? updatedProperty : p));
       setProperties(updated);
-      saveStoredProperties(updated);
+      saveStoredProperties(updated, currentUser?.uid);
       if (detailProperty && detailProperty.id === updatedProperty.id) {
         setDetailProperty(updatedProperty);
       }
@@ -992,7 +967,7 @@ export function App() {
       }
       const updated = properties.filter((p) => p.id !== propertyId);
       setProperties(updated);
-      saveStoredProperties(updated);
+      saveStoredProperties(updated, currentUser?.uid);
       if (detailProperty && detailProperty.id === propertyId) {
         setDetailProperty(null);
       }
@@ -1002,7 +977,7 @@ export function App() {
       console.warn('Firestore delete property offline/fallback:', err);
       const updated = properties.filter((p) => p.id !== propertyId);
       setProperties(updated);
-      saveStoredProperties(updated);
+      saveStoredProperties(updated, currentUser?.uid);
       if (detailProperty && detailProperty.id === propertyId) {
         setDetailProperty(null);
       }
@@ -1020,7 +995,7 @@ export function App() {
       const idSet = new Set(propertyIds);
       const updated = properties.filter((p) => !idSet.has(p.id));
       setProperties(updated);
-      saveStoredProperties(updated);
+      saveStoredProperties(updated, currentUser?.uid);
       if (detailProperty && idSet.has(detailProperty.id)) {
         setDetailProperty(null);
       }
@@ -1030,7 +1005,7 @@ export function App() {
       const idSet = new Set(propertyIds);
       const updated = properties.filter((p) => !idSet.has(p.id));
       setProperties(updated);
-      saveStoredProperties(updated);
+      saveStoredProperties(updated, currentUser?.uid);
       if (detailProperty && idSet.has(detailProperty.id)) {
         setDetailProperty(null);
       }
@@ -1040,9 +1015,7 @@ export function App() {
 
   const handleOpenEditProperty = (propertyToEdit: Property) => {
     guardLockedFeature('Edit Property', () => {
-      // Dismiss the Property Detail view first so two competing modal layers do not remain open
       setDetailProperty(null);
-      // Immediately open the Edit Property view as the active foreground view
       setEditProperty(propertyToEdit);
     });
   };
@@ -1054,7 +1027,6 @@ export function App() {
     type: FollowUpType,
     note: string
   ) => {
-    // Pro access check: Block follow-up scheduling for expired non-subscribed users
     if (!hasProAccess(profile)) {
       setLockedFeatureName('Follow-Ups');
       setIsFeatureLockedOpen(true);
@@ -1089,14 +1061,14 @@ export function App() {
     };
 
     handleUpdateLead(updatedLead);
-    scheduleFollowUpNotifications(updatedLead, type);
+    scheduleFollowUpNotifications(updatedLead, type, currentUser?.uid);
     showToast(`Reminder set for ${target.name} on ${date}! ⏰`);
   };
 
   const handleUpdateProfile = (updates: Partial<UserProfile>) => {
     const updated = { ...profile, ...updates };
     setProfile(updated);
-    saveStoredProfile(updated);
+    saveStoredProfile(updated, currentUser?.uid);
     if (currentUser?.uid) {
       saveUserProfile(currentUser.uid, updated).catch((e) => console.warn('Firestore update profile error:', e));
     }
@@ -1188,24 +1160,74 @@ export function App() {
   };
 
   const handleSignOut = async () => {
+    const departingUid = currentUser?.uid || auth.currentUser?.uid;
     try {
       setIsWelcomeOnboardingOpen(false);
-      await signOutUser();
-      try {
-        localStorage.removeItem('proplead_is_logged_in_v1');
-      } catch {}
-      setCurrentUser(null);
-      setIsCloudSynced(false);
+
+      // 1. Unsubscribe Firestore real-time snapshot listeners
+      if (firestoreCleanupRef.current) {
+        firestoreCleanupRef.current();
+      }
+
+      // 2. Cancel and detach user-specific notification/deep-link state
+      if (departingUid) {
+        try {
+          await cancelAllUserNotifications(leads, departingUid);
+        } catch (notifErr) {
+          console.warn('Notice cancelling user notifications on logout:', notifErr);
+        }
+      }
+
+      // 3. Clear in-memory leads, properties, profile, and templates
       setLeads([]);
       setProperties([]);
       setProfile(INITIAL_USER_PROFILE);
+      setTemplates(WHATSAPP_TEMPLATES);
       setCurrentTab('home');
       setTabHistory(['home']);
-      clearAllData();
+      setIsCloudSynced(false);
+      setCurrentUser(null);
+      activeAuthUidRef.current = null;
+
+      // 4. Clear only that departing UID's localStorage records
+      if (departingUid) {
+        clearUserScopedStorage(departingUid);
+      }
+
+      // 5. Clear only that departing UID's voice-memo IndexedDB records
+      if (departingUid) {
+        try {
+          await clearUserAudioFromIndexedDB(departingUid);
+        } catch (audioErr) {
+          console.warn('Notice clearing user audio on logout:', audioErr);
+        }
+      }
+
+      // 6. Clear pending deep-link state
+      try {
+        sessionStorage.removeItem('proplead_pending_lead_id');
+      } catch {}
+      setPendingNotificationLeadId(null);
+
+      // 7. Sign out from Firebase Auth
+      try {
+        await signOutUser();
+      } catch (authErr) {
+        console.warn('Sign-out auth provider notice:', authErr);
+      }
+
+      try {
+        localStorage.removeItem('proplead_is_logged_in_v1');
+      } catch {}
+
       showToast('Logged out successfully. Cloud data preserved! 🔒');
     } catch (err) {
       console.warn('Sign-out error:', err);
-      showToast('Failed to log out. Please try again.');
+      setLeads([]);
+      setProperties([]);
+      setProfile(INITIAL_USER_PROFILE);
+      setCurrentUser(null);
+      showToast('Logged out.');
     }
   };
 
@@ -1218,10 +1240,11 @@ export function App() {
     // 2. Clear all sensitive in-memory user data & reset profile
     setLeads([]);
     setProperties([]);
-    setTemplates(getStoredTemplates());
+    setTemplates(WHATSAPP_TEMPLATES);
     setProfile(INITIAL_USER_PROFILE);
     setCurrentUser(null);
     setIsCloudSynced(false);
+    activeAuthUidRef.current = null;
 
     // 3. Close all open modals & reset navigation
     setIsQuickAddOpen(false);
@@ -1302,40 +1325,42 @@ export function App() {
             </div>
 
             <div className="text-center space-y-2">
-              <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                {accountDeletedNotice.isPartial ? 'Account data deleted' : 'Account deleted'}
+              <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
+                {accountDeletedNotice.isPartial
+                  ? 'Account Deletion Notice'
+                  : 'Account & Data Deleted'}
               </h2>
-              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                {accountDeletedNotice.isPartial && accountDeletedNotice.partialMessage
-                  ? accountDeletedNotice.partialMessage
-                  : 'Your PropLead account and saved data have been deleted.'}
+              <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed">
+                {accountDeletedNotice.partialMessage ||
+                  'Your PropLead profile, leads, inventory, and cloud data have been completely deleted.'}
               </p>
             </div>
+          </div>
 
-            {/* Optional Google Play note */}
-            <div className="p-3.5 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-800/60 text-left">
-              <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
-                If you had an active Google Play subscription, manage or cancel it separately in Google Play.
-              </p>
-            </div>
-
+          <div className="max-w-sm mx-auto w-full pt-4">
             <button
-              type="button"
               onClick={() => setAccountDeletedNotice(null)}
-              className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-2xl text-xs transition-all shadow-md active:scale-[0.99] cursor-pointer"
+              className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-xl text-sm font-semibold shadow-lg shadow-emerald-600/25 transition-all"
             >
-              Back to Sign In
+              Return to Sign In
             </button>
           </div>
         </div>
       ) : !isUserAuthenticated ? (
-        <AuthFlow />
+        <AuthFlow
+          onGoogleSignIn={handleGoogleSignIn}
+          onExploreFirst={() => {
+            // Unauthenticated view
+          }}
+        />
       ) : (
-        <div className="flex-1 min-h-0 flex flex-col h-full bg-slate-100/70 dark:bg-slate-950 w-full max-w-full">
+        <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white relative">
           {/* Header */}
           <Header
             profile={profile}
-            currentTab={currentTab}
+            leads={leads}
+            properties={properties}
+            isLocked={isLocked}
             searchQuery={
               currentTab === 'home'
                 ? dashboardSearchQuery
@@ -1345,7 +1370,15 @@ export function App() {
             }
             onSearchChange={handleSearchChange}
             onSearchFocus={handleSearchFocus}
-            onOpenQuickAdd={() => {
+            onSelectLead={(l) => {
+              setDetailLead(l);
+              setCurrentTab('leads');
+            }}
+            onSelectProperty={(p) => {
+              setDetailProperty(p);
+              setCurrentTab('properties');
+            }}
+            onOpenAddModal={() => {
               if (currentTab === 'properties') {
                 guardLockedFeature('Add Property', () => setIsAddPropertyOpen(true));
               } else {
@@ -1448,14 +1481,14 @@ export function App() {
                 onAccountDeleted={handleAccountDeleted}
                 onUpdateProfile={(p) => {
                   setProfile(p);
-                  saveStoredProfile(p);
+                  saveStoredProfile(p, currentUser?.uid);
                   if (currentUser?.uid) {
                     saveUserProfile(currentUser.uid, p).catch((e) => console.warn('Firestore update profile error:', e));
                   }
                 }}
                 onUpdateTemplates={(t) => {
                   setTemplates(t);
-                  saveStoredTemplates(t);
+                  saveStoredTemplates(t, currentUser?.uid);
                 }}
                 onOpenSubscription={() => setIsSubscriptionOpen(true)}
               />
@@ -1486,7 +1519,7 @@ export function App() {
       )}
 
       {/* LEAD MODALS */}
-      {/* 1. Quick Add Lead Modal (10s capture) */}
+      {/* 1. Quick Add Lead Modal */}
       {isQuickAddOpen && (
         <QuickAddLeadModal
           isOpen={isQuickAddOpen}
@@ -1520,7 +1553,7 @@ export function App() {
         />
       )}
 
-      {/* 3. Schedule Follow-Up Modal - Rendered after LeadDetailModal with z-[60] */}
+      {/* 3. Schedule Follow-Up Modal */}
       {scheduleLead && (
         <ScheduleFollowUpModal
           isOpen={Boolean(scheduleLead)}
@@ -1536,7 +1569,7 @@ export function App() {
         />
       )}
 
-      {/* 4. WhatsApp Modal (1-tap templates) */}
+      {/* 4. WhatsApp Modal */}
       {whatsAppLead && (
         <WhatsAppModal
           isOpen={Boolean(whatsAppLead)}
@@ -1553,55 +1586,57 @@ export function App() {
           isOpen={Boolean(editLead)}
           onClose={() => setEditLead(null)}
           lead={editLead}
-          onSave={handleUpdateLead}
+          onUpdateLead={handleUpdateLead}
+        />
+      )}
+
+      {/* 6. Import Contacts Modal */}
+      {isImportContactsOpen && (
+        <ImportContactsModal
+          isOpen={isImportContactsOpen}
+          onClose={() => setIsImportContactsOpen(false)}
+          onImportLeads={handleImportBulkLeads}
         />
       )}
 
       {/* PROPERTY MODALS */}
-      {/* 1. Add Property Modal */}
+      {/* 7. Add Property Modal */}
       {isAddPropertyOpen && (
         <AddPropertyModal
           isOpen={isAddPropertyOpen}
           onClose={() => setIsAddPropertyOpen(false)}
           onSaveProperty={handleSaveProperty}
           profile={profile}
+          onOpenSubscription={() => setIsSubscriptionOpen(true)}
         />
       )}
 
-      {/* 2. Property Detail Modal */}
+      {/* 8. Property Detail Modal */}
       {detailProperty && (
         <PropertyDetailModal
           isOpen={Boolean(detailProperty)}
           onClose={() => setDetailProperty(null)}
           property={detailProperty}
           leads={leads}
-          profile={profile}
-          onUpdateProperty={handleUpdateProperty}
+          onOpenEdit={(p) => handleOpenEditProperty(p)}
+          onOpenShare={(p, preselectedLead) =>
+            setSharePropertyData({ property: p, preselectedLead })
+          }
           onDeleteProperty={handleDeleteProperty}
-          onOpenEditModal={handleOpenEditProperty}
-          onOpenEdit={handleOpenEditProperty}
-          onOpenShareModal={(prop, lead) =>
-            setSharePropertyData({ property: prop, preselectedLead: lead })
-          }
-          onShareToLead={(prop, lead) =>
-            setSharePropertyData({ property: prop, preselectedLead: lead })
-          }
         />
       )}
 
-      {/* 3. Edit Property Modal */}
+      {/* 9. Edit Property Modal */}
       {editProperty && (
         <EditPropertyModal
-          key={editProperty.id}
           isOpen={Boolean(editProperty)}
           onClose={() => setEditProperty(null)}
           property={editProperty}
-          onSaveProperty={handleUpdateProperty}
-          onSave={handleUpdateProperty}
+          onUpdateProperty={handleUpdateProperty}
         />
       )}
 
-      {/* 4. Customer-Safe WhatsApp Share Modal */}
+      {/* 10. Share Property Modal */}
       {sharePropertyData && (
         <SharePropertyModal
           isOpen={Boolean(sharePropertyData)}
@@ -1610,58 +1645,46 @@ export function App() {
           leads={leads}
           profile={profile}
           preselectedLead={sharePropertyData.preselectedLead}
+          onUpdateLead={handleUpdateLead}
         />
       )}
 
-      {/* Subscription / Upgrade Modal */}
-      <SubscriptionModal
-        isOpen={isSubscriptionOpen}
-        onClose={() => setIsSubscriptionOpen(false)}
-        profile={profile}
-        onUpdateProfile={handleUpdateProfile}
-        onSubscribe={() => {
-          showToast('PropLead Pro subscription active! 🏆');
-        }}
-      />
+      {/* GLOBAL MODALS */}
+      {/* 11. Pro Feature Locked Modal */}
+      {isFeatureLockedOpen && (
+        <FeatureLockedModal
+          isOpen={isFeatureLockedOpen}
+          onClose={() => setIsFeatureLockedOpen(false)}
+          featureName={lockedFeatureName}
+          profile={profile}
+          onUpgrade={() => {
+            setIsFeatureLockedOpen(false);
+            setIsSubscriptionOpen(true);
+          }}
+        />
+      )}
 
-      {/* Feature Locked Modal when Free Trial Expired */}
-      <FeatureLockedModal
-        isOpen={isFeatureLockedOpen}
-        onClose={() => setIsFeatureLockedOpen(false)}
-        onSubscribe={() => {
-          setIsFeatureLockedOpen(false);
-          setIsSubscriptionOpen(true);
-        }}
-        featureName={lockedFeatureName}
-        title="PropLead Pro Required"
-        message={
-          lockedFeatureName === 'Follow-Ups' || !lockedFeatureName || lockedFeatureName === 'Schedule Follow-Up'
-            ? 'Your free trial has expired. Subscribe to continue managing follow-ups.'
-            : `Your free trial has expired. Subscribe to continue using ${lockedFeatureName}.`
-        }
-        confirmText="View Plans"
-        cancelText="Not Now"
-      />
+      {/* 12. Subscription Modal */}
+      {isSubscriptionOpen && (
+        <SubscriptionModal
+          isOpen={isSubscriptionOpen}
+          onClose={() => setIsSubscriptionOpen(false)}
+          profile={profile}
+          onUpdateProfile={handleUpdateProfile}
+        />
+      )}
 
-      {/* Import Contacts Modal */}
-      <ImportContactsModal
-        isOpen={isImportContactsOpen}
-        onClose={() => setIsImportContactsOpen(false)}
-        existingLeads={leads}
-        onImportLeads={handleImportBulkLeads}
-      />
-
-      {/* First-Time User Welcome & Quick Setup Onboarding Modal */}
-      <WelcomeOnboardingModal
-        isOpen={isWelcomeOnboardingOpen}
-        onComplete={handleCompleteWelcomeOnboarding}
-        onStartTrial={handleStartTrialFromOnboarding}
-        onExploreFirst={handleExploreFirstFromOnboarding}
-        agentName={profile.name || currentUser?.displayName || ''}
-        trialStatus={profile.trialStatus}
-        trialEndDate={profile.trialEndDate}
-        isSubscribed={profile.isSubscribed}
-      />
+      {/* 13. Welcome Onboarding Modal */}
+      {isWelcomeOnboardingOpen && (
+        <WelcomeOnboardingModal
+          isOpen={isWelcomeOnboardingOpen}
+          onClose={() => setIsWelcomeOnboardingOpen(false)}
+          profile={profile}
+          onStartTrial={handleStartTrialFromOnboarding}
+          onExploreFirst={handleExploreFirstFromOnboarding}
+          onComplete={handleCompleteWelcomeOnboarding}
+        />
+      )}
     </MobileFrame>
   );
 }
