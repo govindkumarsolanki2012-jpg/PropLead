@@ -45,36 +45,36 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header
       id="app-header"
-      className="flex-shrink-0 sticky top-0 z-40 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-3.5 sm:px-4 pb-2.5 sm:pb-3 transition-colors safe-header w-full opacity-100"
+      className="flex-shrink-0 sticky top-0 z-40 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-2.5 sm:px-4 pb-2 sm:pb-3 transition-colors safe-header w-full opacity-100"
       style={{
         paddingTop: 'calc(0.75rem + max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)))',
         isolation: 'isolate',
       }}
     >
       {/* Top Row: Brand Identity (Left) + Quick Add (Right) */}
-      <div className="flex items-center justify-between gap-2 sm:gap-2.5 w-full max-w-2xl mx-auto min-w-0">
+      <div className="flex items-center justify-between gap-1.5 sm:gap-2.5 w-full max-w-2xl mx-auto min-w-0">
         {/* Brand & Agency */}
-        <div id="header-brand-section" className="flex items-center gap-2 sm:gap-2.5 min-w-0 flex-1 mr-1">
+        <div id="header-brand-section" className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1 mr-0.5 sm:mr-1">
           <div
             id="header-brand-logo"
-            className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-xl bg-emerald-600 dark:bg-emerald-500 text-white flex items-center justify-center shadow-xs flex-shrink-0"
+            className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-emerald-600 dark:bg-emerald-500 text-white flex items-center justify-center shadow-xs flex-shrink-0"
           >
-            <Building2 className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+            <Building2 className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
           <div className="min-w-0 flex-1 overflow-hidden">
             <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
               <h1
-                className="text-[13.5px] sm:text-base font-bold text-slate-900 dark:text-white tracking-tight leading-none truncate min-w-0 flex-1"
+                className="text-[12px] min-[360px]:text-[13px] sm:text-base font-bold text-slate-900 dark:text-white tracking-tight leading-tight min-w-0 truncate sm:overflow-visible"
                 title="PropLead for Agents"
               >
                 PropLead for Agents
               </h1>
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-1 sm:px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 flex-shrink-0 leading-tight">
+              <span className="text-[8.5px] sm:text-[9.5px] font-bold uppercase tracking-wider px-1 sm:px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 flex-shrink-0 leading-none">
                 IN
               </span>
             </div>
             <p
-              className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5 leading-tight w-full block"
+              className="text-[10.5px] sm:text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5 leading-tight w-full block"
               title={profile?.agencyName || profile?.name || 'Property Agency'}
             >
               {profile?.agencyName || profile?.name || 'Property Agency'}
@@ -83,12 +83,12 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Right Actions: Pro Status (if subscribed) + Quick Add Button */}
-        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0 ml-auto">
+        <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0 ml-auto">
           {/* Pro Badge: Only shown if user has an active paid subscription */}
           {profile?.isSubscribed && (
             <span
               id="header-pro-badge"
-              className="inline-flex items-center gap-1 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[11px] sm:text-xs font-semibold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex-shrink-0 whitespace-nowrap"
+              className="inline-flex items-center gap-1 px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-full text-[10px] sm:text-xs font-semibold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex-shrink-0 whitespace-nowrap"
             >
               <Sparkles className="w-3 h-3 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
               <span>{t('header_pro')}</span>
@@ -100,7 +100,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="header-add-lead-btn"
               onClick={onOpenQuickAdd}
-              className="flex items-center gap-1 sm:gap-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-semibold px-2.5 sm:px-3 py-1.5 rounded-lg shadow-sm transition-all flex-shrink-0 whitespace-nowrap"
+              className="flex items-center gap-1 sm:gap-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-[11px] sm:text-xs font-semibold px-2 sm:px-3 py-1.5 rounded-lg shadow-xs transition-all flex-shrink-0 whitespace-nowrap"
               aria-label={addBtnLabel}
             >
               <Plus className="w-3.5 h-3.5 flex-shrink-0" />
@@ -113,7 +113,7 @@ export const Header: React.FC<HeaderProps> = ({
             id="header-settings-btn"
             type="button"
             onClick={onOpenSettings}
-            className={`w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-xl border flex items-center justify-center transition-all shadow-xs active:scale-95 flex-shrink-0 ${
+            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl border flex items-center justify-center transition-all shadow-xs active:scale-95 flex-shrink-0 ${
               currentTab === 'settings'
                 ? 'bg-emerald-50 dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 border-emerald-300 dark:border-emerald-600 shadow-sm ring-2 ring-emerald-500/20'
                 : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white border-slate-200/90 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-750'
@@ -121,7 +121,7 @@ export const Header: React.FC<HeaderProps> = ({
             aria-label={t('nav_settings') || 'Settings'}
             title={t('nav_settings') || 'Settings'}
           >
-            <Settings className="w-4.5 h-4.5 sm:w-5 sm:h-5 stroke-[1.85px]" />
+            <Settings className="w-4 h-4 sm:w-5 sm:h-5 stroke-[1.85px]" />
           </button>
         </div>
       </div>
