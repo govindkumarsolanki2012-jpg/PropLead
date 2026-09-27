@@ -35,7 +35,7 @@ export const PrivacyPolicyModal: React.FC<PrivacyPolicyModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                PropLead Privacy Policy
+                PropLead for Agents Privacy Policy
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Last updated: September 2026 • Effective immediately

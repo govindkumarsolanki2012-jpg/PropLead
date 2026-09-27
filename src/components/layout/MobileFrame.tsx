@@ -15,7 +15,7 @@ export const MobileFrame: React.FC<MobileFrameProps> = ({ children }) => {
       <div className="hidden lg:flex items-center justify-between px-6 py-2.5 bg-slate-900 text-slate-300 text-xs border-b border-slate-800 shadow-sm flex-shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
-          <span className="font-semibold text-white tracking-wide">PropLead • Property Agent Lead Tracker</span>
+          <span className="font-semibold text-white tracking-wide">PropLead for Agents • Property Agent Lead Tracker</span>
           <span className="text-slate-500">|</span>
           <span className="text-slate-400">Indian Real Estate Broker Edition</span>
         </div>

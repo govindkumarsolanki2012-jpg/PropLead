@@ -42,7 +42,7 @@ try {
 
 export const db = firestoreInstance;
 
-// Initialize Storage
-export const storage = getStorage(app);
+// Initialize Storage with explicit bucket
+export const storage = getStorage(app, firebaseConfig.storageBucket || 'proplead-e5c6a.firebasestorage.app');
 
 export type { FirebaseUser };

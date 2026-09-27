@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.proplead.tracker',
-  appName: 'PropLead',
+  appName: 'PropLead for Agents',
   webDir: 'dist',
   backgroundColor: '#ffffff',
   server: {

@@ -54,55 +54,17 @@ export const PRO_FEATURES_LIST = [
   'All future Pro improvements',
 ];
 
-// Production Cloud Run billing service endpoint
-// In Native Android (Capacitor), requests hit this public HTTPS endpoint directly (bypassing AI Studio dev cookie proxy)
-export const DEFAULT_PRODUCTION_BILLING_URL = 'https://proplead-36803800158.asia-south1.run.app';
+import { PRODUCTION_API_BASE_URL, getBackendApiUrl, getApiBaseUrl } from './apiConfig';
 
-export const REMOTE_BACKEND_URL = (
-  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_BILLING_BACKEND_URL) ||
-  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_BACKEND_URL) ||
-  DEFAULT_PRODUCTION_BILLING_URL
-).trim().replace(/\/$/, '');
+export const DEFAULT_PRODUCTION_BILLING_URL = PRODUCTION_API_BASE_URL;
+
+export const REMOTE_BACKEND_URL = (getApiBaseUrl() || PRODUCTION_API_BASE_URL).trim().replace(/\/$/, '');
 
 /**
- * Resolves the appropriate billing API endpoint URL based on runtime environment:
- * - In Android Native (Capacitor), relative paths hit the local asset scheme returning index.html.
- *   Therefore, native requests are routed to the live production Cloud Run backend server.
- * - On Web browsers, standard relative paths /api/* (or custom VITE_BILLING_BACKEND_URL) are used.
+ * Resolves the appropriate billing API endpoint URL based on runtime environment.
  */
 export function getBillingApiUrl(path: string): string {
-  const cleanPath = path.startsWith('/') ? path : `/${path}`;
-  const customEnv = (
-    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_BILLING_BACKEND_URL) ||
-    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_BACKEND_URL) ||
-    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_URL) ||
-    ''
-  ).trim();
-
-  // If custom environment URL is explicitly provided, use it
-  if (customEnv) {
-    return `${customEnv.replace(/\/$/, '')}${cleanPath}`;
-  }
-
-  // Detect Android Capacitor / WebView environment:
-  // 1. Capacitor.getPlatform() === 'android'
-  // 2. Capacitor.isNativePlatform() === true
-  // 3. window.location.protocol === 'capacitor:'
-  // 4. Running locally in phone WebView on localhost without port 3000 (Vite dev server)
-  const isAndroid = typeof window !== 'undefined' && (
-    Capacitor.getPlatform() === 'android' ||
-    Capacitor.isNativePlatform() ||
-    window.location.protocol === 'capacitor:' ||
-    (window.location.hostname === 'localhost' && window.location.port !== '3000') ||
-    (typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent) && window.location.hostname === 'localhost')
-  );
-
-  if (isAndroid) {
-    return `${DEFAULT_PRODUCTION_BILLING_URL}${cleanPath}`;
-  }
-
-  // Web in production on Cloud Run (same origin) or local dev server
-  return cleanPath;
+  return getBackendApiUrl(path);
 }
 
 export const DEFAULT_PRODUCT_DETAILS: GooglePlaySubscriptionProduct = {

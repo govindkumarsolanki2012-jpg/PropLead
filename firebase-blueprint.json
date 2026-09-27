@@ -67,6 +67,8 @@
         "nextFollowUpNote": { "type": "string", "description": "Scheduled follow-up agenda", "optional": true },
         "followUpCount": { "type": "number", "description": "Total follow-ups executed", "optional": true },
         "activities": { "type": "array", "description": "Full activity timeline of calls, site visits, messages" },
+        "attachments": { "type": "array", "description": "Uploaded documents and photos with download URLs", "optional": true },
+        "voiceNotes": { "type": "array", "description": "Recorded audio memos", "optional": true },
         "createdAt": { "type": "string", "description": "Creation ISO date" },
         "updatedAt": { "type": "string", "description": "Last updated ISO date" }
       }

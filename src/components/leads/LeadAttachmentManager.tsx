@@ -1,7 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   FileText,
-  Image as ImageIcon,
   Plus,
   Trash2,
   ExternalLink,
@@ -12,6 +11,7 @@ import {
   Pause,
   FileSpreadsheet,
   AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { Attachment } from '../../types';
 import { openLeadDocument, isAudioAttachment } from '../../utils/documentOpener';
@@ -20,7 +20,7 @@ import {
   uploadLeadAttachmentToStorage,
   deleteStorageFile,
   validateAttachmentFile,
-  compressImage,
+  UploadProgress,
 } from '../../utils/attachmentStorage';
 
 interface LeadAttachmentManagerProps {
@@ -37,19 +37,25 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
   onDeleteAttachment,
 }) => {
   const [docName, setDocName] = useState<string>('');
-  const [docType, setDocType] = useState<'image' | 'document'>('image');
   const [isUploading, setIsUploading] = useState<boolean>(false);
-  const [showSaveButton, setShowSaveButton] = useState<boolean>(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [lastFailedFile, setLastFailedFile] = useState<{ file: File; displayName: string } | null>(null);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
 
   const [isOpeningId, setIsOpeningId] = useState<string | null>(null);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const toastTimeoutRef = useRef<any>(null);
+  const isMountedRef = useRef<boolean>(true);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current = null;
@@ -66,71 +72,95 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
     }
     setToastMessage(msg);
     toastTimeoutRef.current = setTimeout(() => {
-      setToastMessage(null);
+      if (isMountedRef.current) {
+        setToastMessage(null);
+      }
     }, 4000);
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Validate size and extension before proceeding
-    const validation = validateAttachmentFile(file);
+  const processFileUpload = useCallback(async (fileToUpload: File, displayName: string) => {
+    // Validate file size and extension before upload
+    const validation = validateAttachmentFile(fileToUpload);
     if (!validation.valid) {
-      showToast(validation.error || 'Invalid file');
-      e.target.value = '';
+      const errMsg = validation.error || 'File is too large. Maximum size is 10 MB.';
+      setUploadError(errMsg);
+      showToast(errMsg);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      return;
+    }
+
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid) {
+      setUploadError('Please sign in to upload documents.');
+      showToast('Please sign in to upload documents.');
       return;
     }
 
     setIsUploading(true);
+    setUploadError(null);
     setSavedSuccess(false);
+    setUploadProgress({ percent: 10, statusText: 'Preparing…' });
 
     try {
-      const currentUid = auth.currentUser?.uid;
-      let newAtt: Attachment;
+      const { attachment: newAtt } = await uploadLeadAttachmentToStorage({
+        userId: currentUid,
+        leadId,
+        file: fileToUpload,
+        displayName: displayName.trim() || undefined,
+        onProgress: (progress) => {
+          if (isMountedRef.current) {
+            setUploadProgress(progress);
+          }
+        },
+      });
 
-      if (currentUid) {
-        // Upload to Firebase Storage scoped to user's UID
-        newAtt = await uploadLeadAttachmentToStorage({
-          userId: currentUid,
-          leadId,
-          file,
-          displayName: docName.trim() || undefined,
-        });
-      } else {
-        // Safe offline fallback with image compression
-        const uploadBlob = file.type.startsWith('image/')
-          ? await compressImage(file)
-          : file;
-        const reader = new FileReader();
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(uploadBlob);
-        });
-
-        newAtt = {
-          id: `att_${Date.now()}`,
-          leadId,
-          name: docName.trim() || file.name,
-          type: file.type.startsWith('image/') ? 'image' : 'document',
-          url: dataUrl,
-          size: `${(uploadBlob.size / (1024 * 1024)).toFixed(2)} MB`,
-          createdAt: new Date().toISOString().split('T')[0],
-        };
-      }
+      if (!isMountedRef.current) return;
 
       onAddAttachment(newAtt);
+
       setDocName('');
-      setShowSaveButton(true);
-      showToast('Document attached successfully');
+      setLastFailedFile(null);
+      setUploadProgress({ percent: 100, statusText: 'Upload complete' });
+      setSavedSuccess(true);
+      showToast('Document uploaded successfully! 📄');
+
+      setTimeout(() => {
+        if (isMountedRef.current) {
+          setUploadProgress(null);
+          setSavedSuccess(false);
+        }
+      }, 2500);
     } catch (err: any) {
-      console.warn('[Attachment Upload Notice]', err);
-      showToast(err?.message || 'Failed to upload attachment. Please try again.');
+      console.error('[LeadAttachmentManager] Upload error:', err);
+      if (isMountedRef.current) {
+        const errorText = err?.message || 'Upload failed. Please retry.';
+        setUploadError(errorText);
+        setLastFailedFile({ file: fileToUpload, displayName });
+        setUploadProgress(null);
+        showToast(errorText);
+      }
     } finally {
-      setIsUploading(false);
-      e.target.value = '';
+      if (isMountedRef.current) {
+        setIsUploading(false);
+      }
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
+  }, [leadId, onAddAttachment]);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isUploading) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+    processFileUpload(file, docName);
+  };
+
+  const handleRetry = () => {
+    if (!lastFailedFile || isUploading) return;
+    processFileUpload(lastFailedFile.file, lastFailedFile.displayName);
   };
 
   const handleDelete = async (att: Attachment) => {
@@ -139,14 +169,6 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
     }
     onDeleteAttachment(att.id);
     showToast('Attachment deleted');
-  };
-
-  const handleConfirmSave = () => {
-    setShowSaveButton(false);
-    setSavedSuccess(true);
-    setTimeout(() => {
-      setSavedSuccess(false);
-    }, 4000);
   };
 
   const handleToggleAudio = (att: Attachment) => {
@@ -196,13 +218,11 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
       return;
     }
 
-    // Audio files / Voice Notes -> continue playing inside PropLead
     if (isAudioAttachment(att)) {
       handleToggleAudio(att);
       return;
     }
 
-    // Documents & Photos: PDF, JPG/JPEG/PNG/WEBP, DOC/DOCX, XLS/XLSX, PPT/PPTX
     setIsOpeningId(att.id);
     try {
       const res = await openLeadDocument(att, {
@@ -220,18 +240,21 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
   };
 
   const renderFileIcon = (att: Attachment) => {
-    if (att.type === 'image' && att.url) {
+    if (att.type === 'image' && att.url && att.url.startsWith('http')) {
       return (
         <img
           src={att.url}
           alt={att.name}
-          className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-slate-200 dark:border-slate-700"
+          className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-700"
           referrerPolicy="no-referrer"
+          onError={(e) => {
+            (e.currentTarget as HTMLElement).style.display = 'none';
+          }}
         />
       );
     }
 
-    const ext = att.name.split('.').pop()?.toLowerCase() || '';
+    const ext = (att.fileName || att.name).split('.').pop()?.toLowerCase() || '';
     const isAudio = isAudioAttachment(att);
 
     if (isAudio) {
@@ -276,7 +299,7 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
 
   return (
     <div className="space-y-4 relative">
-      {/* Toast Notification for File Opening Feedback */}
+      {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-90 max-w-xs w-full px-4 text-center pointer-events-none animate-fade-in">
           <div className="bg-slate-900/95 dark:bg-slate-800/95 text-white text-xs font-semibold px-4 py-2.5 rounded-2xl shadow-xl border border-slate-700/60 backdrop-blur-xs">
@@ -292,16 +315,27 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
           Upload Property Photos & Client Documents
         </div>
         <p className="text-[11px] text-slate-400 mt-0.5">
-          Floor plans, flat photos, KYC documents, allotment letters
+          Floor plans, flat photos, KYC documents, allotment letters (Max 10 MB)
         </p>
 
         <div className="mt-3 flex flex-col items-center justify-center gap-2">
+          {/* Upload Button */}
           <div className="flex flex-wrap items-center justify-center gap-2">
-            <label className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs cursor-pointer inline-flex items-center gap-1.5 shadow-xs transition-all">
-              <Plus className="w-3.5 h-3.5" />
-              <span>Select File from Phone</span>
+            <label
+              className={`px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs inline-flex items-center gap-1.5 shadow-xs transition-all ${
+                isUploading ? 'opacity-50 pointer-events-none cursor-not-allowed' : 'cursor-pointer'
+              }`}
+            >
+              {isUploading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Plus className="w-3.5 h-3.5" />
+              )}
+              <span>{isUploading ? (uploadProgress?.statusText || 'Uploading…') : 'Select File from Phone'}</span>
               <input
+                ref={fileInputRef}
                 type="file"
+                disabled={isUploading}
                 onChange={handleFileUpload}
                 accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,audio/*"
                 className="hidden"
@@ -309,33 +343,44 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
             </label>
           </div>
 
-          {isUploading && (
-            <div className="flex items-center justify-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 pt-1">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
-              <span>Uploading...</span>
+          {/* Simple Progress State Display */}
+          {isUploading && uploadProgress && (
+            <div className="w-full max-w-xs pt-2 space-y-1.5 animate-fade-in">
+              <div className="flex items-center justify-center text-xs font-semibold text-emerald-700 dark:text-emerald-400 gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>{uploadProgress.statusText}</span>
+              </div>
             </div>
           )}
 
-          {/* Simple Save button shown when upload completes */}
-          {showSaveButton && !isUploading && (
-            <div className="pt-1">
-              <button
-                type="button"
-                onClick={handleConfirmSave}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-sm inline-flex items-center gap-1.5 transition-all cursor-pointer"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>Save</span>
-              </button>
+          {/* Upload Error with Retry Action */}
+          {uploadError && !isUploading && (
+            <div className="w-full max-w-sm pt-2 animate-fade-in">
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 rounded-xl flex items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-1.5 text-rose-700 dark:text-rose-300 font-semibold min-w-0">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-600 dark:text-rose-400" />
+                  <span className="truncate">{uploadError}</span>
+                </div>
+                {lastFailedFile && (
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold rounded-lg text-[11px] inline-flex items-center gap-1 shadow-xs transition-all cursor-pointer flex-shrink-0"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Retry</span>
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
-          {/* Simple Saved successfully message */}
-          {savedSuccess && (
-            <div className="pt-1">
+          {/* Saved Success Confirmation */}
+          {savedSuccess && !isUploading && (
+            <div className="pt-1 animate-fade-in">
               <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-semibold">
                 <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                <span>Saved successfully</span>
+                <span>Upload complete</span>
               </div>
             </div>
           )}
@@ -372,7 +417,7 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
                     {att.name}
                   </div>
                   <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1.5">
-                    <span>{att.size || '1.2 MB'} • {att.createdAt}</span>
+                    <span>{att.size || 'File'} • {att.createdAt}</span>
                     {playingAudioId === att.id && (
                       <span className="text-purple-600 dark:text-purple-400 font-semibold flex items-center gap-1">
                         • Playing in PropLead
@@ -418,4 +463,3 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
     </div>
   );
 };
-

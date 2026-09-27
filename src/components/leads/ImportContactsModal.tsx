@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   X,
   Search,
@@ -59,33 +59,26 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
 
   // Native handling state
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isImporting, setIsImporting] = useState<boolean>(false);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
   const [permissionDenied, setPermissionDenied] = useState<boolean>(false);
   const [isPermanentlyDenied, setIsPermanentlyDenied] = useState<boolean>(false);
   const [permissionErrorMessage, setPermissionErrorMessage] = useState<string | null>(null);
   const [deviceHasNoContacts, setDeviceHasNoContacts] = useState<boolean>(false);
   const [previewLoaded, setPreviewLoaded] = useState<boolean>(false);
 
-  useEffect(() => {
-    if (isOpen) {
-      console.log('[ImportContacts] CONTACTS_UI_STATE:', {
-        isOpen,
-        isLoading,
-        permissionDenied,
-        isPermanentlyDenied,
-        hasErrorMessage: Boolean(permissionErrorMessage),
-        permissionErrorMessage,
-        contactsLoadedCount: contacts.length,
-      });
-    }
-  }, [isOpen, isLoading, permissionDenied, isPermanentlyDenied, permissionErrorMessage, contacts.length]);
+  // Set of existing phone numbers normalized to 10 digits (memoized to prevent re-creation)
+  const existingPhoneSet = useMemo(() => {
+    return new Set(
+      existingLeads.map((l) => normalizePhoneForMatch(l.phone)).filter(Boolean)
+    );
+  }, [existingLeads]);
 
-  // Set of existing phone numbers normalized to 10 digits
-  const existingPhoneSet = new Set(
-    existingLeads.map((l) => normalizePhoneForMatch(l.phone)).filter(Boolean)
-  );
-  const existingNameSet = new Set(
-    existingLeads.map((l) => l.name.trim().toLowerCase()).filter(Boolean)
-  );
+  const existingNameSet = useMemo(() => {
+    return new Set(
+      existingLeads.map((l) => l.name.trim().toLowerCase()).filter(Boolean)
+    );
+  }, [existingLeads]);
 
   const checkIsDuplicate = useCallback((phone: string, name: string): boolean => {
     const normPhone = normalizePhoneForMatch(phone);
@@ -272,6 +265,9 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
     [checkIsDuplicate, loadSampleDeviceContacts]
   );
 
+  const fetchRef = useRef(fetchAndLoadContacts);
+  fetchRef.current = fetchAndLoadContacts;
+
   // 1. Check live permission state upon modal open and auto-load if already granted
   useEffect(() => {
     if (!isOpen) {
@@ -279,20 +275,28 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
       setShowPasteInput(false);
       setPasteText('');
       setPermissionErrorMessage(null);
+      setIsImporting(false);
+      setImportProgress(null);
       return;
     }
 
+    let isMounted = true;
     checkContactsPermission().then((perm) => {
+      if (!isMounted) return;
       if (perm.state === 'granted') {
         setPermissionDenied(false);
         setIsPermanentlyDenied(false);
         setPermissionErrorMessage(null);
-        fetchAndLoadContacts(true);
+        fetchRef.current(true);
       } else if (perm.state === 'denied') {
         setIsPermanentlyDenied(true);
       }
     });
-  }, [isOpen, fetchAndLoadContacts]);
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen]);
 
   // 2. App Resume listener: Re-check permissions automatically when returning from Android Settings (ONLY when modal is open)
   useEffect(() => {
@@ -305,7 +309,7 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
           setIsPermanentlyDenied(false);
           setPermissionErrorMessage(null);
           // Automatically load contacts now that permission is granted in settings!
-          fetchAndLoadContacts(true);
+          fetchRef.current(true);
         } else if (perm.state === 'denied') {
           setIsPermanentlyDenied(true);
         }
@@ -313,7 +317,7 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
     });
 
     return () => unsubscribe();
-  }, [isOpen, fetchAndLoadContacts]);
+  }, [isOpen]);
 
   // Guard render: Modal must NEVER render DOM when closed
   if (!isOpen) return null;
@@ -389,8 +393,8 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
   );
 
   const toggleSelect = (contact: ContactItem) => {
-    if (contact.isExistingLead) {
-      return; // Do not allow selecting existing duplicates
+    if (contact.isExistingLead || isImporting) {
+      return; // Do not allow selecting existing duplicates or toggling while importing
     }
     const next = new Set(selectedIds);
     if (next.has(contact.id)) {
@@ -404,6 +408,7 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
   const selectableFilteredContacts = filteredContacts.filter((c) => !c.isExistingLead);
 
   const handleSelectAll = () => {
+    if (isImporting) return;
     if (selectedIds.size === selectableFilteredContacts.length && selectableFilteredContacts.length > 0) {
       setSelectedIds(new Set());
     } else {
@@ -412,6 +417,8 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
   };
 
   const handleImport = () => {
+    if (isImporting) return;
+
     const today = new Date().toISOString().split('T')[0];
 
     // Filter only selected contacts that are not already leads (prevent duplicate creation)
@@ -423,8 +430,22 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
       return;
     }
 
-    // Selected contacts must be imported as inactive leads ('status: new'), as intended by the existing feature
-    const newLeads: Lead[] = validContactsToImport.map((c) => ({
+    setIsImporting(true);
+    setImportProgress({ current: 0, total: validContactsToImport.length });
+
+    // Deduplicate within the imported batch itself
+    const seenBatchPhones = new Set<string>();
+    const deduplicatedBatch: ContactItem[] = [];
+    for (const c of validContactsToImport) {
+      const norm = normalizePhoneForMatch(c.phone);
+      if (norm && seenBatchPhones.has(norm)) continue;
+      if (norm) seenBatchPhones.add(norm);
+      deduplicatedBatch.push(c);
+    }
+
+    setImportProgress({ current: deduplicatedBatch.length, total: deduplicatedBatch.length });
+
+    const newLeads: Lead[] = deduplicatedBatch.map((c) => ({
       id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       name: c.name || 'Client',
       phone: c.phone || '',
@@ -463,6 +484,7 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
     }));
 
     onImportLeads(newLeads);
+    setIsImporting(false);
     onClose();
   };
 
@@ -801,13 +823,26 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
           <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
             <button
               onClick={handleImport}
-              disabled={selectedIds.size === 0}
+              disabled={selectedIds.size === 0 || isImporting}
               className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl shadow-md text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
             >
-              <UserPlus className="w-4 h-4" />
-              <span>
-                Import {selectedIds.size} Contact{selectedIds.size === 1 ? '' : 's'} as Inactive Leads
-              </span>
+              {isImporting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>
+                    {importProgress
+                      ? `Importing ${importProgress.current} of ${importProgress.total} contacts...`
+                      : 'Importing contacts...'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <UserPlus className="w-4 h-4" />
+                  <span>
+                    Import {selectedIds.size} Contact{selectedIds.size === 1 ? '' : 's'} as Inactive Leads
+                  </span>
+                </>
+              )}
             </button>
           </div>
         )}

@@ -104,8 +104,8 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
           <div className="w-18 h-18 rounded-3xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-xl shadow-emerald-600/25 mb-4">
             <Building2 className="w-9 h-9" />
           </div>
-          <h1 className="text-3xl font-black tracking-tight text-slate-900 dark:text-white">
-            PropLead
+          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-white">
+            PropLead for Agents
           </h1>
           <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 mt-1 uppercase tracking-wider">
             Property Agent Lead & Follow-up Tracker

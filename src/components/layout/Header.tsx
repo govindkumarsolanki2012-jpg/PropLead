@@ -64,7 +64,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5 flex-nowrap">
               <h1 className="text-base font-bold text-slate-900 dark:text-white tracking-tight leading-none whitespace-nowrap">
-                PropLead
+                PropLead for Agents
               </h1>
               <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 flex-shrink-0 leading-tight">
                 IN

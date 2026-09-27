@@ -169,7 +169,7 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
               </div>
               <div className="space-y-1">
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  Deleting your PropLead account...
+                  Deleting your PropLead for Agents account...
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs">
                   Erasing leads, properties, backups, and security credentials. Please do not close the app.

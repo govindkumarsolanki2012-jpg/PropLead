@@ -32,8 +32,8 @@ import { formatIndianCurrency } from '../../utils/formatters';
 import { auth } from '../../lib/firebase';
 import {
   uploadPropertyPhotoToStorage,
-  compressImage,
   validateAttachmentFile,
+  UploadProgress,
 } from '../../utils/attachmentStorage';
 
 interface AddPropertyModalProps {
@@ -146,60 +146,84 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
   };
 
   const [isUploadingPhotos, setIsUploadingPhotos] = useState<boolean>(false);
+  const [photoUploadProgress, setPhotoUploadProgress] = useState<UploadProgress | null>(null);
+  const [failedPhotoFiles, setFailedPhotoFiles] = useState<File[]>([]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const uploadFileList = async (fileList: File[]) => {
+    if (fileList.length === 0) return;
+
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid) {
+      setErrorMessage('Please sign in to upload property photos.');
+      return;
+    }
 
     setIsUploadingPhotos(true);
     setErrorMessage(null);
+    setPhotoUploadProgress({ percent: 0, statusText: 'Uploading...' });
 
-    const currentUid = auth.currentUser?.uid;
+    const newlyFailed: File[] = [];
     const tempPropId = `prop_${Date.now()}`;
 
     try {
-      const fileList: File[] = Array.from(files);
-      for (const file of fileList) {
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
         const validation = validateAttachmentFile(file);
         if (!validation.valid) {
-          setErrorMessage(validation.error || 'Invalid photo format');
+          setErrorMessage(validation.error || 'File is too large. Maximum size is 10 MB.');
           continue;
         }
 
-        if (currentUid) {
-          try {
-            const { downloadUrl } = await uploadPropertyPhotoToStorage({
-              userId: currentUid,
-              propertyId: tempPropId,
-              file,
-            });
-            setPhotos((prev) => [...prev, downloadUrl]);
-          } catch (storageErr) {
-            console.warn('[Storage upload fallback to compressed]', storageErr);
-            const compressed = await compressImage(file);
-            const reader = new FileReader();
-            reader.onload = () => {
-              if (reader.result) {
-                setPhotos((prev) => [...prev, reader.result as string]);
-              }
-            };
-            reader.readAsDataURL(compressed);
-          }
-        } else {
-          const compressed = await compressImage(file);
-          const reader = new FileReader();
-          reader.onload = () => {
-            if (reader.result) {
-              setPhotos((prev) => [...prev, reader.result as string]);
-            }
-          };
-          reader.readAsDataURL(compressed);
+        try {
+          const { downloadUrl } = await uploadPropertyPhotoToStorage({
+            userId: currentUid,
+            propertyId: tempPropId,
+            file,
+            onProgress: (progress) => {
+              const prefix = fileList.length > 1 ? `Photo ${i + 1}/${fileList.length}: ` : '';
+              setPhotoUploadProgress({
+                percent: progress.percent,
+                statusText: `${prefix}${progress.statusText}`,
+              });
+            },
+          });
+          setPhotos((prev) => [...prev, downloadUrl]);
+        } catch (storageErr: any) {
+          console.error('[AddPropertyModal] Photo upload failed:', storageErr);
+          newlyFailed.push(file);
         }
+      }
+
+      if (newlyFailed.length > 0) {
+        setFailedPhotoFiles(newlyFailed);
+        setErrorMessage('Upload did not complete. Please retry.');
+      } else {
+        setFailedPhotoFiles([]);
+        setPhotoUploadProgress({ percent: 100, statusText: 'Upload complete' });
+        setTimeout(() => {
+          setPhotoUploadProgress(null);
+        }, 3000);
       }
     } finally {
       setIsUploadingPhotos(false);
-      e.target.value = '';
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isUploadingPhotos) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const fileList: File[] = Array.from(files);
+    await uploadFileList(fileList);
+  };
+
+  const handleRetryFailedPhotos = async () => {
+    if (isUploadingPhotos || failedPhotoFiles.length === 0) return;
+    const toRetry = [...failedPhotoFiles];
+    await uploadFileList(toRetry);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -252,6 +276,11 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
       const saveFn = onSaveProperty || onSave;
       if (saveFn) {
         await saveFn(newProperty);
+        console.log('[UPLOAD_STAGE: 10. FIRESTORE_METADATA_SAVED]', {
+          propertyId: newProperty.id,
+          photoCount: newProperty.photos.length,
+          title: newProperty.title,
+        });
       }
       setIsSubmitting(false);
       resetForm();
@@ -630,7 +659,9 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                 {isUploadingPhotos ? (
                   <>
                     <RefreshCw className="w-5 h-5 mb-1 animate-spin text-emerald-600" />
-                    <span className="text-[10px] font-bold text-emerald-600">Uploading...</span>
+                    <span className="text-[10px] font-bold text-emerald-600">
+                      {photoUploadProgress?.statusText || 'Uploading...'}
+                    </span>
                   </>
                 ) : (
                   <>
@@ -640,6 +671,30 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                 )}
               </button>
             </div>
+
+            {/* Photo Upload Progress Bar */}
+            {isUploadingPhotos && photoUploadProgress && (
+              <div className="pt-1 space-y-1 animate-fade-in">
+                <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                  <span className="flex items-center gap-1.5">
+                    <RefreshCw className="w-3 h-3 animate-spin" />
+                    <span>{photoUploadProgress.statusText}</span>
+                  </span>
+                  {photoUploadProgress.percent > 0 && <span>{photoUploadProgress.percent}%</span>}
+                </div>
+                <div className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden relative">
+                  {photoUploadProgress.percent > 0 ? (
+                    <div
+                      className="h-full bg-emerald-600 transition-all duration-300 rounded-full"
+                      style={{ width: `${Math.max(5, photoUploadProgress.percent)}%` }}
+                    />
+                  ) : (
+                    <div className="h-full bg-emerald-600 rounded-full animate-pulse w-full" />
+                  )}
+                </div>
+              </div>
+            )}
+
             <input
               ref={fileInputRef}
               type="file"
@@ -720,11 +775,23 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
             </div>
           </div>
 
-          {/* Error message banner */}
+          {/* Error message banner with Retry button */}
           {errorMessage && (
-            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-700 dark:text-rose-300 font-medium flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
-              <span>{errorMessage}</span>
+            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-700 dark:text-rose-300 font-medium flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                <span className="truncate">{errorMessage}</span>
+              </div>
+              {failedPhotoFiles.length > 0 && !isUploadingPhotos && (
+                <button
+                  type="button"
+                  onClick={handleRetryFailedPhotos}
+                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold rounded-lg text-[11px] inline-flex items-center gap-1 shadow-xs transition-all cursor-pointer flex-shrink-0"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Retry</span>
+                </button>
+              )}
             </div>
           )}
 
@@ -732,7 +799,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
           <div className="pt-2">
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || isUploadingPhotos}
               className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-2xl text-xs shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-60"
             >
               {isSubmitting ? (

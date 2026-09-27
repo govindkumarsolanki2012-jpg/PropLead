@@ -100,7 +100,7 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
             <>
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 text-[11px] font-bold mb-2">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                <span>PropLead Pro Active</span>
+                <span>PropLead for Agents Pro Active</span>
               </div>
               <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
                 Welcome to Pro!
@@ -116,7 +116,7 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
                 <span>7-Day Free Trial Available</span>
               </div>
               <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                Welcome to PropLead
+                Welcome to PropLead for Agents
               </h1>
               {agentName && (
                 <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 mt-1">

@@ -144,10 +144,32 @@ export async function openLeadDocument(
     return { success: true, isAudio: true };
   }
 
-  if (!attachment.url) {
+  if (!attachment.url || attachment.url.trim().length === 0) {
     return {
       success: false,
-      message: 'No app available to open this file.',
+      message: 'File unavailable. Please delete and re-upload this document.',
+    };
+  }
+
+  // Safe host logging (no tokens or sensitive params)
+  try {
+    const host = attachment.url.startsWith('data:')
+      ? 'data:url'
+      : new URL(attachment.url).hostname;
+    console.log('[OPEN_ATTACHMENT_URL_HOST]', {
+      host,
+      fileName: attachment.name,
+      fileType: attachment.fileType || attachment.type,
+      storagePath: attachment.storagePath || 'none',
+    });
+  } catch {
+    console.log('[OPEN_ATTACHMENT_URL_HOST]', {
+      host: 'invalid-url-format',
+      fileName: attachment.name,
+    });
+    return {
+      success: false,
+      message: 'File unavailable. Please delete and re-upload this document.',
     };
   }
 

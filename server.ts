@@ -3,6 +3,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import multer from 'multer';
 import { google } from 'googleapis';
 import { GoogleGenAI } from '@google/genai';
 
@@ -363,7 +364,11 @@ async function getFirestoreServiceAccountToken(): Promise<string | null> {
     return cachedDatastoreToken.token;
   }
 
-  const credentials = parseServiceAccountCredentials(process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_KEY);
+  const rawKey =
+    process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_KEY ||
+    process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY ||
+    process.env.SERVICE_ACCOUNT_KEY;
+  const credentials = parseServiceAccountCredentials(rawKey);
 
   try {
     // Prefer a dedicated Firebase admin credential when explicitly configured.
@@ -399,7 +404,11 @@ async function getFirebaseAdminAccessToken(): Promise<string | null> {
     return cachedFirebaseAdminToken.token;
   }
 
-  const credentials = parseServiceAccountCredentials(process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_KEY);
+  const rawKey =
+    process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_KEY ||
+    process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY ||
+    process.env.SERVICE_ACCOUNT_KEY;
+  const credentials = parseServiceAccountCredentials(rawKey);
   const authOptions: any = {
     scopes: ['https://www.googleapis.com/auth/cloud-platform'],
   };
@@ -407,16 +416,21 @@ async function getFirebaseAdminAccessToken(): Promise<string | null> {
     authOptions.credentials = credentials;
   }
 
-  const auth = new google.auth.GoogleAuth(authOptions);
-  const client = await auth.getClient();
-  const tokenResponse = await client.getAccessToken();
-  if (!tokenResponse?.token) return null;
+  try {
+    const auth = new google.auth.GoogleAuth(authOptions);
+    const client = await auth.getClient();
+    const tokenResponse = await client.getAccessToken();
+    if (!tokenResponse?.token) return null;
 
-  cachedFirebaseAdminToken = {
-    token: tokenResponse.token,
-    expiresAt: now + 50 * 60 * 1000,
-  };
-  return tokenResponse.token;
+    cachedFirebaseAdminToken = {
+      token: tokenResponse.token,
+      expiresAt: now + 50 * 60 * 1000,
+    };
+    return tokenResponse.token;
+  } catch (err) {
+    console.warn('[Firebase Admin Token Error]:', err);
+    return null;
+  }
 }
 
 function encodeFirestorePath(documentPath: string): string {
@@ -1757,18 +1771,221 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '30mb' }));
 
-  // CORS middleware for API endpoints (critical for Android Capacitor requests)
+  // CORS middleware for API endpoints (critical for Android Capacitor and web requests)
   app.use('/api', (req, res, next) => {
-    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    const origin = req.headers.origin;
+    if (origin) {
+      res.header('Access-Control-Allow-Origin', origin);
+      res.header('Access-Control-Allow-Credentials', 'true');
+    } else {
+      res.header('Access-Control-Allow-Origin', '*');
+    }
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-    res.header('Access-Control-Allow-Credentials', 'true');
     if (req.method === 'OPTIONS') {
       return res.status(204).end();
     }
     next();
+  });
+
+  // Storage Health Endpoint
+  app.get('/api/storage/health', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.json({
+      ok: true,
+      service: 'storage',
+      bucket: FIREBASE_STORAGE_BUCKET,
+      projectId: FIRESTORE_PROJECT_ID,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  const uploadStorage = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+      fileSize: 15 * 1024 * 1024, // 15MB max limit
+    },
+  });
+
+  // Storage Upload Endpoint: Single Production Upload Pipeline via Cloud Run backend
+  app.post('/api/storage/upload', uploadStorage.single('file'), async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    console.log('UPLOAD_REQUEST_RECEIVED');
+
+    try {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        console.warn('[Storage Upload] Missing or invalid Authorization Bearer header');
+        return res.status(401).json({
+          success: false,
+          error: 'UNAUTHORIZED',
+          message: 'Authentication required. Missing Bearer token.',
+        });
+      }
+
+      const token = authHeader.substring(7).trim();
+      const verified = await verifyFirebaseIdToken(token);
+      if (!verified || !verified.uid) {
+        console.warn('[Storage Upload] Firebase token verification failed');
+        return res.status(401).json({
+          success: false,
+          error: 'INVALID_TOKEN',
+          message: 'Invalid or expired Firebase ID token.',
+        });
+      }
+
+      console.log('AUTH_VERIFIED');
+      const verifiedUid = verified.uid;
+
+      // Extract file buffer from multipart form-data or JSON fallback
+      let buffer: Buffer | null = null;
+      let originalFileName = 'file';
+      let contentType = 'application/octet-stream';
+
+      if (req.file) {
+        buffer = req.file.buffer;
+        originalFileName = req.file.originalname || (req.body?.fileName as string) || 'attachment';
+        contentType = req.file.mimetype || 'application/octet-stream';
+      } else if (req.body?.base64Data && typeof req.body.base64Data === 'string') {
+        let cleanBase64 = req.body.base64Data;
+        if (cleanBase64.includes(',')) {
+          cleanBase64 = cleanBase64.split(',')[1];
+        }
+        buffer = Buffer.from(cleanBase64, 'base64');
+        originalFileName = (req.body.fileName as string) || (req.body.originalName as string) || 'attachment';
+        contentType = (req.body.contentType as string) || 'application/octet-stream';
+      }
+
+      if (!buffer || buffer.length === 0) {
+        console.warn('[Storage Upload] Empty file received (0 bytes)');
+        return res.status(400).json({
+          success: false,
+          error: 'EMPTY_FILE',
+          message: 'Uploaded file is empty (0 bytes).',
+        });
+      }
+
+      console.log(`FILE_RECEIVED size=${buffer.length}`);
+
+      const uploadType = (req.body?.uploadType as string) || 'lead_attachment';
+      const leadId = req.body?.leadId as string;
+      const propertyId = req.body?.propertyId as string;
+      const requestedPath = req.body?.storagePath as string;
+
+      const sanitizedName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const uniqueFileName = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${sanitizedName}`;
+
+      let storagePath: string;
+      if (requestedPath && requestedPath.startsWith(`users/${verifiedUid}/`)) {
+        storagePath = requestedPath;
+      } else if (uploadType === 'property_photo' && propertyId) {
+        storagePath = `users/${verifiedUid}/properties/${propertyId}/photos/${uniqueFileName}`;
+      } else if (leadId) {
+        storagePath = `users/${verifiedUid}/leads/${leadId}/attachments/${uniqueFileName}`;
+      } else {
+        storagePath = `users/${verifiedUid}/attachments/${uniqueFileName}`;
+      }
+
+      const adminAccessToken = await getFirebaseAdminAccessToken();
+      if (!adminAccessToken) {
+        console.error('[Storage Upload] Server service account credentials unavailable');
+        return res.status(500).json({
+          success: false,
+          error: 'SERVER_CREDENTIALS_UNAVAILABLE',
+          message: 'Server storage credentials are not available.',
+        });
+      }
+
+      console.log('STORAGE_UPLOAD_STARTED');
+      const bucket = FIREBASE_STORAGE_BUCKET;
+      const uploadUrl = `https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(bucket)}/o?uploadType=media&name=${encodeURIComponent(storagePath)}`;
+
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminAccessToken}`,
+          'Content-Type': contentType,
+        },
+        body: buffer,
+      });
+
+      if (!uploadRes.ok) {
+        const errText = await uploadRes.text();
+        console.error(`[Storage Upload] GCS upload to ${bucket} failed (${uploadRes.status}):`, errText);
+        return res.status(502).json({
+          success: false,
+          error: 'UPLOAD_FAILED',
+          message: `Storage write failed with status ${uploadRes.status}`,
+        });
+      }
+
+      console.log('STORAGE_UPLOAD_FINISHED');
+
+      // Attach Firebase Storage download token metadata
+      const downloadToken = crypto.randomUUID();
+      const patchUrl = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}`;
+      await fetch(patchUrl, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${adminAccessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          metadata: {
+            firebaseStorageDownloadTokens: downloadToken,
+            userId: verifiedUid,
+            leadId: leadId || null,
+            propertyId: propertyId || null,
+            originalName: originalFileName,
+            uploadedAt: new Date().toISOString(),
+          },
+        }),
+      }).catch((patchErr) => {
+        console.warn('[Storage Upload] Patch metadata warning:', patchErr);
+      });
+
+      // Verify object actually exists in Google Cloud / Firebase Storage
+      const getUrl = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}`;
+      const checkRes = await fetch(getUrl, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${adminAccessToken}`,
+        },
+      });
+
+      const objectExists = checkRes.ok;
+      console.log(`OBJECT_EXISTS=${objectExists}`);
+
+      if (!objectExists) {
+        return res.status(502).json({
+          success: false,
+          error: 'UPLOAD_FAILED',
+          message: 'Object verification failed after upload.',
+        });
+      }
+
+      const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/${encodeURIComponent(storagePath)}?alt=media&token=${downloadToken}`;
+      console.log('DOWNLOAD_URL_CREATED');
+      console.log('UPLOAD_RESPONSE_SENT');
+
+      return res.status(200).json({
+        success: true,
+        storagePath,
+        downloadUrl,
+        fileName: originalFileName,
+        fileType: contentType,
+        fileSize: buffer.length,
+      });
+    } catch (err: any) {
+      console.error('[Storage Upload Exception]:', err);
+      return res.status(500).json({
+        success: false,
+        error: 'UPLOAD_FAILED',
+        message: err?.message || 'Storage upload encountered an unexpected error.',
+      });
+    }
   });
 
   // Helper to extract bearer token from headers

@@ -27,6 +27,7 @@ import {
 } from '../../utils/audioStorage';
 import {
   checkMicrophonePermission,
+  requestMicrophonePermission,
   openNativeAppSettings,
   registerAppResumeListener,
 } from '../../utils/nativePermissions';
@@ -159,13 +160,26 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
     }
 
     // Check live native microphone permission before attempting capture
-    const livePerm = await checkMicrophonePermission();
+    let livePerm = await checkMicrophonePermission();
     if (livePerm.state === 'denied' && livePerm.isPermanentlyDenied) {
       setIsMicPermanentlyDenied(true);
       setErrorMessage(
         'Microphone permission is permanently denied. Please tap "Open Settings" to enable microphone access.'
       );
       return;
+    }
+
+    if (livePerm.state !== 'granted') {
+      const reqPerm = await requestMicrophonePermission();
+      if (reqPerm.state !== 'granted') {
+        setIsMicPermanentlyDenied(reqPerm.isPermanentlyDenied || false);
+        setErrorMessage(
+          reqPerm.isPermanentlyDenied
+            ? 'Microphone permission is permanently denied. Please tap "Open Settings" to enable microphone access.'
+            : 'Microphone permission was denied. PropLead needs microphone access to record voice memos.'
+        );
+        return;
+      }
     }
 
     if (typeof window === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -176,35 +190,17 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
     }
 
     try {
-      // 1. Check if enumerateDevices reports no audio input devices
-      if (navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === 'function') {
-        try {
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          const hasAudioInput = devices.some((d) => d.kind === 'audioinput');
-          if (devices.length > 0 && !hasAudioInput) {
-            setErrorMessage(
-              'No microphone detected on this device. You can upload an audio file or memo directly using the upload button.'
-            );
-            return;
-          }
-        } catch {
-          // If enumerateDevices is restricted or fails, proceed to getUserMedia
-        }
-      }
-
-      // 2. Request microphone stream with progressive fallback for device constraints
+      // 1. Request microphone stream with progressive fallback for device constraints
       let stream: MediaStream;
       try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (basicErr) {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
             noiseSuppression: true,
-            autoGainControl: true,
           },
         });
-      } catch (constraintErr: any) {
-        // Fallback to basic audio constraint if audio enhancement parameters caused OverconstrainedError or NotFoundError
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       }
 
       mediaStreamRef.current = stream;
@@ -215,7 +211,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
 
       let recorder: MediaRecorder;
       try {
-        recorder = new MediaRecorder(stream, options);
+        recorder = options ? new MediaRecorder(stream, options) : new MediaRecorder(stream);
       } catch (mimeErr) {
         console.warn('Could not initialize MediaRecorder with options, using default', mimeErr);
         recorder = new MediaRecorder(stream);
@@ -250,7 +246,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
         const audioBlob = new Blob(audioChunksRef.current, { type: finalMime });
 
         if (audioBlob.size === 0) {
-          setErrorMessage('No audio data was captured. Please check microphone permissions and speak clearly.');
+          setErrorMessage('No audio data was captured. Please speak clearly into your microphone.');
           setIsRecording(false);
           setIsSaving(false);
           setRecordingSeconds(0);

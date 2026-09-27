@@ -55,7 +55,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ className = '' }) =>
           className="mt-5 flex flex-col items-center"
         >
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-white leading-none">
-            Prop<span className="text-emerald-600 dark:text-emerald-400">Lead</span>
+            Prop<span className="text-emerald-600 dark:text-emerald-400">Lead</span> for Agents
           </h1>
           <p className="text-xs font-semibold text-slate-400 dark:text-slate-500 tracking-wide uppercase mt-1.5">
             Property Agent CRM

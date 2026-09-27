@@ -32,6 +32,7 @@ export type LeadSource =
   | 'Referral'
   | 'Walk-in'
   | 'Phone Call'
+  | 'Phone Contacts'
   | 'Instagram'
   | 'Facebook'
   | 'Google'
@@ -88,11 +89,16 @@ export interface Attachment {
   id: string;
   leadId: string;
   name: string;
+  fileName?: string;
+  fileType?: string;
+  fileSize?: string | number;
   type: 'image' | 'document';
   url: string;
+  downloadUrl?: string;
   storagePath?: string;
   size?: string;
   createdAt: string;
+  uploadedAt?: string;
 }
 
 export interface Lead {

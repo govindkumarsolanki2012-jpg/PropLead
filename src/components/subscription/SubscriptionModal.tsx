@@ -215,7 +215,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
             Choose Your Plan
           </h2>
           <p className="text-xs text-emerald-100 mt-1 max-w-xs mx-auto leading-relaxed">
-            Unlock all PropLead features
+            Unlock all PropLead for Agents features
           </p>
         </div>
 
