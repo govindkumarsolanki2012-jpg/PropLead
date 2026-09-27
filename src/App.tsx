@@ -99,6 +99,7 @@ const checkHasActiveSession = (): boolean => {
 export function App() {
   // Single fast branded splash shown once after the native Android splash
   const [isSplashActive, setIsSplashActive] = useState<boolean>(true);
+  const [isAppContentVisible, setIsAppContentVisible] = useState<boolean>(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -1249,13 +1250,18 @@ export function App() {
   // Check today and overdue follow-up counts for bottom nav badge
   const todayCount = leads.filter((l) => formatRelativeDate(l.nextFollowUpDate).isToday).length;
 
+  if (!isAppContentVisible) {
+    return (
+      <MobileFrame>
+        <AnimatePresence onExitComplete={() => setIsAppContentVisible(true)}>
+          {isSplashActive && <SplashScreen key="app-launch-splash" />}
+        </AnimatePresence>
+      </MobileFrame>
+    );
+  }
+
   return (
     <MobileFrame>
-      {/* WhatsApp / YouTube style clean animated splash screen */}
-      <AnimatePresence>
-        {isSplashActive && <SplashScreen key="app-launch-splash" />}
-      </AnimatePresence>
-
       {/* Toast Notification */}
       {toastMessage && (
         <div
