@@ -31,6 +31,22 @@ jobs:
       - name: Sync Android project
         run: npx cap sync android
 
+      - name: Verify packaged splash assets are current
+        run: |
+          if grep -R -F -n "initial-launch-splash" android/app/src/main/assets/public; then
+            echo "Stale initial HTML splash found in packaged Android assets."
+            exit 1
+          fi
+          if grep -R -F -n "scale:.84" android/app/src/main/assets/public; then
+            echo "Old splash entrance scale animation found in packaged Android assets."
+            exit 1
+          fi
+          if grep -R -F -n "scale:1.04" android/app/src/main/assets/public; then
+            echo "Old splash exit scale animation found in packaged Android assets."
+            exit 1
+          fi
+          echo "Packaged Android splash assets are current."
+
       - name: Install Gradle 8.14.3
         run: |
           wget -q https://services.gradle.org/distributions/gradle-8.14.3-bin.zip
