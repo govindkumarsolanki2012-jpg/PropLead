@@ -97,13 +97,13 @@ const checkHasActiveSession = (): boolean => {
 };
 
 export function App() {
-  // WhatsApp / YouTube style clean 1.5-second smooth splash screen
+  // Single fast branded splash shown once after the native Android splash
   const [isSplashActive, setIsSplashActive] = useState<boolean>(true);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsSplashActive(false);
-    }, 1500);
+    }, 900);
     return () => clearTimeout(timer);
   }, []);
 
