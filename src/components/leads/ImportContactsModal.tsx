@@ -28,17 +28,16 @@ import {
   getNativeDeviceContacts,
 } from '../../utils/nativePermissions';
 
-const CONTACT_SEARCH_BUILD_ID = 'contact-search-debug-v1.0.38-173f27c';
+const CONTACT_SEARCH_BUILD_ID = 'contact-search-strict-v1.0.38';
 
 const normalizeText = (value: unknown): string => {
   if (!value) return '';
   return String(value).toLowerCase().trim().replace(/\s+/g, ' ');
 };
 
-const normalizePhone = (value: unknown): string => {
+const normalizePhoneDigits = (value: unknown): string => {
   if (!value) return '';
-  let s = String(value).toLowerCase().trim();
-  s = s.replace(/[\s\-().+]/g, '');
+  let s = String(value).replace(/\D/g, '');
   if (s.startsWith('91') && s.length > 10) {
     s = s.substring(2);
   }
@@ -48,7 +47,12 @@ const normalizePhone = (value: unknown): string => {
   return s;
 };
 
-const getContactSearchText = (contact: any): { nameText: string; phoneText: string } => {
+type ContactSearchMatch = {
+  matchedBy: 'all' | 'name' | 'phone';
+  matchedValue: string;
+};
+
+const getVisibleContactValues = (contact: any): { names: string[]; phones: string[] } => {
   const names: string[] = [];
   const phones: string[] = [];
 
@@ -63,8 +67,6 @@ const getContactSearchText = (contact: any): { nameText: string; phoneText: stri
     }
   }
   if (contact.displayName) names.push(contact.displayName);
-  if (contact.suggestedLocality) names.push(contact.suggestedLocality);
-
   if (contact.phone) phones.push(contact.phone);
   if (contact.phoneNumber) phones.push(contact.phoneNumber);
   if (contact.phoneNumbers && Array.isArray(contact.phoneNumbers)) {
@@ -80,10 +82,35 @@ const getContactSearchText = (contact: any): { nameText: string; phoneText: stri
     }
   }
 
-  const nameText = normalizeText(names.join(' '));
-  const phoneText = phones.map((p) => normalizePhone(p)).join(' ');
+  return { names, phones };
+};
 
-  return { nameText, phoneText };
+const getContactSearchMatch = (contact: any, rawQuery: string): ContactSearchMatch | null => {
+  const query = rawQuery.trim();
+  if (!query) {
+    return { matchedBy: 'all', matchedValue: 'empty query' };
+  }
+
+  const { names, phones } = getVisibleContactValues(contact);
+  const hasLetters = /[a-z]/i.test(query);
+
+  if (hasLetters) {
+    const normalizedQuery = normalizeText(query);
+    if (!normalizedQuery) return null;
+
+    const matchedName = names.find((name) => normalizeText(name).includes(normalizedQuery));
+    return matchedName ? { matchedBy: 'name', matchedValue: matchedName } : null;
+  }
+
+  const queryDigits = normalizePhoneDigits(query);
+  if (!queryDigits) return null;
+
+  const matchedPhone = phones.find((phone) => {
+    const phoneDigits = normalizePhoneDigits(phone);
+    return phoneDigits.length > 0 && phoneDigits.includes(queryDigits);
+  });
+
+  return matchedPhone ? { matchedBy: 'phone', matchedValue: matchedPhone } : null;
 };
 
 export interface ContactItem {
@@ -247,7 +274,9 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
             const isDuplicate = checkIsDuplicate(primaryPhone, displayName);
 
             parsedContacts.push({
-              id: rc.id || `dev_${Date.now()}_${i}`,
+              // Android returns one row per phone number, so contactId alone is
+              // not a unique React key when a contact owns multiple numbers.
+              id: `${rc.id || 'device'}_${normPhone || i}`,
               name: displayName,
               phone: primaryPhone,
               isExistingLead: isDuplicate,
@@ -430,25 +459,18 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
     }
   };
 
-  const filteredContacts = useMemo(() => {
-    const qText = normalizeText(search);
-    const qPhone = normalizePhone(search);
-
-    if (!qText && !qPhone) {
-      return contacts;
-    }
-
-    const filtered = contacts.filter((contact) => {
-      const { nameText, phoneText } = getContactSearchText(contact);
-      return nameText.includes(qText) || (qPhone.length > 0 && phoneText.includes(qPhone));
-    });
-
-    return filtered;
+  const contactSearchMatches = useMemo(() => {
+    return contacts
+      .map((contact) => ({ contact, match: getContactSearchMatch(contact, search) }))
+      .filter((entry): entry is { contact: ContactItem; match: ContactSearchMatch } => entry.match !== null);
   }, [contacts, search]);
 
   // Keep the rendered collection explicit so device diagnostics can prove that
   // the visible rows come from the filtered result rather than the source list.
-  const renderedContacts = filteredContacts;
+  const renderedContacts = contactSearchMatches.map((entry) => entry.contact);
+  const matchByContactId = new Map<string, ContactSearchMatch>(
+    contactSearchMatches.map((entry): [string, ContactSearchMatch] => [entry.contact.id, entry.match])
+  );
 
   const toggleSelect = (contact: ContactItem) => {
     if (contact.isExistingLead || isImporting) {
@@ -464,8 +486,8 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
   };
 
   const selectableFilteredContacts = useMemo(
-    () => filteredContacts.filter((c) => !c.isExistingLead),
-    [filteredContacts]
+    () => renderedContacts.filter((c) => !c.isExistingLead),
+    [renderedContacts]
   );
 
   const selectedCountInFiltered = useMemo(
@@ -738,7 +760,7 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
               data-contact-search-debug
               className="text-[9px] leading-tight text-slate-400 dark:text-slate-500"
             >
-              query=&quot;{search}&quot; · total={contacts.length} · filtered={filteredContacts.length} · rendered={renderedContacts.length} · build={CONTACT_SEARCH_BUILD_ID}
+              query=&quot;{search}&quot; · total={contacts.length} · filtered={contactSearchMatches.length} · rendered={renderedContacts.length} · build={CONTACT_SEARCH_BUILD_ID}
             </div>
 
             <div className="flex items-center justify-between text-xs">
@@ -850,6 +872,7 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
             renderedContacts.map((contact) => {
               const isSelected = selectedIds.has(contact.id);
               const isDuplicate = Boolean(contact.isExistingLead);
+              const searchMatch = matchByContactId.get(contact.id);
 
               return (
                 <div
@@ -891,6 +914,9 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
                       </div>
                       <div className="text-[11px] text-slate-400">
                         {contact.phone || 'No phone number'} {contact.suggestedLocality && `• ${contact.suggestedLocality}`}
+                      </div>
+                      <div className="text-[9px] text-sky-600 dark:text-sky-400">
+                        matchedBy={searchMatch?.matchedBy || 'none'} · matchedValue={searchMatch?.matchedValue || 'none'}
                       </div>
                     </div>
                   </div>
