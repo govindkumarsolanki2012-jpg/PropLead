@@ -28,8 +28,6 @@ import {
   getNativeDeviceContacts,
 } from '../../utils/nativePermissions';
 
-const CONTACT_SEARCH_BUILD_ID = 'contact-search-strict-v1.0.38';
-
 const normalizeText = (value: unknown): string => {
   if (!value) return '';
   return String(value).toLowerCase().trim().replace(/\s+/g, ' ');
@@ -468,9 +466,6 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
   // Keep the rendered collection explicit so device diagnostics can prove that
   // the visible rows come from the filtered result rather than the source list.
   const renderedContacts = contactSearchMatches.map((entry) => entry.contact);
-  const matchByContactId = new Map<string, ContactSearchMatch>(
-    contactSearchMatches.map((entry): [string, ContactSearchMatch] => [entry.contact.id, entry.match])
-  );
 
   const toggleSelect = (contact: ContactItem) => {
     if (contact.isExistingLead || isImporting) {
@@ -756,13 +751,6 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
               />
             </div>
 
-            <div
-              data-contact-search-debug
-              className="text-[9px] leading-tight text-slate-400 dark:text-slate-500"
-            >
-              query=&quot;{search}&quot; · total={contacts.length} · filtered={contactSearchMatches.length} · rendered={renderedContacts.length} · build={CONTACT_SEARCH_BUILD_ID}
-            </div>
-
             <div className="flex items-center justify-between text-xs">
               <button
                 type="button"
@@ -872,7 +860,6 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
             renderedContacts.map((contact) => {
               const isSelected = selectedIds.has(contact.id);
               const isDuplicate = Boolean(contact.isExistingLead);
-              const searchMatch = matchByContactId.get(contact.id);
 
               return (
                 <div
@@ -914,9 +901,6 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
                       </div>
                       <div className="text-[11px] text-slate-400">
                         {contact.phone || 'No phone number'} {contact.suggestedLocality && `• ${contact.suggestedLocality}`}
-                      </div>
-                      <div className="text-[9px] text-sky-600 dark:text-sky-400">
-                        matchedBy={searchMatch?.matchedBy || 'none'} · matchedValue={searchMatch?.matchedValue || 'none'}
                       </div>
                     </div>
                   </div>
