@@ -102,7 +102,7 @@ export const AuthFlow: React.FC<AuthFlowProps> = () => {
         {/* Brand Header */}
         <div className="flex flex-col items-center text-center mb-8">
           <div className="relative mb-4">
-            <PropLeadLogo className="w-18 h-18 rounded-3xl shadow-xl shadow-blue-600/20" />
+            <PropLeadLogo className="w-18 h-18" showShadow={false} />
           </div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-white">
             PropLead for Agents

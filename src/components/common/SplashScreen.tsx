@@ -21,9 +21,8 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ className = '' }) =>
     >
       {/* Stable final-size logo and brand. No entrance motion or responsive resizing. */}
       <div className="flex flex-col items-center justify-center text-center px-4">
-        <div className="relative flex items-center justify-center">
-          <div className="absolute -inset-2 bg-blue-500/15 dark:bg-blue-500/20 rounded-3xl blur-md" />
-          <PropLeadLogo className="w-20 h-20 rounded-2xl shadow-xl shadow-blue-600/20" />
+        <div className="flex items-center justify-center">
+          <PropLeadLogo className="w-24 h-24" showShadow={false} />
         </div>
 
         <div className="mt-5 flex flex-col items-center">

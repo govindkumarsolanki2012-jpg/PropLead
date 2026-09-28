@@ -91,7 +91,7 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
         <div className="relative px-6 pt-8 pb-6 bg-gradient-to-b from-emerald-50/80 via-teal-50/40 to-transparent dark:from-emerald-950/30 dark:via-slate-900 dark:to-transparent text-center">
           <div className="inline-flex items-center justify-center mb-4">
             {step === 1 && !isSubscribed ? (
-              <PropLeadLogo className="w-16 h-16 rounded-2xl shadow-xl shadow-blue-600/25" />
+              <PropLeadLogo className="w-16 h-16" showShadow={false} />
             ) : (
               <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white shadow-xl shadow-emerald-600/25">
                 <CheckCircle2 className="w-8 h-8" />

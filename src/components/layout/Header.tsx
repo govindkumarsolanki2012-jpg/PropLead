@@ -57,7 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Brand & Agency */}
         <div id="header-brand-section" className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1 mr-0.5 sm:mr-1">
           <div id="header-brand-logo" className="flex-shrink-0">
-            <PropLeadLogo className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl shadow-xs" />
+            <PropLeadLogo className="w-8 h-8 sm:w-9 sm:h-9" showShadow={false} />
           </div>
           <div className="min-w-0 flex-1 overflow-hidden">
             <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">

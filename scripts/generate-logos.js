@@ -1,4 +1,7 @@
-<?xml version="1.0" encoding="UTF-8"?>
+import fs from 'fs';
+import { Resvg } from '@resvg/resvg-js';
+
+const svgContent = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
   <rect width="1024" height="1024" fill="#FFFFFF" />
 
@@ -45,4 +48,21 @@
   <circle cx="616" cy="716" r="92" fill="#FFFFFF" />
   <circle cx="616" cy="716" r="82" fill="url(#badgeGrad)" />
   <path d="M 580 716 L 604 740 L 656 688" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" />
-</svg>
+</svg>`;
+
+fs.writeFileSync('public/logo.svg', svgContent);
+
+const resvg = new Resvg(svgContent, { fitTo: { mode: 'width', value: 1024 } });
+const pngBuffer = resvg.render().asPng();
+
+fs.writeFileSync('public/logo.png', pngBuffer);
+fs.writeFileSync('src/assets/logo.png', pngBuffer);
+fs.writeFileSync('public/favicon.png', pngBuffer);
+
+const resvg192 = new Resvg(svgContent, { fitTo: { mode: 'width', value: 192 } });
+fs.writeFileSync('public/icon-192.png', resvg192.render().asPng());
+
+const resvg512 = new Resvg(svgContent, { fitTo: { mode: 'width', value: 512 } });
+fs.writeFileSync('public/icon-512.png', resvg512.render().asPng());
+
+console.log('Logos generated successfully!');

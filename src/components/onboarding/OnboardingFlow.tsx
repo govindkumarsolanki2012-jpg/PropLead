@@ -89,7 +89,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete }) =>
       {step === 2 && (
         <div className="flex-1 flex flex-col justify-between py-6">
           <div className="flex justify-center pt-8">
-            <PropLeadLogo className="w-16 h-16 rounded-2xl shadow-xl shadow-blue-600/20" />
+            <PropLeadLogo className="w-16 h-16" showShadow={false} />
           </div>
 
           <div className="text-center my-auto px-2">

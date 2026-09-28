@@ -13,10 +13,10 @@ interface PropLeadLogoProps {
  * lime-green growth arrow, agent bust, and checklist clipboard.
  */
 export const PropLeadLogo: React.FC<PropLeadLogoProps> = ({
-  className = 'w-8 h-8 rounded-xl',
+  className = 'w-8 h-8',
   size,
-  alt = 'PropLead for Agents Logo',
-  showShadow = true,
+  alt = 'PropLead Logo',
+  showShadow = false,
 }) => {
   const style: React.CSSProperties = size
     ? { width: size, height: size, objectFit: 'contain' }
@@ -27,7 +27,7 @@ export const PropLeadLogo: React.FC<PropLeadLogoProps> = ({
       src="/logo.png"
       alt={alt}
       style={style}
-      className={`select-none flex-shrink-0 ${showShadow ? 'shadow-xs' : ''} ${className}`}
+      className={`select-none flex-shrink-0 object-contain aspect-square ${showShadow ? 'drop-shadow-xs' : ''} ${className}`}
       loading="eager"
       decoding="async"
     />

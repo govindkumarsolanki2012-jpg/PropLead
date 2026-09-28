@@ -28,6 +28,62 @@ import {
   getNativeDeviceContacts,
 } from '../../utils/nativePermissions';
 
+const normalizeText = (value: unknown): string => {
+  if (!value) return '';
+  return String(value).toLowerCase().trim().replace(/\s+/g, ' ');
+};
+
+const normalizePhone = (value: unknown): string => {
+  if (!value) return '';
+  let s = String(value).toLowerCase().trim();
+  s = s.replace(/[\s\-().+]/g, '');
+  if (s.startsWith('91') && s.length > 10) {
+    s = s.substring(2);
+  }
+  if (s.startsWith('0') && s.length > 10) {
+    s = s.substring(1);
+  }
+  return s;
+};
+
+const getContactSearchText = (contact: any): { nameText: string; phoneText: string } => {
+  const names: string[] = [];
+  const phones: string[] = [];
+
+  if (contact.name) {
+    if (typeof contact.name === 'string') {
+      names.push(contact.name);
+    } else if (typeof contact.name === 'object') {
+      if (contact.name.display) names.push(contact.name.display);
+      if (contact.name.given) names.push(contact.name.given);
+      if (contact.name.family) names.push(contact.name.family);
+      if (contact.name.middle) names.push(contact.name.middle);
+    }
+  }
+  if (contact.displayName) names.push(contact.displayName);
+  if (contact.suggestedLocality) names.push(contact.suggestedLocality);
+
+  if (contact.phone) phones.push(contact.phone);
+  if (contact.phoneNumber) phones.push(contact.phoneNumber);
+  if (contact.phoneNumbers && Array.isArray(contact.phoneNumbers)) {
+    for (const p of contact.phoneNumbers) {
+      if (typeof p === 'string') phones.push(p);
+      else if (p && typeof p.number === 'string') phones.push(p.number);
+    }
+  }
+  if (contact.phones && Array.isArray(contact.phones)) {
+    for (const p of contact.phones) {
+      if (typeof p === 'string') phones.push(p);
+      else if (p && typeof p.number === 'string') phones.push(p.number);
+    }
+  }
+
+  const nameText = normalizeText(names.join(' '));
+  const phoneText = phones.map((p) => normalizePhone(p)).join(' ');
+
+  return { nameText, phoneText };
+};
+
 export interface ContactItem {
   id: string;
   name: string;
@@ -373,26 +429,19 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
   };
 
   const filteredContacts = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return contacts;
+    const qText = normalizeText(search);
+    const qPhone = normalizePhone(search);
 
-    const qDigits = q.replace(/\D/g, '');
+    if (!qText && !qPhone) {
+      return contacts;
+    }
 
-    return contacts.filter((c) => {
-      const nameMatch = c.name.toLowerCase().includes(q);
-      const localityMatch = c.suggestedLocality?.toLowerCase().includes(q) || false;
-
-      const cleanPhone = c.phone.replace(/\D/g, '');
-      const phoneCleanedQuery = c.phone.toLowerCase().replace(/[\s\-()]/g, '');
-      const searchCleanedQuery = q.replace(/[\s\-()]/g, '');
-
-      const phoneMatch =
-        (qDigits.length > 0 && cleanPhone.includes(qDigits)) ||
-        phoneCleanedQuery.includes(searchCleanedQuery) ||
-        c.phone.includes(search);
-
-      return nameMatch || localityMatch || phoneMatch;
+    const filtered = contacts.filter((contact) => {
+      const { nameText, phoneText } = getContactSearchText(contact);
+      return nameText.includes(qText) || (qPhone.length > 0 && phoneText.includes(qPhone));
     });
+
+    return filtered;
   }, [contacts, search]);
 
   const toggleSelect = (contact: ContactItem) => {
