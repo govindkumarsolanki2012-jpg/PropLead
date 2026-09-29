@@ -839,7 +839,7 @@ export function evaluateBhkMatch(
   propType?: PropertyType
 ): { score: number; reason?: string } {
   // Non-residential or plots don't strictly require BHK
-  if (propType === 'plot' || propType === 'commercial') {
+  if (propType === 'plot' || propType === 'land' || propType === 'commercial' || propType === 'farmhouse') {
     return { score: 10 };
   }
 

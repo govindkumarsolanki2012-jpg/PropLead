@@ -26,20 +26,47 @@ export function generateCustomerPropertyMessage(
 
   const greeting = customCustomerName ? `Hello ${customCustomerName},\n\n` : `Hello,\n\n`;
 
+  const isPlotOrLand = property.propertyType === 'plot' || property.propertyType === 'land';
+  const isCommercial = property.propertyType === 'commercial';
+  const isFarmhouse = property.propertyType === 'farmhouse';
+
   let details = `${greeting}🌟 *NEW PROPERTY RECOMMENDATION*\n\n`;
   details += `🏡 *${property.title}*\n`;
   details += `📍 *Location:* ${property.locality}, ${property.city}\n\n`;
 
   details += `📋 *Property Highlights:*\n`;
-  details += `• *Type:* ${typeLabel} ${property.bhk ? `(${property.bhk})` : ''}\n`;
+  details += `• *Type:* ${typeLabel}\n`;
+
+  if (!isPlotOrLand && !isCommercial && property.bhk) {
+    details += `• *Configuration:* ${property.bhk}\n`;
+  }
+  if (isCommercial && property.commercialType) {
+    details += `• *Commercial Type:* ${property.commercialType}\n`;
+  }
+
   details += `• *Pricing:* *${priceFormatted}*\n`;
-  if (property.superBuiltUpAreaSqFt) {
-    details += `• *Super Built-Up Area:* ${property.superBuiltUpAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
+
+  if (isPlotOrLand && property.plotAreaSqFt) {
+    details += `• *Plot Area:* ${property.plotAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
+  } else if (isFarmhouse) {
+    if (property.landAreaSqFt) details += `• *Land Area:* ${property.landAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
+    if (property.builtUpAreaSqFt) details += `• *Built-Up Area:* ${property.builtUpAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
+  } else if (isCommercial) {
+    if (property.carpetAreaSqFt) details += `• *Carpet Area:* ${property.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
+    if (property.builtUpAreaSqFt) details += `• *Built-Up Area:* ${property.builtUpAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
+  } else {
+    if (property.superBuiltUpAreaSqFt) {
+      details += `• *Super Built-Up Area:* ${property.superBuiltUpAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
+    }
+    if (property.carpetAreaSqFt) {
+      details += `• *Carpet Area:* ${property.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
+    }
+    if (property.plotAreaSqFt) {
+      details += `• *Plot Area:* ${property.plotAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
+    }
   }
-  if (property.carpetAreaSqFt) {
-    details += `• *Carpet Area:* ${property.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
-  }
-  if (property.furnishing) {
+
+  if (!isPlotOrLand && property.furnishing) {
     const furnishingLabel =
       property.furnishing === 'fully_furnished'
         ? 'Fully Furnished'
@@ -48,12 +75,21 @@ export function generateCustomerPropertyMessage(
         : 'Unfurnished';
     details += `• *Furnishing:* ${furnishingLabel}\n`;
   }
-  if (property.floor) {
+
+  if (!isPlotOrLand && !isFarmhouse && property.floor) {
     details += `• *Floor:* ${property.floor}\n`;
   }
+
   if (property.facing) {
-    details += `• *Facing:* ${property.facing} Facing (Vastu Compliant)\n`;
+    details += `• *Facing:* ${property.facing} Facing\n`;
   }
+
+  if (isPlotOrLand) {
+    if (property.roadWidthFt) details += `• *Road Width:* ${property.roadWidthFt} ft\n`;
+    if (property.isCornerPlot) details += `• *Corner Plot:* Yes\n`;
+    if (property.boundaryWall) details += `• *Boundary Wall:* ${property.boundaryWall}\n`;
+  }
+
   details += `• *Status:* ${
     property.status === 'available'
       ? 'Ready to Move / Available'

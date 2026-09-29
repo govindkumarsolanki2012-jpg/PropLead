@@ -289,6 +289,28 @@ export interface Property {
   bhk?: string; // '1 BHK', '2 BHK', '3 BHK', etc.
   carpetAreaSqFt?: number;
   superBuiltUpAreaSqFt?: number;
+  totalFloors?: string;
+  plotAreaSqFt?: number;
+  builtUpAreaSqFt?: number;
+  landAreaSqFt?: number;
+  terraceAreaSqFt?: number;
+  balconies?: number;
+  parking?: string;
+  lift?: boolean;
+  roadWidthFt?: number;
+  isCornerPlot?: boolean;
+  boundaryWall?: boolean | string;
+  approvalType?: string;
+  waterSupply?: string;
+  electricitySupply?: string;
+  commercialType?: string;
+  washrooms?: string | number;
+  frontageFt?: number;
+  suitableFor?: string;
+  bedrooms?: string | number;
+  roadAccess?: string;
+  waterSource?: string;
+  farmGarden?: boolean;
   locality: string; // Customer-facing (e.g. 'MVP Colony')
   city: string; // Customer-facing (e.g. 'Visakhapatnam')
   amenities: string[];

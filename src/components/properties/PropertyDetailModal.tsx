@@ -436,49 +436,88 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
                 </div>
 
                 <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-                  <span className="text-[10px] text-slate-400 block font-bold uppercase">Configuration</span>
+                  <span className="text-[10px] text-slate-400 block font-bold uppercase">Property Type</span>
                   <span className="text-sm font-extrabold text-slate-800 dark:text-slate-200">
-                    {property.bhk || 'Plot / Space'}
-                  </span>
-                  <span className="text-[10px] text-slate-500 block">
                     {PROPERTY_TYPE_LABELS[property.propertyType]}
                   </span>
-                </div>
-
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-                  <span className="text-[10px] text-slate-400 block font-bold uppercase">Area</span>
-                  <span className="text-sm font-extrabold text-slate-800 dark:text-slate-200">
-                    {property.superBuiltUpAreaSqFt
-                      ? `${property.superBuiltUpAreaSqFt} sq.ft`
-                      : property.carpetAreaSqFt
-                      ? `${property.carpetAreaSqFt} sq.ft`
-                      : 'On Request'}
-                  </span>
-                  {property.carpetAreaSqFt && (
-                    <span className="text-[10px] text-slate-500 block">
-                      Carpet: {property.carpetAreaSqFt} sq.ft
-                    </span>
+                  {property.bhk && property.propertyType !== 'plot' && property.propertyType !== 'land' && property.propertyType !== 'commercial' && (
+                    <span className="text-[10px] text-slate-500 block">{property.bhk}</span>
+                  )}
+                  {property.propertyType === 'commercial' && property.commercialType && (
+                    <span className="text-[10px] text-slate-500 block">{property.commercialType}</span>
                   )}
                 </div>
 
                 <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-                  <span className="text-[10px] text-slate-400 block font-bold uppercase">Facing & Floor</span>
-                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                    {property.facing || 'East'} Facing
+                  <span className="text-[10px] text-slate-400 block font-bold uppercase">
+                    {property.propertyType === 'plot' || property.propertyType === 'land' ? 'Plot Area' : property.propertyType === 'farmhouse' ? 'Land Area' : 'Area'}
                   </span>
-                  <span className="text-[10px] text-slate-500 block">
-                    {property.floor || 'Standard Floor'}
+                  <span className="text-sm font-extrabold text-slate-800 dark:text-slate-200">
+                    {property.plotAreaSqFt
+                      ? `${property.plotAreaSqFt.toLocaleString('en-IN')} sq.ft`
+                      : property.landAreaSqFt
+                      ? `${property.landAreaSqFt.toLocaleString('en-IN')} sq.ft`
+                      : property.superBuiltUpAreaSqFt
+                      ? `${property.superBuiltUpAreaSqFt.toLocaleString('en-IN')} sq.ft`
+                      : property.carpetAreaSqFt
+                      ? `${property.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft`
+                      : property.builtUpAreaSqFt
+                      ? `${property.builtUpAreaSqFt.toLocaleString('en-IN')} sq.ft`
+                      : 'On Request'}
                   </span>
+                  {property.carpetAreaSqFt && property.propertyType !== 'plot' && property.propertyType !== 'land' && (
+                    <span className="text-[10px] text-slate-500 block">
+                      Carpet: {property.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft
+                    </span>
+                  )}
                 </div>
 
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-                  <span className="text-[10px] text-slate-400 block font-bold uppercase">Furnishing</span>
-                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                    {property.furnishing && FURNISHING_LABELS[property.furnishing]
-                      ? FURNISHING_LABELS[property.furnishing]
-                      : 'Not Specified'}
-                  </span>
-                </div>
+                {property.propertyType !== 'plot' && property.propertyType !== 'land' && (
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-slate-400 block font-bold uppercase">Facing & Floor</span>
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      {property.facing || 'East'} Facing
+                    </span>
+                    <span className="text-[10px] text-slate-500 block">
+                      {property.floor || property.totalFloors ? `Floor: ${property.floor || 'N/A'} (Total: ${property.totalFloors || 'N/A'})` : 'Standard Floor'}
+                    </span>
+                  </div>
+                )}
+
+                {property.propertyType === 'plot' || property.propertyType === 'land' ? (
+                  <>
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                      <span className="text-[10px] text-slate-400 block font-bold uppercase">Road & Facing</span>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        {property.roadWidthFt ? `${property.roadWidthFt} ft Road` : 'Standard Road'}
+                      </span>
+                      <span className="text-[10px] text-slate-500 block">
+                        {property.facing ? `${property.facing} Facing` : ''} {property.isCornerPlot ? '• Corner Plot' : ''}
+                      </span>
+                    </div>
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                      <span className="text-[10px] text-slate-400 block font-bold uppercase">Boundary & Approval</span>
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        {property.boundaryWall ? `Boundary: ${property.boundaryWall}` : 'Standard'}
+                      </span>
+                      {property.approvalType && (
+                        <span className="text-[10px] text-slate-500 block">Approval: {property.approvalType}</span>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-slate-400 block font-bold uppercase">Furnishing</span>
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      {property.furnishing && FURNISHING_LABELS[property.furnishing]
+                        ? FURNISHING_LABELS[property.furnishing]
+                        : 'Not Specified'}
+                    </span>
+                    {property.parking && (
+                      <span className="text-[10px] text-slate-500 block">Parking: {property.parking}</span>
+                    )}
+                  </div>
+                )}
 
                 <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
                   <span className="text-[10px] text-slate-400 block font-bold uppercase">Locality</span>
