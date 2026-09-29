@@ -28,6 +28,7 @@ import {
   PROPERTY_TYPE_LABELS,
   FURNISHING_LABELS,
   TRANSACTION_TYPE_LABELS,
+  normalizePropertyPhotos,
 } from '../../utils/formatters';
 import { findMatchingLeads } from '../../utils/propertyMatching';
 import { matchPropertyWithCityAliases } from '../../utils/cityAliases';
@@ -473,18 +474,21 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
                       </div>
                     )}
 
-                    {property.photos && property.photos.length > 0 ? (
-                      <img
-                        src={property.photos[0]}
-                        alt={property.title}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-slate-500">
-                        <Building className="w-8 h-8" />
-                      </div>
-                    )}
+                    {(() => {
+                      const propPhotos = normalizePropertyPhotos(property.photos);
+                      return propPhotos.length > 0 ? (
+                        <img
+                          src={propPhotos[0]}
+                          alt={property.title}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-slate-500">
+                          <Building className="w-8 h-8" />
+                        </div>
+                      );
+                    })()}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 sm:hidden" />
 
                     {/* Status Pill */}
@@ -495,9 +499,9 @@ export const PropertiesList: React.FC<PropertiesListProps> = ({
                     </span>
 
                     {/* Photos count */}
-                    {property.photos && property.photos.length > 1 && (
+                    {normalizePropertyPhotos(property.photos).length > 1 && (
                       <span className="absolute bottom-2.5 right-2.5 px-1.5 py-0.5 bg-black/60 backdrop-blur-xs text-white text-[10px] font-bold rounded">
-                        📸 {property.photos.length}
+                        📸 {normalizePropertyPhotos(property.photos).length}
                       </span>
                     )}
                   </div>

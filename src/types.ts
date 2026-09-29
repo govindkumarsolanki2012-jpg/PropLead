@@ -268,6 +268,17 @@ export interface PropertyDocument {
   createdAt: string;
 }
 
+export interface PropertyPhoto {
+  id: string;
+  downloadURL: string;
+  downloadUrl?: string;
+  storagePath: string;
+  fileName: string;
+  contentType: string;
+  createdAt: string;
+  url?: string;
+}
+
 export interface Property {
   id: string;
   title: string;
@@ -285,7 +296,7 @@ export interface Property {
   floor?: string;
   facing?: FacingDirection;
   status: PropertyStatus;
-  photos: string[];
+  photos: (string | PropertyPhoto)[];
 
   // PRIVATE OWNER & AGENT DETAILS (NEVER SHARED WITH CUSTOMERS)
   ownerName: string;

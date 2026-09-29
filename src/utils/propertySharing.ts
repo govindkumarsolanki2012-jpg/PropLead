@@ -1,5 +1,5 @@
 import { Property, UserProfile } from '../types';
-import { formatIndianCurrency, PROPERTY_TYPE_LABELS } from './formatters';
+import { formatIndianCurrency, PROPERTY_TYPE_LABELS, normalizePropertyPhotos } from './formatters';
 import { openWhatsApp } from './whatsapp';
 
 /**
@@ -72,7 +72,7 @@ export function generateCustomerPropertyMessage(
 
   // Include photo links if available (first 2-3 links)
   if (property.photos && property.photos.length > 0) {
-    const validUrlPhotos = property.photos.filter((p) => p.startsWith('http'));
+    const validUrlPhotos = normalizePropertyPhotos(property.photos);
     if (validUrlPhotos.length > 0) {
       details += `📸 *Photos & View:*\n`;
       validUrlPhotos.slice(0, 2).forEach((url, i) => {

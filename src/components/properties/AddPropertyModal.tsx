@@ -28,13 +28,14 @@ import {
   FacingDirection,
   UserProfile,
 } from '../../types';
-import { formatIndianCurrency } from '../../utils/formatters';
+import { formatIndianCurrency, getPropertyPhotoUrl } from '../../utils/formatters';
 import { auth } from '../../lib/firebase';
 import {
   uploadPropertyPhotoToStorage,
   validateAttachmentFile,
   UploadProgress,
 } from '../../utils/attachmentStorage';
+import { PropertyPhoto } from '../../types';
 
 interface AddPropertyModalProps {
   isOpen: boolean;
@@ -70,6 +71,9 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [formPropertyId, setFormPropertyId] = useState<string>(
+    () => `prop_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`
+  );
   const [title, setTitle] = useState<string>('');
   const [transactionType, setTransactionType] = useState<PropertyTransactionType>('sale');
   const [propertyType, setPropertyType] = useState<PropertyType>('flat');
@@ -85,7 +89,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
   const [facing, setFacing] = useState<FacingDirection | ''>('');
   const [status, setStatus] = useState<PropertyStatus>('available');
   const [amenities, setAmenities] = useState<string[]>([]);
-  const [photos, setPhotos] = useState<string[]>([]);
+  const [photos, setPhotos] = useState<(string | PropertyPhoto)[]>([]);
 
   // PRIVATE OWNER FIELDS
   const [ownerName, setOwnerName] = useState<string>('');
@@ -98,6 +102,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const resetForm = useCallback(() => {
+    setFormPropertyId(`prop_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
     setTitle('');
     setTransactionType('sale');
     setPropertyType('flat');
@@ -163,7 +168,6 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
     setPhotoUploadProgress({ percent: 0, statusText: 'Uploading...' });
 
     const newlyFailed: File[] = [];
-    const tempPropId = `prop_${Date.now()}`;
 
     try {
       for (let i = 0; i < fileList.length; i++) {
@@ -175,9 +179,9 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
         }
 
         try {
-          const { downloadUrl } = await uploadPropertyPhotoToStorage({
+          const photoMeta = await uploadPropertyPhotoToStorage({
             userId: currentUid,
-            propertyId: tempPropId,
+            propertyId: formPropertyId,
             file,
             onProgress: (progress) => {
               const prefix = fileList.length > 1 ? `Photo ${i + 1}/${fileList.length}: ` : '';
@@ -187,7 +191,8 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
               });
             },
           });
-          setPhotos((prev) => [...prev, downloadUrl]);
+          setPhotos((prev) => [...prev, photoMeta]);
+          console.log('[AddPropertyModal] photo upload success and added to state:', photoMeta);
         } catch (storageErr: any) {
           console.error('[AddPropertyModal] Photo upload failed:', storageErr);
           newlyFailed.push(file);
@@ -244,7 +249,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
     }
 
     const newProperty: Property = {
-      id: `prop_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: formPropertyId,
       title: title.trim(),
       propertyType,
       transactionType,
@@ -271,6 +276,8 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
       updatedAt: new Date().toISOString().split('T')[0],
     };
 
+    console.log('[AddPropertyModal] final saved photo field:', newProperty.photos);
+
     try {
       setIsSubmitting(true);
       const saveFn = onSaveProperty || onSave;
@@ -281,14 +288,16 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
           photoCount: newProperty.photos.length,
           title: newProperty.title,
         });
+        console.log('[Firestore update success/failure] Firestore save success for property:', newProperty.id);
       }
       setIsSubmitting(false);
       resetForm();
       onClose();
     } catch (err: any) {
       console.warn('Notice adding property:', err);
+      console.error('[Firestore update success/failure] Firestore save failure for property:', newProperty.id, err);
       setIsSubmitting(false);
-      setErrorMessage(err?.message || 'Failed to add property. Please try again.');
+      setErrorMessage(err?.message || 'Could not save property. Please try again.');
     }
   };
 
@@ -623,13 +632,13 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
 
             {/* Photo Previews Grid */}
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-              {photos.map((url, idx) => (
+              {photos.map((photo, idx) => (
                 <div
                   key={idx}
                   className="relative group rounded-xl overflow-hidden aspect-4/3 border border-slate-200 dark:border-slate-700"
                 >
                   <img
-                    src={url}
+                    src={getPropertyPhotoUrl(photo)}
                     alt={`Photo ${idx + 1}`}
                     referrerPolicy="no-referrer"
                     className="w-full h-full object-cover"

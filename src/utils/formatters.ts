@@ -329,3 +329,17 @@ export const TRANSACTION_TYPE_LABELS: Record<PropertyTransactionType, { label: s
   lease: { label: 'Commercial Lease', badge: 'bg-purple-100 dark:bg-purple-950/60 text-purple-800 dark:text-purple-300 border-purple-200 dark:border-purple-800' },
 };
 
+import { PropertyPhoto } from '../types';
+
+export function getPropertyPhotoUrl(photo: string | PropertyPhoto | undefined | null): string {
+  if (!photo) return '';
+  if (typeof photo === 'string') return photo;
+  return photo.downloadURL || photo.url || '';
+}
+
+export function normalizePropertyPhotos(photos: (string | PropertyPhoto)[] | undefined | null): string[] {
+  if (!photos || !Array.isArray(photos)) return [];
+  return photos.map(p => getPropertyPhotoUrl(p)).filter(Boolean);
+}
+
+

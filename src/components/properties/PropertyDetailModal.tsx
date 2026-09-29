@@ -35,9 +35,11 @@ import {
   TRANSACTION_TYPE_LABELS,
   formatDisplayPhone,
   formatBudgetRange,
+  normalizePropertyPhotos,
 } from '../../utils/formatters';
 import { findMatchingLeads } from '../../utils/propertyMatching';
 import { openDialer, openWhatsApp } from '../../utils/whatsapp';
+import { generateCustomerPropertyMessage, openWhatsAppPropertyShare } from '../../utils/propertySharing';
 
 interface PropertyDetailModalProps {
   isOpen: boolean;
@@ -49,6 +51,7 @@ interface PropertyDetailModalProps {
   onDeleteProperty: (propertyId: string) => Promise<void | boolean> | void;
   onOpenShareModal?: (property: Property, preselectedLead?: Lead | null) => void;
   onShareToLead?: (property: Property, preselectedLead?: Lead | null) => void;
+  onOpenShare?: (property: Property, preselectedLead?: Lead | null) => void;
   onOpenEditModal?: (property: Property) => void;
   onOpenEdit?: (property: Property) => void;
   onOpenScheduleVisit?: (lead: Lead, propertyNote?: string) => void;
@@ -64,6 +67,7 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
   onDeleteProperty,
   onOpenShareModal,
   onShareToLead,
+  onOpenShare,
   onOpenEditModal,
   onOpenEdit,
   onOpenScheduleVisit,
@@ -75,10 +79,21 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleShare = (prop: Property, preselectedLead?: Lead | null) => {
-    if (typeof onOpenShareModal === 'function') {
-      onOpenShareModal(prop, preselectedLead);
-    } else if (typeof onShareToLead === 'function') {
-      onShareToLead(prop, preselectedLead);
+    console.log('Property modal share clicked');
+    console.log('selected property id:', prop?.id);
+    console.log('selected property title/name:', prop?.title || prop?.locality);
+
+    const shareFn = onOpenShare || onOpenShareModal || onShareToLead;
+    const message = generateCustomerPropertyMessage(prop, profile, preselectedLead?.name);
+    const urlGenerated = Boolean(message && message.length > 0);
+    console.log('whether WhatsApp/share URL was generated:', urlGenerated);
+
+    if (shareFn) {
+      console.log('whether native share/WhatsApp open was called:', true, '(via share modal)');
+      shareFn(prop, preselectedLead);
+    } else {
+      console.log('whether native share/WhatsApp open was called:', true, '(via direct WhatsApp link)');
+      openWhatsAppPropertyShare(prop, preselectedLead?.phone, profile, preselectedLead?.name);
     }
   };
 
@@ -91,6 +106,13 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
   };
 
   if (!isOpen) return null;
+
+  const propertyPhotos = normalizePropertyPhotos(property.photos);
+  console.log('[PropertyDetailModal] photo field loaded when reopening property:', {
+    propertyId: property.id,
+    rawPhotos: property.photos,
+    normalizedPhotos: propertyPhotos,
+  });
 
   const statusInfo = PROPERTY_STATUS_CONFIG[property.status] || PROPERTY_STATUS_CONFIG.available;
   const isRent = property.transactionType === 'rent' || property.transactionType === 'lease';
@@ -123,13 +145,13 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
   };
 
   const nextPhoto = () => {
-    if (!property.photos || property.photos.length === 0) return;
-    setActivePhotoIdx((prev) => (prev + 1) % property.photos.length);
+    if (propertyPhotos.length === 0) return;
+    setActivePhotoIdx((prev) => (prev + 1) % propertyPhotos.length);
   };
 
   const prevPhoto = () => {
-    if (!property.photos || property.photos.length === 0) return;
-    setActivePhotoIdx((prev) => (prev - 1 + property.photos.length) % property.photos.length);
+    if (propertyPhotos.length === 0) return;
+    setActivePhotoIdx((prev) => (prev - 1 + propertyPhotos.length) % propertyPhotos.length);
   };
 
   return (
@@ -265,10 +287,10 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
         {/* Scrollable Modal Body */}
         <div className="overflow-y-auto flex-1 space-y-4 p-4 sm:p-5">
           {/* Hero Photo Carousel */}
-          {property.photos && property.photos.length > 0 ? (
+          {propertyPhotos.length > 0 ? (
             <div className="relative rounded-2xl overflow-hidden aspect-16/9 bg-slate-900 shadow-md group">
               <img
-                src={property.photos[activePhotoIdx] || property.photos[0]}
+                src={propertyPhotos[activePhotoIdx] || propertyPhotos[0]}
                 alt={property.title}
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover"
@@ -277,11 +299,11 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
 
               {/* Photos count badge */}
               <div className="absolute top-3 right-3 px-2 py-1 bg-black/60 backdrop-blur-md rounded-lg text-white text-[11px] font-bold">
-                {activePhotoIdx + 1} / {property.photos.length}
+                {activePhotoIdx + 1} / {propertyPhotos.length}
               </div>
 
               {/* Prev / Next controls */}
-              {property.photos.length > 1 && (
+              {propertyPhotos.length > 1 && (
                 <>
                   <button
                     onClick={prevPhoto}

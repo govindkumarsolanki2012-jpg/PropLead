@@ -741,7 +741,9 @@ export async function getPropertiesFromFirestore(userId: string): Promise<Proper
       if (DEMO_PROP_IDS.has(docSnap.id)) {
         deleteDoc(docSnap.ref).catch(() => {});
       } else {
-        validProps.push(docSnap.data() as Property);
+        const propData = docSnap.data() as Property;
+        console.log('[Firestore] property loaded:', { propertyId: propData.id, photos: propData.photos });
+        validProps.push(propData);
       }
     });
     return validProps;
@@ -764,7 +766,9 @@ export function subscribePropertiesFromFirestore(
         if (DEMO_PROP_IDS.has(docSnap.id)) {
           deleteDoc(docSnap.ref).catch(() => {});
         } else {
-          validProps.push(docSnap.data() as Property);
+          const propData = docSnap.data() as Property;
+          console.log('[Firestore] property loaded from snapshot:', { propertyId: propData.id, photos: propData.photos });
+          validProps.push(propData);
         }
       });
       validProps.sort((a, b) => {
@@ -782,18 +786,36 @@ export function subscribePropertiesFromFirestore(
 
 export async function addPropertyToFirestore(userId: string, property: Property): Promise<void> {
   const propRef = doc(db, 'users', userId, 'properties', property.id);
-  await setDoc(propRef, cleanFirestorePayload({
-    ...property,
-    updatedAt: new Date().toISOString(),
-  }));
+  try {
+    await setDoc(propRef, cleanFirestorePayload({
+      ...property,
+      updatedAt: new Date().toISOString(),
+    }));
+    console.log('[Firestore] addPropertyToFirestore success:', {
+      propertyId: property.id,
+      finalSavedPhotos: property.photos,
+    });
+  } catch (err) {
+    console.error('[Firestore] addPropertyToFirestore failure:', err);
+    throw err;
+  }
 }
 
 export async function updatePropertyInFirestore(userId: string, property: Property): Promise<void> {
   const propRef = doc(db, 'users', userId, 'properties', property.id);
-  await setDoc(propRef, cleanFirestorePayload({
-    ...property,
-    updatedAt: new Date().toISOString(),
-  }), { merge: true });
+  try {
+    await setDoc(propRef, cleanFirestorePayload({
+      ...property,
+      updatedAt: new Date().toISOString(),
+    }), { merge: true });
+    console.log('[Firestore] updatePropertyInFirestore success:', {
+      propertyId: property.id,
+      finalSavedPhotos: property.photos,
+    });
+  } catch (err) {
+    console.error('[Firestore] updatePropertyInFirestore failure:', err);
+    throw err;
+  }
 }
 
 export async function deletePropertyFromFirestore(userId: string, propertyId: string): Promise<void> {

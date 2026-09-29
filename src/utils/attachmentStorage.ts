@@ -2,7 +2,7 @@ import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { storage, auth, db } from '../lib/firebase';
 import { cleanFirestorePayload } from '../services/firebaseService';
-import { Attachment, Lead, ActivityLog } from '../types';
+import { Attachment, Lead, ActivityLog, PropertyPhoto } from '../types';
 import { Capacitor } from '@capacitor/core';
 
 export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10MB limit
@@ -432,14 +432,7 @@ export async function uploadPropertyPhotoToStorage({
   propertyId: string;
   file: File | Blob | string;
   onProgress?: (progress: UploadProgress) => void;
-}): Promise<{
-  downloadUrl: string;
-  storagePath: string;
-  fileName: string;
-  fileSize: number;
-  uploadedAt: string;
-  startTime: number;
-}> {
+}): Promise<PropertyPhoto & { fileSize: number; uploadedAt: string; startTime: number }> {
   const startTime = Date.now();
 
   const currentUser = auth.currentUser;
@@ -473,11 +466,20 @@ export async function uploadPropertyPhotoToStorage({
   const timestamp = Date.now();
   const randomSuffix = Math.random().toString(36).substring(2, 8);
   const sanitizedName = (resolved.fileName || 'photo.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
-  const fileId = `${timestamp}_${randomSuffix}_${sanitizedName}`;
-  const storagePath = `users/${currentUid}/properties/${propertyId}/photos/${fileId}`;
+  const fileId = `${timestamp}_${randomSuffix}`;
+  const ext = sanitizedName.includes('.') ? sanitizedName.split('.').pop() : 'jpg';
+  const storagePath = `users/${currentUid}/properties/${propertyId}/photos/${fileId}.${ext}`;
+
+  console.log('[PropertyPhotoUpload] upload started', {
+    propertyId,
+    userId: currentUid,
+    selectedImageSource: resolved.fileName,
+    blobSize: compressedBlob.size,
+    storagePath,
+  });
 
   const metadata = {
-    contentType: 'image/jpeg',
+    contentType: resolved.blob.type || 'image/jpeg',
     customMetadata: {
       userId: currentUid,
       propertyId,
@@ -494,9 +496,9 @@ export async function uploadPropertyPhotoToStorage({
 
   try {
     const uploadResult = await uploadBytes(storageRef, compressedBlob, metadata);
-    console.log('[Firebase Storage] Photo uploaded successfully:', uploadResult.ref.fullPath);
+    console.log('[PropertyPhotoUpload] upload success', { storagePath, fullPath: uploadResult.ref.fullPath });
   } catch (uploadErr: any) {
-    console.error('[Firebase Storage Error] Photo uploadBytes failed:', uploadErr);
+    console.error('[PropertyPhotoUpload] upload failure', uploadErr);
     throw new Error(uploadErr?.message || 'Photo upload failed. Please retry.');
   }
 
@@ -508,17 +510,22 @@ export async function uploadPropertyPhotoToStorage({
     if (!downloadUrl || !downloadUrl.startsWith('http')) {
       throw new Error('Invalid download URL returned by Firebase Storage.');
     }
+    console.log('[PropertyPhotoUpload] downloadURL created', { downloadUrl });
   } catch (urlErr: any) {
-    console.error('[Firebase Storage Error] Photo getDownloadURL failed:', urlErr);
+    console.error('[PropertyPhotoUpload] upload failure (getDownloadURL)', urlErr);
     throw new Error(urlErr?.message || 'Failed to retrieve photo download URL.');
   }
 
   onProgress?.({ percent: 100, statusText: 'Upload complete' });
 
   return {
+    id: fileId,
+    downloadURL: downloadUrl,
     downloadUrl,
     storagePath,
     fileName: resolved.fileName,
+    contentType: resolved.blob.type || 'image/jpeg',
+    createdAt: new Date().toISOString(),
     fileSize: compressedBlob.size,
     uploadedAt: new Date().toISOString(),
     startTime,
