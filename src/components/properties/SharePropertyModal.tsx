@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Share2,
@@ -15,9 +15,10 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { Property, Lead, UserProfile } from '../../types';
-import { generateCustomerPropertyMessage, openWhatsAppPropertyShare } from '../../utils/propertySharing';
-import { formatIndianCurrency, PROPERTY_TYPE_LABELS } from '../../utils/formatters';
+import { generateCustomerPropertyMessage, openWhatsAppPropertyShare, getPublicGalleryUrl } from '../../utils/propertySharing';
+import { formatIndianCurrency, PROPERTY_TYPE_LABELS, normalizePropertyPhotos } from '../../utils/formatters';
 import { openWhatsApp, copyUnicodeTextToClipboard } from '../../utils/whatsapp';
+import { savePublicPhotoShare } from '../../services/firebaseService';
 
 interface SharePropertyModalProps {
   isOpen: boolean;
@@ -40,24 +41,58 @@ export const SharePropertyModal: React.FC<SharePropertyModalProps> = ({
   const [customName, setCustomName] = useState<string>(preselectedLead?.name || '');
   const [customPhone, setCustomPhone] = useState<string>(preselectedLead?.phone || '');
   const [copied, setCopied] = useState<boolean>(false);
-  const [editedMessage, setEditedMessage] = useState<string>(() =>
-    generateCustomerPropertyMessage(property, profile, preselectedLead?.name)
-  );
+  const [editedMessage, setEditedMessage] = useState<string>('');
+
+  useEffect(() => {
+    let isMounted = true;
+    async function initShare() {
+      let galleryUrl = getPublicGalleryUrl(property.id);
+      if (property.photos && property.photos.length > 0) {
+        const validUrlPhotos = normalizePropertyPhotos(property.photos);
+        if (validUrlPhotos.length > 0) {
+          try {
+            await savePublicPhotoShare(property.id, validUrlPhotos);
+          } catch (err) {
+            console.warn('Failed to save public photo share:', err);
+          }
+        }
+      }
+      if (isMounted) {
+        setEditedMessage(generateCustomerPropertyMessage(property, profile, preselectedLead?.name, galleryUrl));
+      }
+    }
+    if (isOpen) {
+      initShare();
+    }
+    return () => { isMounted = false; };
+  }, [isOpen, property, profile, preselectedLead]);
 
   if (!isOpen) return null;
 
-  const handleSelectLead = (leadId: string) => {
+  const handleSelectLead = async (leadId: string) => {
     setSelectedLeadId(leadId);
+    let galleryUrl = getPublicGalleryUrl(property.id);
+    if (property.photos && property.photos.length > 0) {
+      const validUrlPhotos = normalizePropertyPhotos(property.photos);
+      if (validUrlPhotos.length > 0) {
+        try {
+          await savePublicPhotoShare(property.id, validUrlPhotos);
+        } catch (err) {
+          console.warn('Failed to save public photo share:', err);
+        }
+      }
+    }
+
     if (leadId === 'custom') {
       setCustomName('');
       setCustomPhone('');
-      setEditedMessage(generateCustomerPropertyMessage(property, profile, ''));
+      setEditedMessage(generateCustomerPropertyMessage(property, profile, '', galleryUrl));
     } else {
       const found = leads.find((l) => l.id === leadId);
       if (found) {
         setCustomName(found.name);
         setCustomPhone(found.phone);
-        setEditedMessage(generateCustomerPropertyMessage(property, profile, found.name));
+        setEditedMessage(generateCustomerPropertyMessage(property, profile, found.name, galleryUrl));
       }
     }
   };
@@ -70,9 +105,9 @@ export const SharePropertyModal: React.FC<SharePropertyModalProps> = ({
     }
   };
 
-  const handleSendWhatsApp = () => {
+  const handleSendWhatsApp = async () => {
     const phoneToUse = customPhone.trim() || '';
-    openWhatsApp(phoneToUse, editedMessage);
+    await openWhatsAppPropertyShare(property, phoneToUse, profile, customName);
     onClose();
   };
 

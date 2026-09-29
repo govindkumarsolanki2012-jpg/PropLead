@@ -836,6 +836,38 @@ export async function batchDeletePropertiesFromFirestore(userId: string, propert
   }
 }
 
+export async function savePublicPhotoShare(propertyId: string, photoUrls: string[]): Promise<string> {
+  const shareId = propertyId;
+  const shareRef = doc(db, 'publicPhotoShares', shareId);
+  try {
+    await setDoc(shareRef, {
+      shareId,
+      propertyId,
+      photoUrls,
+      createdAt: new Date().toISOString(),
+    }, { merge: true });
+    return shareId;
+  } catch (err) {
+    console.error('[Firestore] savePublicPhotoShare error:', err);
+    throw err;
+  }
+}
+
+export async function getPublicPhotoShare(shareId: string): Promise<string[]> {
+  const shareRef = doc(db, 'publicPhotoShares', shareId);
+  try {
+    const snap = await getDoc(shareRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      return Array.isArray(data.photoUrls) ? data.photoUrls : [];
+    }
+    return [];
+  } catch (err) {
+    console.error('[Firestore] getPublicPhotoShare error:', err);
+    return [];
+  }
+}
+
 // --- FIREBASE STORAGE: PROPERTY PHOTOS ---
 
 export async function uploadPropertyPhoto(

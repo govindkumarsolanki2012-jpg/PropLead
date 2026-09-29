@@ -97,6 +97,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Public Photo Shares collection for WhatsApp property photo galleries
+    match /publicPhotoShares/{shareId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
     // Fallback: deny all other paths
     match /{document=**} {
       allow read, write: if false;

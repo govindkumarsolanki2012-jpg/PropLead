@@ -30,6 +30,7 @@ import { AddPropertyModal } from './components/properties/AddPropertyModal';
 import { EditPropertyModal } from './components/properties/EditPropertyModal';
 import { PropertyDetailModal } from './components/properties/PropertyDetailModal';
 import { SharePropertyModal } from './components/properties/SharePropertyModal';
+import { PublicPhotoGalleryView } from './components/properties/PublicPhotoGalleryView';
 import { WelcomeOnboardingModal } from './components/auth/WelcomeOnboardingModal';
 
 // Storage & Types
@@ -85,6 +86,14 @@ import {
 } from './utils/notifications';
 
 export function App() {
+  const [shareGalleryId] = useState<string | null>(() => {
+    const match = window.location.pathname.match(/^\/share\/photos\/([a-zA-Z0-9_-]+)$/);
+    return match ? match[1] : null;
+  });
+
+  if (shareGalleryId) {
+    return <PublicPhotoGalleryView shareId={shareGalleryId} />;
+  }
   // Single fast branded splash shown once after the native Android splash
   const [isSplashActive, setIsSplashActive] = useState<boolean>(true);
   const [isAppContentVisible, setIsAppContentVisible] = useState<boolean>(false);

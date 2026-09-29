@@ -1,7 +1,17 @@
 import { Property, UserProfile } from '../types';
 import { formatIndianCurrency, PROPERTY_TYPE_LABELS, normalizePropertyPhotos } from './formatters';
 import { openWhatsApp } from './whatsapp';
-import { getRelevantPropertySpecs, PROPERTY_TYPE_AMENITIES } from './propertyTypeFields';
+import { savePublicPhotoShare } from '../services/firebaseService';
+
+/**
+ * Get the public photo gallery share URL using Firebase Hosting domain
+ * to prevent 404s and Google login barriers.
+ */
+export function getPublicGalleryUrl(propertyId: string): string {
+  const customBase = typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_PUBLIC_SHARE_BASE_URL;
+  const base = customBase || 'https://proplead-e5c6a.web.app';
+  return `${base}/share/photos/${propertyId}`;
+}
 
 /**
  * Generate a clean, high-converting WhatsApp message for customer sharing.
@@ -12,12 +22,13 @@ import { getRelevantPropertySpecs, PROPERTY_TYPE_AMENITIES } from './propertyTyp
  * - NO Owner Notes / Private Notes
  * - NO Exact Door / Flat / Plot Number
  * - NO Internal documents
- * - Show ONLY general locality & city (e.g. 📍 MVP Colony, Visakhapatnam)
+ * - Show ONLY general locality & city (e.g. MVP Colony, Visakhapatnam)
  */
 export function generateCustomerPropertyMessage(
   property: Property,
   profile?: UserProfile,
-  customCustomerName?: string
+  customCustomerName?: string,
+  galleryUrl?: string
 ): string {
   const isRent = property.transactionType === 'rent' || property.transactionType === 'lease';
   const typeLabel = PROPERTY_TYPE_LABELS[property.propertyType] || 'Property';
@@ -27,61 +38,32 @@ export function generateCustomerPropertyMessage(
 
   const greeting = customCustomerName ? `Hello ${customCustomerName},\n\n` : `Hello,\n\n`;
 
-  let details = `${greeting}🌟 *NEW PROPERTY RECOMMENDATION*\n\n`;
-  details += `🏡 *${property.title}*\n`;
-  details += `📍 *Location:* ${property.locality}, ${property.city}\n\n`;
+  const isPlotOrLand = property.propertyType === 'plot' || property.propertyType === 'land';
+  const statusText = property.status === 'available'
+    ? (isPlotOrLand ? 'Available' : 'Ready to Move / Available')
+    : property.status === 'negotiation'
+    ? 'Under Discussion'
+    : 'Active';
 
-  details += `📋 *Property Highlights:*\n`;
-  details += `• *Type:* ${typeLabel}\n`;
-  details += `• *Pricing:* *${priceFormatted}*\n`;
-  getRelevantPropertySpecs(property).forEach((spec) => {
-    details += `• *${spec.label}:* ${spec.value}\n`;
-  });
-  details += `• *Status:* ${
-    property.status === 'available'
-      ? 'Ready to Move / Available'
-      : property.status === 'negotiation'
-      ? 'Under Discussion'
-      : 'Active'
-  }\n\n`;
+  let details = `${greeting}*NEW PROPERTY RECOMMENDATION*\n\n`;
+  details += `*Property:* ${property.title}\n`;
+  details += `*Location:* ${property.locality}, ${property.city}\n\n`;
 
-  const relevantAmenities = (property.amenities || []).filter((amenity) =>
-    PROPERTY_TYPE_AMENITIES[property.propertyType].includes(amenity)
-  );
-  if (relevantAmenities.length > 0) {
-    details += `✨ *Key Amenities & Features:*\n`;
-    relevantAmenities.slice(0, 8).forEach((amenity) => {
-      details += `✓ ${amenity}\n`;
-    });
-    details += `\n`;
+  details += `*Property Highlights:*\n`;
+  details += `• Type: ${typeLabel}\n`;
+  details += `• Price: ${priceFormatted}\n`;
+  if (property.facing) {
+    details += `• Facing: ${property.facing} Facing\n`;
+  }
+  details += `• Status: ${statusText}\n\n`;
+
+  if (galleryUrl && property.photos && normalizePropertyPhotos(property.photos).length > 0) {
+    details += `*Photos:* ${galleryUrl}\n\n`;
   }
 
-  // Include photo links if available (first 2-3 links)
-  if (property.photos && property.photos.length > 0) {
-    const validUrlPhotos = normalizePropertyPhotos(property.photos);
-    if (validUrlPhotos.length > 0) {
-      details += `📸 *Photos & View:*\n`;
-      validUrlPhotos.slice(0, 2).forEach((url, i) => {
-        details += `Image ${i + 1}: ${url}\n`;
-      });
-      details += `\n`;
-    }
-  }
-
-  details += `---------------------------------\n`;
-  details += `🤝 *Presented by:*\n`;
-  details += `*${profile?.name || 'Property Advisor'}*\n`;
-  if (profile?.agencyName) {
-    details += `${profile.agencyName}\n`;
-  }
-  if (profile?.phone) {
-    details += `📞 Phone/WhatsApp: +91 ${profile.phone}\n`;
-  }
-  if (profile?.reraNumber) {
-    details += `📜 RERA Reg: ${profile.reraNumber}\n`;
-  }
-
-  details += `\n_Reply to this message to schedule a private site visit or discuss customized payment plans._`;
+  details += `--------------------------------\n`;
+  details += `*Presented by:* ${profile?.name || 'Property Advisor'}\n\n`;
+  details += `Reply to this message to schedule a private site visit.`;
 
   return details;
 }
@@ -90,12 +72,24 @@ export function generateCustomerPropertyMessage(
  * Open WhatsApp directly with the customer-safe property message.
  * Ensures UTF-8 encoding, preserving all emojis, ₹ symbols, and formatting.
  */
-export function openWhatsAppPropertyShare(
+export async function openWhatsAppPropertyShare(
   property: Property,
   customerPhone?: string,
   profile?: UserProfile,
   customerName?: string
-): void {
-  const message = generateCustomerPropertyMessage(property, profile, customerName);
+): Promise<void> {
+  const galleryUrl = getPublicGalleryUrl(property.id);
+  if (property.photos && property.photos.length > 0) {
+    const validUrlPhotos = normalizePropertyPhotos(property.photos);
+    if (validUrlPhotos.length > 0) {
+      try {
+        await savePublicPhotoShare(property.id, validUrlPhotos);
+      } catch (err) {
+        console.warn('Failed to save public photo share:', err);
+      }
+    }
+  }
+
+  const message = generateCustomerPropertyMessage(property, profile, customerName, galleryUrl);
   openWhatsApp(customerPhone || '', message);
 }
