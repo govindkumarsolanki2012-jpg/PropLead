@@ -11,17 +11,21 @@ import {
   Clock,
   Sparkles,
   IndianRupee,
+  ChevronRight,
 } from 'lucide-react';
 import { Lead, UserProfile } from '../../types';
 import { formatIndianCurrency, formatRelativeDate } from '../../utils/formatters';
 import { useTranslation } from '../../context/LanguageContext';
+import { auth } from '../../lib/firebase';
 
 interface AnalyticsViewProps {
   leads: Lead[];
   profile: UserProfile;
+  currentUserUid?: string;
+  onNavigateToLeads?: (filter: string) => void;
 }
 
-export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ leads, profile }) => {
+export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ leads, profile, currentUserUid: currentUserUidProp, onNavigateToLeads }) => {
   const { t, translateStatus } = useTranslation();
   const totalLeads = leads.length;
   const closedLeads = leads.filter((l) => l.status === 'closed');
@@ -44,8 +48,17 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ leads, profile }) 
     (l) => l.nextFollowUpDate && formatRelativeDate(l.nextFollowUpDate).isOverdue
   ).length;
   const completedFollowUpsCount = leads.reduce((acc, l) => {
-    return acc + (l.activities?.filter((a) => a.type === 'followup_completed').length || 0);
-  }, 4);
+    return acc + (l.activities?.filter((a) => a.type === 'followup_completed' || a.type === 'site_visit_completed').length || 0);
+  }, 0);
+
+  const currentUserUid = currentUserUidProp || auth.currentUser?.uid || 'guest';
+  console.log('[AnalyticsDebug] Follow-Ups Met calculation:', {
+    currentUserUid,
+    totalLeadsCount: totalLeads,
+    completedFollowUpActivityCount: completedFollowUpsCount,
+    sourceOfCount: leads.length > 0 ? 'Firestore/local storage' : 'empty',
+    finalFollowUpsMetValue: completedFollowUpsCount,
+  });
 
   // Group by lead source
   const sourceMap: Record<string, number> = {};
@@ -109,32 +122,56 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({ leads, profile }) 
 
       {/* KPI Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        <div className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs">
-          <span className="text-[11px] text-slate-400 font-bold uppercase block">{t('analytics_conversion_rate')}</span>
+        <div
+          onClick={() => onNavigateToLeads?.('closed')}
+          className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-95 hover:border-emerald-500/60 transition-all group relative"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-slate-400 font-bold uppercase block">{t('analytics_conversion_rate')}</span>
+            <ChevronRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-emerald-500 transition-colors" />
+          </div>
           <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-0.5">
             {conversionRate}%
           </div>
           <span className="text-[10px] text-slate-500">{t('analytics_won_of_total', { count: closedLeads.length, total: totalLeads })}</span>
         </div>
 
-        <div className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs">
-          <span className="text-[11px] text-slate-400 font-bold uppercase block">{t('analytics_active_pipeline')}</span>
+        <div
+          onClick={() => onNavigateToLeads?.('active')}
+          className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-95 hover:border-slate-400/60 transition-all group relative"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-slate-400 font-bold uppercase block">{t('analytics_active_pipeline')}</span>
+            <ChevronRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-slate-600 transition-colors" />
+          </div>
           <div className="text-2xl font-black text-slate-900 dark:text-white mt-0.5">
             {activeLeads.length}
           </div>
           <span className="text-[10px] text-slate-500">{t('analytics_in_progress')}</span>
         </div>
 
-        <div className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs">
-          <span className="text-[11px] text-slate-400 font-bold uppercase block">{t('analytics_followups_met')}</span>
+        <div
+          onClick={() => onNavigateToLeads?.('followups_met')}
+          className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-95 hover:border-blue-500/60 transition-all group relative"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-slate-400 font-bold uppercase block">{t('analytics_followups_met')}</span>
+            <ChevronRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-blue-500 transition-colors" />
+          </div>
           <div className="text-2xl font-black text-blue-600 dark:text-blue-400 mt-0.5">
             {completedFollowUpsCount}
           </div>
           <span className="text-[10px] text-slate-500">{t('analytics_completed_actions')}</span>
         </div>
 
-        <div className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs">
-          <span className="text-[11px] text-slate-400 font-bold uppercase block">{t('analytics_overdue')}</span>
+        <div
+          onClick={() => onNavigateToLeads?.('overdue')}
+          className="p-3 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-95 hover:border-rose-500/60 transition-all group relative"
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-slate-400 font-bold uppercase block">{t('analytics_overdue')}</span>
+            <ChevronRight className="w-3.5 h-3.5 text-slate-300 group-hover:text-rose-500 transition-colors" />
+          </div>
           <div className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-0.5">
             {overdueCount}
           </div>

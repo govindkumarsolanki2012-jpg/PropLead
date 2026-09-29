@@ -109,6 +109,11 @@ export const LeadsList: React.FC<LeadsListProps> = ({
         if (activeFilter === 'all') return true;
         if (activeFilter === 'today') return formatRelativeDate(lead.nextFollowUpDate).isToday;
         if (activeFilter === 'overdue') return formatRelativeDate(lead.nextFollowUpDate).isOverdue;
+        if (activeFilter === 'active') return lead.status !== 'closed' && lead.status !== 'lost';
+        if (activeFilter === 'closed') return lead.status === 'closed';
+        if (activeFilter === 'followups_met') {
+          return Boolean(lead.activities?.some((a) => a.type === 'followup_completed' || a.type === 'site_visit_completed'));
+        }
         if (activeFilter === 'hot') return lead.priority === 'hot';
         if (activeFilter === 'buy') return lead.requirement === 'buy';
         if (activeFilter === 'rent') return lead.requirement === 'rent';

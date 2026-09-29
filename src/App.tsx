@@ -1466,7 +1466,14 @@ export function App() {
             )}
 
             {currentTab === 'analytics' && (
-              <AnalyticsView leads={leads} profile={profile} />
+              <AnalyticsView
+                leads={leads}
+                profile={profile}
+                onNavigateToLeads={(filter) => {
+                  setLeadsFilter(filter);
+                  handleTabChange('leads');
+                }}
+              />
             )}
 
             {currentTab === 'settings' && (
