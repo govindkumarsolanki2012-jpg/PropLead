@@ -268,14 +268,19 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
     try {
       setIsSubmitting(true);
       const saveFn = onSaveProperty || onSave;
-      if (saveFn) {
-        await saveFn(updatedProperty);
-        console.log('[UPLOAD_STAGE: 10. FIRESTORE_METADATA_SAVED]', {
-          propertyId: updatedProperty.id,
-          photoCount: updatedProperty.photos.length,
-          title: updatedProperty.title,
-        });
+      if (!saveFn) {
+        console.error('[EditPropertyModal] Cannot save property: no save callback was provided.');
+        setIsSubmitting(false);
+        setErrorMessage('Unable to save the property. Please close and reopen it, then try again.');
+        return;
       }
+
+      await saveFn(updatedProperty);
+      console.log('[UPLOAD_STAGE: 10. FIRESTORE_METADATA_SAVED]', {
+        propertyId: updatedProperty.id,
+        photoCount: updatedProperty.photos.length,
+        title: updatedProperty.title,
+      });
       setIsSubmitting(false);
       onClose();
     } catch (err: any) {

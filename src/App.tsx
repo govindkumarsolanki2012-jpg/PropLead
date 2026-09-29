@@ -1632,7 +1632,7 @@ export function App() {
           isOpen={Boolean(editProperty)}
           onClose={() => setEditProperty(null)}
           property={editProperty}
-          onUpdateProperty={handleUpdateProperty}
+          onSaveProperty={handleUpdateProperty}
         />
       )}
 
