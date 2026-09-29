@@ -40,6 +40,7 @@ import {
 import { findMatchingLeads } from '../../utils/propertyMatching';
 import { openDialer, openWhatsApp } from '../../utils/whatsapp';
 import { generateCustomerPropertyMessage, openWhatsAppPropertyShare } from '../../utils/propertySharing';
+import { getRelevantPropertySpecs, isPropertyFieldVisible, PROPERTY_TYPE_AMENITIES } from '../../utils/propertyTypeFields';
 
 interface PropertyDetailModalProps {
   isOpen: boolean;
@@ -117,6 +118,9 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
   const statusInfo = PROPERTY_STATUS_CONFIG[property.status] || PROPERTY_STATUS_CONFIG.available;
   const isRent = property.transactionType === 'rent' || property.transactionType === 'lease';
   const matchingLeads = findMatchingLeads(property, leads);
+  const relevantAmenities = (property.amenities || []).filter((amenity) =>
+    PROPERTY_TYPE_AMENITIES[property.propertyType].includes(amenity)
+  );
 
   const handleStatusChange = (newStatus: PropertyStatus) => {
     onUpdateProperty({
@@ -354,12 +358,12 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
               </h2>
               <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 dark:text-slate-400">
                 <span className="font-bold text-slate-700 dark:text-slate-300">
-                  {property.bhk}
-                  {property.furnishing && FURNISHING_LABELS[property.furnishing]
+                  {isPropertyFieldVisible(property.propertyType, 'bhk') ? property.bhk : ''}
+                  {isPropertyFieldVisible(property.propertyType, 'furnishing') && property.furnishing && FURNISHING_LABELS[property.furnishing]
                     ? ` • ${FURNISHING_LABELS[property.furnishing]}`
                     : ''}
                 </span>
-                {property.facing && <span>• {property.facing} Facing</span>}
+                {isPropertyFieldVisible(property.propertyType, 'facing') && property.facing && <span>• {property.facing} Facing</span>}
               </div>
             </div>
 
@@ -435,89 +439,12 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
                   )}
                 </div>
 
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-                  <span className="text-[10px] text-slate-400 block font-bold uppercase">Property Type</span>
-                  <span className="text-sm font-extrabold text-slate-800 dark:text-slate-200">
-                    {PROPERTY_TYPE_LABELS[property.propertyType]}
-                  </span>
-                  {property.bhk && property.propertyType !== 'plot' && property.propertyType !== 'land' && property.propertyType !== 'commercial' && (
-                    <span className="text-[10px] text-slate-500 block">{property.bhk}</span>
-                  )}
-                  {property.propertyType === 'commercial' && property.commercialType && (
-                    <span className="text-[10px] text-slate-500 block">{property.commercialType}</span>
-                  )}
-                </div>
-
-                <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-                  <span className="text-[10px] text-slate-400 block font-bold uppercase">
-                    {property.propertyType === 'plot' || property.propertyType === 'land' ? 'Plot Area' : property.propertyType === 'farmhouse' ? 'Land Area' : 'Area'}
-                  </span>
-                  <span className="text-sm font-extrabold text-slate-800 dark:text-slate-200">
-                    {property.plotAreaSqFt
-                      ? `${property.plotAreaSqFt.toLocaleString('en-IN')} sq.ft`
-                      : property.landAreaSqFt
-                      ? `${property.landAreaSqFt.toLocaleString('en-IN')} sq.ft`
-                      : property.superBuiltUpAreaSqFt
-                      ? `${property.superBuiltUpAreaSqFt.toLocaleString('en-IN')} sq.ft`
-                      : property.carpetAreaSqFt
-                      ? `${property.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft`
-                      : property.builtUpAreaSqFt
-                      ? `${property.builtUpAreaSqFt.toLocaleString('en-IN')} sq.ft`
-                      : 'On Request'}
-                  </span>
-                  {property.carpetAreaSqFt && property.propertyType !== 'plot' && property.propertyType !== 'land' && (
-                    <span className="text-[10px] text-slate-500 block">
-                      Carpet: {property.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft
-                    </span>
-                  )}
-                </div>
-
-                {property.propertyType !== 'plot' && property.propertyType !== 'land' && (
-                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-                    <span className="text-[10px] text-slate-400 block font-bold uppercase">Facing & Floor</span>
-                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                      {property.facing || 'East'} Facing
-                    </span>
-                    <span className="text-[10px] text-slate-500 block">
-                      {property.floor || property.totalFloors ? `Floor: ${property.floor || 'N/A'} (Total: ${property.totalFloors || 'N/A'})` : 'Standard Floor'}
-                    </span>
+                {getRelevantPropertySpecs(property).map((spec) => (
+                  <div key={spec.label} className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <span className="text-[10px] text-slate-400 block font-bold uppercase">{spec.label}</span>
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{spec.value}</span>
                   </div>
-                )}
-
-                {property.propertyType === 'plot' || property.propertyType === 'land' ? (
-                  <>
-                    <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-                      <span className="text-[10px] text-slate-400 block font-bold uppercase">Road & Facing</span>
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                        {property.roadWidthFt ? `${property.roadWidthFt} ft Road` : 'Standard Road'}
-                      </span>
-                      <span className="text-[10px] text-slate-500 block">
-                        {property.facing ? `${property.facing} Facing` : ''} {property.isCornerPlot ? '• Corner Plot' : ''}
-                      </span>
-                    </div>
-                    <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-                      <span className="text-[10px] text-slate-400 block font-bold uppercase">Boundary & Approval</span>
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                        {property.boundaryWall ? `Boundary: ${property.boundaryWall}` : 'Standard'}
-                      </span>
-                      {property.approvalType && (
-                        <span className="text-[10px] text-slate-500 block">Approval: {property.approvalType}</span>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
-                    <span className="text-[10px] text-slate-400 block font-bold uppercase">Furnishing</span>
-                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                      {property.furnishing && FURNISHING_LABELS[property.furnishing]
-                        ? FURNISHING_LABELS[property.furnishing]
-                        : 'Not Specified'}
-                    </span>
-                    {property.parking && (
-                      <span className="text-[10px] text-slate-500 block">Parking: {property.parking}</span>
-                    )}
-                  </div>
-                )}
+                ))}
 
                 <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
                   <span className="text-[10px] text-slate-400 block font-bold uppercase">Locality</span>
@@ -529,13 +456,13 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
               </div>
 
               {/* Amenities */}
-              {property.amenities && property.amenities.length > 0 && (
+              {relevantAmenities.length > 0 && (
                 <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
                   <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2.5">
-                    Amenities & Key Features ({property.amenities.length})
+                    Amenities & Key Features ({relevantAmenities.length})
                   </h4>
                   <div className="grid grid-cols-2 gap-2 text-xs">
-                    {property.amenities.map((amenity, idx) => (
+                    {relevantAmenities.map((amenity, idx) => (
                       <div key={idx} className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-medium">
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
                         <span>{amenity}</span>

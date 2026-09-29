@@ -35,6 +35,8 @@ import {
   validateAttachmentFile,
   UploadProgress,
 } from '../../utils/attachmentStorage';
+import { PropertyTypeSpecificFields } from './PropertyTypeSpecificFields';
+import { getBhkLabel, isPropertyFieldVisible, PROPERTY_TYPE_AMENITIES } from '../../utils/propertyTypeFields';
 
 interface EditPropertyModalProps {
   isOpen: boolean;
@@ -43,23 +45,6 @@ interface EditPropertyModalProps {
   onSaveProperty?: (property: Property) => Promise<void | boolean> | void;
   onSave?: (property: Property) => Promise<void | boolean> | void;
 }
-
-const COMMON_AMENITIES = [
-  'Lift with Power Backup',
-  '24/7 Security & CCTV',
-  'Covered Car Parking',
-  'Gym & Fitness Centre',
-  'Swimming Pool',
-  'Clubhouse',
-  'Gated Community',
-  '100% Vastu Compliant',
-  'PNG Piped Gas',
-  'Children Play Area',
-  'Rainwater Harvesting',
-  'Park / Jogging Track',
-  'Intercom Facility',
-  'Solar Water Heating',
-];
 
 export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
   isOpen,
@@ -86,6 +71,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
   const [status, setStatus] = useState<PropertyStatus>(property?.status || 'available');
   const [amenities, setAmenities] = useState<string[]>(property?.amenities || []);
   const [photos, setPhotos] = useState<string[]>(property?.photos || []);
+  const [extraFields, setExtraFields] = useState<Partial<Property>>({ ...property });
 
   // PRIVATE OWNER FIELDS
   const [ownerName, setOwnerName] = useState<string>(property?.ownerName || '');
@@ -116,6 +102,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
       setStatus(property.status || 'available');
       setAmenities(property.amenities || []);
       setPhotos(property.photos || []);
+      setExtraFields({ ...property });
       setOwnerName(property.ownerName || '');
       setOwnerPhone(property.ownerPhone || '');
       setOwnerWhatsApp(property.ownerWhatsApp || '');
@@ -238,13 +225,14 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
 
     const updatedProperty: Property = {
       ...property,
+      ...extraFields,
       id: property.id, // Strictly preserve existing ID
       title: title.trim(),
       propertyType,
       transactionType,
       price: Number(price) || 0,
       priceNegotiable,
-      bhk: propertyType === 'plot' || propertyType === 'commercial' ? propertyType : bhk,
+      bhk: bhk.trim() || undefined,
       superBuiltUpAreaSqFt: Number(superBuiltUpAreaSqFt) || undefined,
       carpetAreaSqFt: Number(carpetAreaSqFt) || undefined,
       locality: locality.trim(),
@@ -379,10 +367,10 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
             </div>
 
             {/* BHK & Price input */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
+            <div className={`grid grid-cols-1 ${isPropertyFieldVisible(propertyType, 'bhk') ? 'sm:grid-cols-2' : ''} gap-3`}>
+              {isPropertyFieldVisible(propertyType, 'bhk') && <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  BHK / Config
+                  {getBhkLabel(propertyType)}
                 </label>
                 <input
                   type="text"
@@ -390,7 +378,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                   onChange={(e) => setBhk(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
                 />
-              </div>
+              </div>}
 
               <div>
                 <div className="flex items-center justify-between mb-1">
@@ -427,8 +415,8 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
               2. Location & Specifications (Public Details)
             </span>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
+            {(isPropertyFieldVisible(propertyType, 'superBuiltUpAreaSqFt') || isPropertyFieldVisible(propertyType, 'carpetAreaSqFt')) && <div className="grid grid-cols-2 gap-3">
+              {isPropertyFieldVisible(propertyType, 'superBuiltUpAreaSqFt') && <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Locality / Area *
                 </label>
@@ -439,9 +427,9 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                   onChange={(e) => setLocality(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
                 />
-              </div>
+              </div>}
 
-              <div>
+              {isPropertyFieldVisible(propertyType, 'carpetAreaSqFt') && <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   City
                 </label>
@@ -452,8 +440,8 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                   onChange={(e) => setCity(e.target.value)}
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
                 />
-              </div>
-            </div>
+              </div>}
+            </div>}
 
             {/* Area */}
             <div className="grid grid-cols-2 gap-3">
@@ -483,8 +471,8 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
             </div>
 
             {/* Floor, Facing, Furnishing */}
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+              {isPropertyFieldVisible(propertyType, 'floor') && <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Floor
                 </label>
@@ -494,9 +482,9 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                   onChange={(e) => setFloor(e.target.value)}
                   className="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden"
                 />
-              </div>
+              </div>}
 
-              <div>
+              {isPropertyFieldVisible(propertyType, 'facing') && <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Facing
                 </label>
@@ -514,9 +502,9 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                   <option value="South-East">South-East</option>
                   <option value="South-West">South-West</option>
                 </select>
-              </div>
+              </div>}
 
-              <div>
+              {isPropertyFieldVisible(propertyType, 'furnishing') && <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Furnishing
                 </label>
@@ -529,8 +517,14 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                   <option value="fully_furnished">Fully Furnished</option>
                   <option value="unfurnished">Unfurnished</option>
                 </select>
-              </div>
+              </div>}
             </div>
+
+            <PropertyTypeSpecificFields
+              propertyType={propertyType}
+              values={extraFields}
+              onChange={(field, value) => setExtraFields((prev) => ({ ...prev, [field]: value }))}
+            />
 
             {/* Status */}
             <div>
@@ -561,7 +555,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                 Amenities & Features ({amenities.length} selected)
               </label>
               <div className="flex flex-wrap gap-1.5">
-                {COMMON_AMENITIES.map((item) => {
+                {PROPERTY_TYPE_AMENITIES[propertyType].map((item) => {
                   const selected = amenities.includes(item);
                   return (
                     <button

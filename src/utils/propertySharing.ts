@@ -1,6 +1,7 @@
 import { Property, UserProfile } from '../types';
 import { formatIndianCurrency, PROPERTY_TYPE_LABELS, normalizePropertyPhotos } from './formatters';
 import { openWhatsApp } from './whatsapp';
+import { getRelevantPropertySpecs, PROPERTY_TYPE_AMENITIES } from './propertyTypeFields';
 
 /**
  * Generate a clean, high-converting WhatsApp message for customer sharing.
@@ -26,70 +27,16 @@ export function generateCustomerPropertyMessage(
 
   const greeting = customCustomerName ? `Hello ${customCustomerName},\n\n` : `Hello,\n\n`;
 
-  const isPlotOrLand = property.propertyType === 'plot' || property.propertyType === 'land';
-  const isCommercial = property.propertyType === 'commercial';
-  const isFarmhouse = property.propertyType === 'farmhouse';
-
   let details = `${greeting}🌟 *NEW PROPERTY RECOMMENDATION*\n\n`;
   details += `🏡 *${property.title}*\n`;
   details += `📍 *Location:* ${property.locality}, ${property.city}\n\n`;
 
   details += `📋 *Property Highlights:*\n`;
   details += `• *Type:* ${typeLabel}\n`;
-
-  if (!isPlotOrLand && !isCommercial && property.bhk) {
-    details += `• *Configuration:* ${property.bhk}\n`;
-  }
-  if (isCommercial && property.commercialType) {
-    details += `• *Commercial Type:* ${property.commercialType}\n`;
-  }
-
   details += `• *Pricing:* *${priceFormatted}*\n`;
-
-  if (isPlotOrLand && property.plotAreaSqFt) {
-    details += `• *Plot Area:* ${property.plotAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
-  } else if (isFarmhouse) {
-    if (property.landAreaSqFt) details += `• *Land Area:* ${property.landAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
-    if (property.builtUpAreaSqFt) details += `• *Built-Up Area:* ${property.builtUpAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
-  } else if (isCommercial) {
-    if (property.carpetAreaSqFt) details += `• *Carpet Area:* ${property.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
-    if (property.builtUpAreaSqFt) details += `• *Built-Up Area:* ${property.builtUpAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
-  } else {
-    if (property.superBuiltUpAreaSqFt) {
-      details += `• *Super Built-Up Area:* ${property.superBuiltUpAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
-    }
-    if (property.carpetAreaSqFt) {
-      details += `• *Carpet Area:* ${property.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
-    }
-    if (property.plotAreaSqFt) {
-      details += `• *Plot Area:* ${property.plotAreaSqFt.toLocaleString('en-IN')} sq.ft\n`;
-    }
-  }
-
-  if (!isPlotOrLand && property.furnishing) {
-    const furnishingLabel =
-      property.furnishing === 'fully_furnished'
-        ? 'Fully Furnished'
-        : property.furnishing === 'semi_furnished'
-        ? 'Semi-Furnished'
-        : 'Unfurnished';
-    details += `• *Furnishing:* ${furnishingLabel}\n`;
-  }
-
-  if (!isPlotOrLand && !isFarmhouse && property.floor) {
-    details += `• *Floor:* ${property.floor}\n`;
-  }
-
-  if (property.facing) {
-    details += `• *Facing:* ${property.facing} Facing\n`;
-  }
-
-  if (isPlotOrLand) {
-    if (property.roadWidthFt) details += `• *Road Width:* ${property.roadWidthFt} ft\n`;
-    if (property.isCornerPlot) details += `• *Corner Plot:* Yes\n`;
-    if (property.boundaryWall) details += `• *Boundary Wall:* ${property.boundaryWall}\n`;
-  }
-
+  getRelevantPropertySpecs(property).forEach((spec) => {
+    details += `• *${spec.label}:* ${spec.value}\n`;
+  });
   details += `• *Status:* ${
     property.status === 'available'
       ? 'Ready to Move / Available'
@@ -98,9 +45,12 @@ export function generateCustomerPropertyMessage(
       : 'Active'
   }\n\n`;
 
-  if (property.amenities && property.amenities.length > 0) {
+  const relevantAmenities = (property.amenities || []).filter((amenity) =>
+    PROPERTY_TYPE_AMENITIES[property.propertyType].includes(amenity)
+  );
+  if (relevantAmenities.length > 0) {
     details += `✨ *Key Amenities & Features:*\n`;
-    property.amenities.slice(0, 8).forEach((amenity) => {
+    relevantAmenities.slice(0, 8).forEach((amenity) => {
       details += `✓ ${amenity}\n`;
     });
     details += `\n`;

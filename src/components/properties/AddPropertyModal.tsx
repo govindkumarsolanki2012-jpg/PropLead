@@ -36,6 +36,8 @@ import {
   UploadProgress,
 } from '../../utils/attachmentStorage';
 import { PropertyPhoto } from '../../types';
+import { PropertyTypeSpecificFields } from './PropertyTypeSpecificFields';
+import { getBhkLabel, isPropertyFieldVisible, PROPERTY_TYPE_AMENITIES } from '../../utils/propertyTypeFields';
 
 interface AddPropertyModalProps {
   isOpen: boolean;
@@ -44,23 +46,6 @@ interface AddPropertyModalProps {
   onSave?: (property: Property) => Promise<void | boolean> | void;
   profile?: UserProfile;
 }
-
-const COMMON_AMENITIES = [
-  'Lift with Power Backup',
-  '24/7 Security & CCTV',
-  'Covered Car Parking',
-  'Gym & Fitness Centre',
-  'Swimming Pool',
-  'Clubhouse',
-  'Gated Community',
-  '100% Vastu Compliant',
-  'PNG Piped Gas',
-  'Children Play Area',
-  'Rainwater Harvesting',
-  'Park / Jogging Track',
-  'Intercom Facility',
-  'Solar Water Heating',
-];
 
 export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
   isOpen,
@@ -90,6 +75,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
   const [status, setStatus] = useState<PropertyStatus>('available');
   const [amenities, setAmenities] = useState<string[]>([]);
   const [photos, setPhotos] = useState<(string | PropertyPhoto)[]>([]);
+  const [extraFields, setExtraFields] = useState<Partial<Property>>({});
 
   // PRIVATE OWNER FIELDS
   const [ownerName, setOwnerName] = useState<string>('');
@@ -119,6 +105,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
     setStatus('available');
     setAmenities([]);
     setPhotos([]);
+    setExtraFields({});
     setOwnerName('');
     setOwnerPhone('');
     setOwnerWhatsApp('');
@@ -249,13 +236,14 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
     }
 
     const newProperty: Property = {
+      ...extraFields,
       id: formPropertyId,
       title: title.trim(),
       propertyType,
       transactionType,
       price: typeof price === 'number' ? price : 0,
       priceNegotiable,
-      bhk: propertyType === 'plot' || propertyType === 'commercial' ? (bhk.trim() || propertyType) : bhk.trim(),
+      bhk: bhk.trim() || undefined,
       superBuiltUpAreaSqFt: typeof superBuiltUpAreaSqFt === 'number' && superBuiltUpAreaSqFt > 0 ? superBuiltUpAreaSqFt : undefined,
       carpetAreaSqFt: typeof carpetAreaSqFt === 'number' && carpetAreaSqFt > 0 ? carpetAreaSqFt : undefined,
       locality: locality.trim(),
@@ -400,10 +388,10 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
             </div>
 
             {/* BHK & Price input */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
+            <div className={`grid grid-cols-1 ${isPropertyFieldVisible(propertyType, 'bhk') ? 'sm:grid-cols-2' : ''} gap-3`}>
+              {isPropertyFieldVisible(propertyType, 'bhk') && <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  BHK / Config
+                  {getBhkLabel(propertyType)}
                 </label>
                 <input
                   type="text"
@@ -412,7 +400,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   placeholder="e.g. 1 BHK, 2 BHK, 3 BHK, Plot, Shop..."
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
                 />
-              </div>
+              </div>}
 
               <div>
                 <div className="flex items-center justify-between mb-1">
@@ -453,8 +441,8 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
               2. Location & Specifications (Public Details)
             </span>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
+            {(isPropertyFieldVisible(propertyType, 'superBuiltUpAreaSqFt') || isPropertyFieldVisible(propertyType, 'carpetAreaSqFt')) && <div className="grid grid-cols-2 gap-3">
+              {isPropertyFieldVisible(propertyType, 'superBuiltUpAreaSqFt') && <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Locality / Area * (Customer Sees This)
                 </label>
@@ -466,9 +454,9 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   placeholder="e.g. Indiranagar, Sector 62, Jubilee Hills..."
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-medium"
                 />
-              </div>
+              </div>}
 
-              <div>
+              {isPropertyFieldVisible(propertyType, 'carpetAreaSqFt') && <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   City *
                 </label>
@@ -480,8 +468,8 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   placeholder="e.g. Bengaluru, Hyderabad, Mumbai..."
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-medium"
                 />
-              </div>
-            </div>
+              </div>}
+            </div>}
 
             {/* Area (Super Built-up & Carpet) */}
             <div className="grid grid-cols-2 gap-3">
@@ -519,8 +507,8 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
             </div>
 
             {/* Floor, Facing, Furnishing */}
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+              {isPropertyFieldVisible(propertyType, 'floor') && <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Floor
                 </label>
@@ -531,9 +519,9 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   placeholder="e.g. 2nd Floor, 4th of 8 Floors"
                   className="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden"
                 />
-              </div>
+              </div>}
 
-              <div>
+              {isPropertyFieldVisible(propertyType, 'facing') && <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Facing
                 </label>
@@ -552,9 +540,9 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   <option value="South-East">South-East</option>
                   <option value="South-West">South-West</option>
                 </select>
-              </div>
+              </div>}
 
-              <div>
+              {isPropertyFieldVisible(propertyType, 'furnishing') && <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Furnishing
                 </label>
@@ -568,8 +556,14 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   <option value="semi_furnished">Semi-Furnished</option>
                   <option value="fully_furnished">Fully Furnished</option>
                 </select>
-              </div>
+              </div>}
             </div>
+
+            <PropertyTypeSpecificFields
+              propertyType={propertyType}
+              values={extraFields}
+              onChange={(field, value) => setExtraFields((prev) => ({ ...prev, [field]: value }))}
+            />
 
             {/* Property Status */}
             <div>
@@ -600,7 +594,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                 Amenities & Features ({amenities.length} selected)
               </label>
               <div className="flex flex-wrap gap-1.5">
-                {COMMON_AMENITIES.map((item) => {
+                {PROPERTY_TYPE_AMENITIES[propertyType].map((item) => {
                   const selected = amenities.includes(item);
                   return (
                     <button
