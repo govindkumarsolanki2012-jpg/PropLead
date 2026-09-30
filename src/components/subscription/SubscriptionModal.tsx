@@ -26,7 +26,9 @@ import {
   PRO_FEATURES_LIST,
   startFreeTrialServer,
   formatTrialEndDateTime,
+  getBillingApiUrl,
 } from '../../utils/billing';
+import { auth } from '../../lib/firebase';
 import confetti from 'canvas-confetti';
 
 interface SubscriptionModalProps {
@@ -35,6 +37,7 @@ interface SubscriptionModalProps {
   profile: UserProfile;
   onUpdateProfile: (updates: Partial<UserProfile>) => void;
   onSubscribe?: (plan: string) => void;
+  initialMessage?: string | null;
 }
 
 export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
@@ -43,6 +46,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   profile,
   onUpdateProfile,
   onSubscribe,
+  initialMessage,
 }) => {
   const [selectedPlanId, setSelectedPlanId] = useState<SubscriptionPlanId>('quarterly');
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -62,21 +66,97 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     error: null,
   });
 
+  const [backendSubscriptionData, setBackendSubscriptionData] = useState<any>(null);
+
+  const isExpiredBase =
+    profile.subscriptionStatus === 'EXPIRED' ||
+    profile.trialStatus === 'expired' ||
+    Boolean(profile.trialAlreadyUsed) ||
+    backendSubscriptionData?.subscriptionStatus === 'EXPIRED' ||
+    backendSubscriptionData?.trialStatus === 'expired' ||
+    Boolean(backendSubscriptionData?.trialAlreadyUsed);
+
+  const effectiveProfile: UserProfile = backendSubscriptionData
+    ? {
+        ...profile,
+        subscriptionStatus: backendSubscriptionData.isSubscribed
+          ? backendSubscriptionData.subscriptionStatus
+          : (isExpiredBase ? 'EXPIRED' : backendSubscriptionData.subscriptionStatus),
+        trialStatus: backendSubscriptionData.isSubscribed
+          ? 'expired'
+          : (isExpiredBase ? 'expired' : backendSubscriptionData.trialStatus),
+        trialAlreadyUsed: Boolean(backendSubscriptionData.trialAlreadyUsed || isExpiredBase),
+        trialDaysRemaining: isExpiredBase ? 0 : (backendSubscriptionData.trialDaysRemaining ?? 0),
+        trialEndDate: isExpiredBase ? null : backendSubscriptionData.trialEndDate,
+        isTrialActive: !isExpiredBase && !backendSubscriptionData.isSubscribed && (backendSubscriptionData.trialStatus === 'active' || backendSubscriptionData.subscriptionStatus === 'TRIAL'),
+        isSubscribed: Boolean(backendSubscriptionData.isSubscribed),
+      }
+    : isExpiredBase
+    ? {
+        ...profile,
+        subscriptionStatus: 'EXPIRED',
+        trialStatus: 'expired',
+        trialAlreadyUsed: true,
+        trialDaysRemaining: 0,
+        trialEndDate: null,
+        isTrialActive: false,
+        isSubscribed: false,
+      }
+    : profile;
+
   const {
     status,
     trialStatus,
     trialEverStarted,
+    trialAlreadyUsed,
     daysRemaining,
+    isSubscribed,
     expiryFormatted,
     isLocked,
     isTrialEndDateMissingOrInvalid,
-  } = getEffectiveSubscriptionStatus(profile);
+  } = getEffectiveSubscriptionStatus(effectiveProfile);
 
   useEffect(() => {
     if (isOpen) {
-      setErrorMessage(null);
+      setErrorMessage(initialMessage || null);
       setSuccessMessage(null);
       setProductState((prev) => ({ ...prev, isLoading: true }));
+
+      // Authoritative subscription status refresh directly from backend
+      const targetUid = profile.id || auth.currentUser?.uid;
+      const targetEmail = auth.currentUser?.email || profile.email;
+      if (targetUid) {
+        const currentUser = auth.currentUser;
+        if (currentUser) {
+          currentUser.getIdToken().then(async (token) => {
+            if (!token) return;
+            try {
+              const emailParam = targetEmail ? `&email=${encodeURIComponent(targetEmail)}` : '';
+              const url = getBillingApiUrl(`/api/billing/subscription-status?userId=${encodeURIComponent(targetUid)}${emailParam}`);
+              const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+              if (res.ok) {
+                const data = await res.json();
+                if (data && data.subscriptionStatus) {
+                  setBackendSubscriptionData(data);
+                  const isPaidSub = Boolean(data.isSubscribed);
+                  const isExp = data.subscriptionStatus === 'EXPIRED' || (Boolean(data.trialAlreadyUsed) && !isPaidSub);
+                  onUpdateProfile({
+                    subscriptionStatus: isPaidSub ? data.subscriptionStatus : (isExp ? 'EXPIRED' : data.subscriptionStatus),
+                    trialStatus: isExp ? 'expired' : data.trialStatus,
+                    trialAlreadyUsed: Boolean(data.trialAlreadyUsed || isExp),
+                    trialEverStarted: Boolean(data.trialEverStarted || data.trialAlreadyUsed || isExp),
+                    isTrialActive: !isExp && !isPaidSub && (data.trialStatus === 'active' || data.subscriptionStatus === 'TRIAL'),
+                    trialDaysRemaining: isExp ? 0 : (data.trialDaysRemaining ?? 0),
+                    isSubscribed: isPaidSub,
+                  });
+                }
+              }
+            } catch (err) {
+              console.warn('[SubscriptionModal] Error refreshing status:', err);
+            }
+          });
+        }
+      }
 
       fetchGooglePlayProduct().then((res: GooglePlayProductResult) => {
         setProductState({
@@ -87,7 +167,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         });
       });
     }
-  }, [isOpen]);
+  }, [isOpen, initialMessage, profile.id]);
 
   if (!isOpen) return null;
 
@@ -103,6 +183,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           trialStartDate: res.trialStartDate,
           trialEndDate: res.trialEndDate,
           trialEverStarted: true,
+          trialAlreadyUsed: false,
           subscriptionStatus: 'TRIAL',
           isTrialActive: true,
         });
@@ -115,7 +196,10 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           });
         } catch {}
       } else {
-        setErrorMessage(res.error || res.message || 'Failed to activate free trial.');
+        if (res.trialAlreadyUsed || res.error === 'TRIAL_ALREADY_USED') {
+          onUpdateProfile({ trialAlreadyUsed: true, trialEverStarted: true, subscriptionStatus: 'EXPIRED', trialStatus: 'expired' });
+        }
+        setErrorMessage(res.message || res.error || 'Free trial already used. Please subscribe to continue.');
       }
     } catch (err: any) {
       setErrorMessage(err?.message || 'Error activating free trial.');
@@ -291,7 +375,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           )}
 
           {/* Manual Free Trial Available Banner */}
-          {trialStatus === 'not_started' && status !== 'ACTIVE' && status !== 'CANCELED_BUT_ACTIVE' && status !== 'PAYMENT_ISSUE' && !trialEverStarted && (
+          {trialStatus === 'not_started' && status !== 'ACTIVE' && status !== 'CANCELED_BUT_ACTIVE' && status !== 'PAYMENT_ISSUE' && !trialEverStarted && !trialAlreadyUsed && !profile.trialAlreadyUsed && (
             <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-emerald-500/5 border-2 border-emerald-500/30 dark:border-emerald-500/20 text-xs flex flex-col gap-3 shadow-xs">
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
@@ -335,7 +419,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           )}
 
           {/* Dynamic Real Trial Countdown Indicator */}
-          {status === 'TRIAL' && (
+          {status === 'TRIAL' && !trialAlreadyUsed && !profile.trialAlreadyUsed && trialStatus === 'active' && daysRemaining > 0 && (
             <div
               className={`p-3.5 rounded-2xl border text-xs flex flex-col gap-2 transition-all ${
                 daysRemaining <= 2
@@ -385,20 +469,18 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
             </div>
           )}
 
-          {/* Trial Expired / Unverified State */}
-          {status === 'EXPIRED' && (
+          {/* Trial Already Used / Expired State */}
+          {(status === 'EXPIRED' || trialAlreadyUsed || profile.trialAlreadyUsed || trialStatus === 'expired' || (!isSubscribed && trialEverStarted)) && !isSubscribed && (
             <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-700 rounded-2xl text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2.5">
               <div className="w-7 h-7 rounded-xl bg-rose-600 text-white flex items-center justify-center flex-shrink-0 mt-0.5 shadow-2xs">
                 <AlertCircle className="w-3.5 h-3.5" />
               </div>
               <div>
                 <div className="font-bold text-rose-900 dark:text-rose-100 text-xs">
-                  {isTrialEndDateMissingOrInvalid ? 'Trial Status Unverified' : 'Free Trial Expired (0 Days Remaining)'}
+                  Free trial already used. Please subscribe to continue.
                 </div>
                 <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 leading-relaxed">
-                  {isTrialEndDateMissingOrInvalid
-                    ? 'Authoritative trial end date could not be verified. Select a plan below to activate full access.'
-                    : 'Your free trial period has ended. Select a plan below to continue adding leads, properties, and follow-ups.'}
+                  Your 7-day free trial has already been used for this account. Choose a plan below to continue adding leads, properties, and follow-ups.
                 </p>
               </div>
             </div>

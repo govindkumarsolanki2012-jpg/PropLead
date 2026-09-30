@@ -185,8 +185,8 @@ export async function syncLocalDataToFirestore(
         isOnboarded: true,
         onboardingCompleted: false,
         hasCompletedOnboarding: false,
-        trialStatus: 'not_started',
-        trialEverStarted: false,
+        trialStatus: candidateProfile.trialStatus || 'not_started',
+        trialEverStarted: Boolean(candidateProfile.trialEverStarted || candidateProfile.trialAlreadyUsed),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };

@@ -50,7 +50,7 @@ import { clearUserAudioFromIndexedDB } from './utils/audioStorage';
 import { Lead, Property, UserProfile, WhatsAppTemplate, FollowUpType, TabType, SubscriptionStatus } from './types';
 import { INITIAL_USER_PROFILE } from './data/initialData';
 import { formatRelativeDate, normalizePhoneForMatch } from './utils/formatters';
-import { getEffectiveSubscriptionStatus, hasProAccess, setAuthoritativeServerTime, getBillingApiUrl, checkAndRestoreGooglePlayEntitlement, startFreeTrialServer } from './utils/billing';
+import { getEffectiveSubscriptionStatus, hasProAccess, canUseProFeatures, setAuthoritativeServerTime, getBillingApiUrl, checkAndRestoreGooglePlayEntitlement, startFreeTrialServer } from './utils/billing';
 import {
   subscribeToAuth,
   signInWithGoogle,
@@ -207,6 +207,7 @@ export function App() {
     property: Property;
     preselectedLead?: Lead | null;
   } | null>(null);
+  const [subscriptionModalMessage, setSubscriptionModalMessage] = useState<string | null>(null);
 
   // Toast notification
   const [toastMessage, setToastMessage] = useState<{ text: string; isError?: boolean } | null>(null);
@@ -474,18 +475,29 @@ export function App() {
               }
             }
 
+            const isBackendExpired = prev.subscriptionStatus === 'EXPIRED' || Boolean(prev.trialAlreadyUsed) || prev.trialStatus === 'expired';
+
             const merged: UserProfile = {
               ...prev,
               ...firestoreProfile,
-              subscriptionStatus: firestoreProfile.subscriptionStatus || prev.subscriptionStatus,
+              subscriptionStatus: isBackendExpired
+                ? 'EXPIRED'
+                : (firestoreProfile.subscriptionStatus || prev.subscriptionStatus),
+              trialStatus: isBackendExpired
+                ? 'expired'
+                : (firestoreProfile.trialStatus || prev.trialStatus),
+              trialAlreadyUsed: Boolean(prev.trialAlreadyUsed || isBackendExpired || firestoreProfile.trialAlreadyUsed),
+              trialEverStarted: Boolean(prev.trialEverStarted || firestoreProfile.trialEverStarted || isBackendExpired),
+              isTrialActive: isBackendExpired ? false : (firestoreProfile.isTrialActive ?? prev.isTrialActive),
+              trialDaysRemaining: isBackendExpired ? 0 : (firestoreProfile.trialDaysRemaining ?? prev.trialDaysRemaining),
               isSubscribed: firestoreProfile.isSubscribed !== undefined ? firestoreProfile.isSubscribed : prev.isSubscribed,
               subscriptionProductId: firestoreProfile.subscriptionProductId || prev.subscriptionProductId,
               subscriptionBasePlan: firestoreProfile.subscriptionBasePlan || prev.subscriptionBasePlan,
               subscriptionBasePlanId: firestoreProfile.subscriptionBasePlanId || prev.subscriptionBasePlanId,
               subscriptionExpiryDate: firestoreProfile.subscriptionExpiryDate || prev.subscriptionExpiryDate,
               subscriptionExpiryTime: firestoreProfile.subscriptionExpiryTime || prev.subscriptionExpiryTime,
-              trialEndDate: effectiveTrialEndDate,
-              trialStartDate: effectiveTrialStartDate,
+              trialEndDate: isBackendExpired ? null : effectiveTrialEndDate,
+              trialStartDate: isBackendExpired ? null : effectiveTrialStartDate,
               onboardingCompleted:
                 firestoreProfile.onboardingCompleted !== undefined
                   ? firestoreProfile.onboardingCompleted
@@ -593,7 +605,8 @@ export function App() {
         const token = await currentUser.getIdToken();
         if (!token) return;
 
-        const endpoint = getBillingApiUrl(`/api/billing/subscription-status?userId=${encodeURIComponent(targetUid)}`);
+        const emailParam = currentUser.email ? `&email=${encodeURIComponent(currentUser.email)}` : '';
+        const endpoint = getBillingApiUrl(`/api/billing/subscription-status?userId=${encodeURIComponent(targetUid)}${emailParam}`);
         const res = await fetch(endpoint, {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -625,19 +638,29 @@ export function App() {
               isSub = Boolean(data.isSubscribed);
             }
 
+            const isTrialAlreadyUsed = Boolean(
+              data.trialAlreadyUsed ||
+              rawStat === 'EXPIRED' ||
+              data.trialStatus === 'expired' ||
+              (data.trialEverStarted && (data.trialStatus === 'expired' || rawStat === 'EXPIRED')) ||
+              (!isSub && data.trialEverStarted && data.trialStatus !== 'active')
+            );
+            const isExpiredUser = !isSub && (rawStat === 'EXPIRED' || isTrialAlreadyUsed || data.trialStatus === 'expired');
+
             setProfile((prev) => {
               const updated: UserProfile = {
                 ...prev,
                 subscriptionStatus: isSub
                   ? (rawStat as SubscriptionStatus)
-                  : (rawStat === 'ACTIVE' || rawStat === 'CANCELED_BUT_ACTIVE' ? 'EXPIRED' : (rawStat as SubscriptionStatus)),
-                trialStatus: data.trialStatus ?? prev.trialStatus,
-                trialEverStarted: data.trialEverStarted !== undefined ? data.trialEverStarted : prev.trialEverStarted,
-                isTrialActive: data.trialStatus === 'active' || data.subscriptionStatus === 'TRIAL',
-                trialStartDate: data.trialStartDate ?? prev.trialStartDate,
-                trialEndDate: data.trialEndDate ?? prev.trialEndDate,
+                  : (isExpiredUser ? 'EXPIRED' : (rawStat as SubscriptionStatus)),
+                trialStatus: isExpiredUser ? 'expired' : (data.trialStatus ?? prev.trialStatus),
+                trialEverStarted: Boolean(data.trialEverStarted || prev.trialEverStarted || isTrialAlreadyUsed),
+                trialAlreadyUsed: Boolean(isTrialAlreadyUsed || isExpiredUser),
+                isTrialActive: !isExpiredUser && !isSub && (data.trialStatus === 'active' || data.subscriptionStatus === 'TRIAL'),
+                trialStartDate: isExpiredUser ? null : (data.trialStartDate ?? prev.trialStartDate),
+                trialEndDate: isExpiredUser ? null : (data.trialEndDate ?? prev.trialEndDate),
                 serverTimestamp: data.serverTimestamp || data.serverNow || prev.serverTimestamp,
-                trialDaysRemaining: data.trialDaysRemaining ?? prev.trialDaysRemaining,
+                trialDaysRemaining: isExpiredUser ? 0 : (data.trialDaysRemaining ?? prev.trialDaysRemaining),
                 isSubscribed: isSub,
                 subscriptionExpiryDate: resolvedExp ?? prev.subscriptionExpiryDate,
                 subscriptionExpiryTime: resolvedExp ?? prev.subscriptionExpiryTime,
@@ -787,21 +810,45 @@ export function App() {
     }
   }, [leads, currentUser?.uid]);
 
+  const openSubscriptionModalWithMessage = useCallback((msg?: string) => {
+    setSubscriptionModalMessage(msg || 'Your trial has expired. Please subscribe to continue.');
+    setIsSubscriptionOpen(true);
+  }, []);
+
   // Guarded actions for locked state / Pro access
   const guardLockedFeature = useCallback(
     (featureName: string, action: () => void) => {
-      if (!hasProAccess(profile)) {
-        setLockedFeatureName(featureName);
-        setIsFeatureLockedOpen(true);
+      const check = canUseProFeatures(profile, !isAuthResolved);
+      if (!check.allowed) {
+        if (check.reason === 'EXPIRED') {
+          openSubscriptionModalWithMessage('Your trial has expired. Please subscribe to continue.');
+        } else if (check.reason === 'TRIAL_AVAILABLE') {
+          setLockedFeatureName(featureName);
+          setIsFeatureLockedOpen(true);
+        } else {
+          showToast(check.message || 'Checking subscription status...');
+        }
       } else {
         action();
       }
     },
-    [profile]
+    [profile, isAuthResolved, openSubscriptionModalWithMessage, showToast]
   );
 
   // Lead CRUD handlers
   const handleSaveLead = (newLead: Lead) => {
+    const check = canUseProFeatures(profile, !isAuthResolved);
+    if (!check.allowed) {
+      if (check.reason === 'EXPIRED') {
+        openSubscriptionModalWithMessage('Your trial has expired. Please subscribe to continue.');
+      } else if (check.reason === 'TRIAL_AVAILABLE') {
+        setLockedFeatureName('Add Lead');
+        setIsFeatureLockedOpen(true);
+      } else {
+        showToast(check.message || 'Checking subscription status...');
+      }
+      return;
+    }
     const updated = [newLead, ...leads];
     setLeads(updated);
     saveStoredLeads(updated, currentUser?.uid);
@@ -816,18 +863,17 @@ export function App() {
   };
 
   const handleUpdateLead = (updatedLead: Lead) => {
-    if (!hasProAccess(profile)) {
-      const existing = leads.find((l) => l.id === updatedLead.id);
-      const followUpModified =
-        existing &&
-        (existing.nextFollowUpDate !== updatedLead.nextFollowUpDate ||
-          existing.nextFollowUpTime !== updatedLead.nextFollowUpTime ||
-          existing.nextFollowUpNote !== updatedLead.nextFollowUpNote);
-      if (followUpModified) {
-        setLockedFeatureName('Follow-Ups');
+    const check = canUseProFeatures(profile, !isAuthResolved);
+    if (!check.allowed) {
+      if (check.reason === 'EXPIRED') {
+        openSubscriptionModalWithMessage('Your trial has expired. Please subscribe to continue.');
+      } else if (check.reason === 'TRIAL_AVAILABLE') {
+        setLockedFeatureName('Edit Lead');
         setIsFeatureLockedOpen(true);
-        return;
+      } else {
+        showToast(check.message || 'Checking subscription status...');
       }
+      return;
     }
 
     const updated = leads.map((l) => (l.id === updatedLead.id ? updatedLead : l));
@@ -885,6 +931,19 @@ export function App() {
   };
 
   const handleImportBulkLeads = (newLeads: Lead[]) => {
+    const check = canUseProFeatures(profile, !isAuthResolved);
+    if (!check.allowed) {
+      if (check.reason === 'EXPIRED') {
+        openSubscriptionModalWithMessage('Your trial has expired. Please subscribe to continue.');
+      } else if (check.reason === 'TRIAL_AVAILABLE') {
+        setLockedFeatureName('Import Contacts');
+        setIsFeatureLockedOpen(true);
+      } else {
+        showToast(check.message || 'Checking subscription status...');
+      }
+      return;
+    }
+
     const existingPhones = new Set(
       leads.map((l) => normalizePhoneForMatch(l.phone)).filter(Boolean)
     );
@@ -924,6 +983,19 @@ export function App() {
 
   // Property CRUD handlers
   const handleSaveProperty = async (newProperty: Property) => {
+    const check = canUseProFeatures(profile, !isAuthResolved);
+    if (!check.allowed) {
+      if (check.reason === 'EXPIRED') {
+        openSubscriptionModalWithMessage('Your trial has expired. Please subscribe to continue.');
+      } else if (check.reason === 'TRIAL_AVAILABLE') {
+        setLockedFeatureName('Add Property');
+        setIsFeatureLockedOpen(true);
+      } else {
+        showToast(check.message || 'Checking subscription status...');
+      }
+      return false;
+    }
+
     try {
       if (currentUser?.uid) {
         await addPropertyToFirestore(currentUser.uid, newProperty);
@@ -944,6 +1016,19 @@ export function App() {
   };
 
   const handleUpdateProperty = async (updatedProperty: Property) => {
+    const check = canUseProFeatures(profile, !isAuthResolved);
+    if (!check.allowed) {
+      if (check.reason === 'EXPIRED') {
+        openSubscriptionModalWithMessage('Your trial has expired. Please subscribe to continue.');
+      } else if (check.reason === 'TRIAL_AVAILABLE') {
+        setLockedFeatureName('Edit Property');
+        setIsFeatureLockedOpen(true);
+      } else {
+        showToast(check.message || 'Checking subscription status...');
+      }
+      return false;
+    }
+
     try {
       if (currentUser?.uid) {
         await updatePropertyInFirestore(currentUser.uid, updatedProperty);
@@ -1036,9 +1121,16 @@ export function App() {
     type: FollowUpType,
     note: string
   ) => {
-    if (!hasProAccess(profile)) {
-      setLockedFeatureName('Follow-Ups');
-      setIsFeatureLockedOpen(true);
+    const check = canUseProFeatures(profile, !isAuthResolved);
+    if (!check.allowed) {
+      if (check.reason === 'EXPIRED') {
+        openSubscriptionModalWithMessage('Your trial has expired. Please subscribe to continue.');
+      } else if (check.reason === 'TRIAL_AVAILABLE') {
+        setLockedFeatureName('Follow-Ups');
+        setIsFeatureLockedOpen(true);
+      } else {
+        showToast(check.message || 'Checking subscription status...');
+      }
       return;
     }
 
@@ -1134,7 +1226,15 @@ export function App() {
         showToast('🎉 7-Day Free Trial activated!');
         return true;
       } else {
-        showToast(res.error || res.message || 'Unable to start trial');
+        if (res.trialAlreadyUsed || res.error === 'TRIAL_ALREADY_USED') {
+          handleUpdateProfile({
+            trialAlreadyUsed: true,
+            trialEverStarted: true,
+            trialStatus: 'expired',
+            subscriptionStatus: 'EXPIRED',
+          });
+        }
+        showToast(res.message || res.error || 'Free trial already used. Please subscribe to continue.');
         return false;
       }
     } catch (err: any) {
@@ -1164,7 +1264,7 @@ export function App() {
       handleUpdateProfile({ onboardingCompleted: true });
     }
     if (action === 'lead') {
-      setIsQuickAddOpen(true);
+      guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true));
     }
   };
 
@@ -1458,7 +1558,9 @@ export function App() {
                 onOpenAddProperty={() => guardLockedFeature('Add Property', () => setIsAddPropertyOpen(true))}
                 onOpenPropertyDetail={(prop) => setDetailProperty(prop)}
                 onOpenShareModal={(prop, preselectedLead) =>
-                  setSharePropertyData({ property: prop, preselectedLead })
+                  guardLockedFeature('Share Property', () =>
+                    setSharePropertyData({ property: prop, preselectedLead })
+                  )
                 }
                 onDeleteBulkProperties={handleDeleteBulkProperties}
               />
@@ -1634,9 +1736,13 @@ export function App() {
           onClose={() => setDetailProperty(null)}
           property={detailProperty}
           leads={leads}
+          profile={profile}
+          onUpdateProperty={handleUpdateProperty}
           onOpenEdit={(p) => handleOpenEditProperty(p)}
           onOpenShare={(p, preselectedLead) =>
-            setSharePropertyData({ property: p, preselectedLead })
+            guardLockedFeature('Share Property', () =>
+              setSharePropertyData({ property: p, preselectedLead })
+            )
           }
           onDeleteProperty={handleDeleteProperty}
         />
@@ -1648,7 +1754,9 @@ export function App() {
           isOpen={Boolean(editProperty)}
           onClose={() => setEditProperty(null)}
           property={editProperty}
+          profile={profile}
           onSaveProperty={handleUpdateProperty}
+          onOpenSubscription={() => openSubscriptionModalWithMessage('Your trial has expired. Please subscribe to continue.')}
         />
       )}
 
@@ -1675,7 +1783,7 @@ export function App() {
           profile={profile}
           onUpgrade={() => {
             setIsFeatureLockedOpen(false);
-            setIsSubscriptionOpen(true);
+            openSubscriptionModalWithMessage('Your trial has expired. Please subscribe to continue.');
           }}
         />
       )}
@@ -1684,9 +1792,13 @@ export function App() {
       {isSubscriptionOpen && (
         <SubscriptionModal
           isOpen={isSubscriptionOpen}
-          onClose={() => setIsSubscriptionOpen(false)}
+          onClose={() => {
+            setIsSubscriptionOpen(false);
+            setSubscriptionModalMessage(null);
+          }}
           profile={profile}
           onUpdateProfile={handleUpdateProfile}
+          initialMessage={subscriptionModalMessage}
         />
       )}
 

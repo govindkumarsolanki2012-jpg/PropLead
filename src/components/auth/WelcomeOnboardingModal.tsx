@@ -16,13 +16,16 @@ import { PropLeadLogo } from '../common/PropLeadLogo';
 
 interface WelcomeOnboardingModalProps {
   isOpen: boolean;
+  onClose?: () => void;
   onComplete: (action: 'lead' | 'dashboard') => void;
   onStartTrial?: () => Promise<boolean>;
   onExploreFirst?: () => void;
+  onOpenSubscription?: () => void;
   agentName?: string;
   trialStatus?: 'not_started' | 'active' | 'expired';
   trialEndDate?: string | null;
   isSubscribed?: boolean;
+  profile?: any;
 }
 
 export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
@@ -30,11 +33,20 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
   onComplete,
   onStartTrial,
   onExploreFirst,
+  onOpenSubscription,
   agentName,
   trialStatus = 'not_started',
   trialEndDate,
   isSubscribed = false,
+  profile,
 }) => {
+  const isTrialUsed = Boolean(
+    profile?.trialAlreadyUsed ||
+    profile?.trialEverStarted ||
+    profile?.trialStatus === 'expired' ||
+    profile?.subscriptionStatus === 'EXPIRED' ||
+    trialStatus === 'expired'
+  );
   const isAlreadyActive = trialStatus === 'active' || isSubscribed;
   const [step, setStep] = useState<1 | 2>(isAlreadyActive ? 2 : 1);
   const [isActivating, setIsActivating] = useState(false);
@@ -54,10 +66,10 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
       if (success) {
         setStep(2);
       } else {
-        setErrorMessage('Unable to start trial right now. You can explore first or try again.');
+        setErrorMessage('Free trial already used. Please subscribe to continue.');
       }
     } catch (err: any) {
-      setErrorMessage(err?.message || 'Failed to start trial. Please try again.');
+      setErrorMessage(err?.message || 'Free trial already used. Please subscribe to continue.');
     } finally {
       setIsActivating(false);
     }
@@ -112,6 +124,19 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
                 All Pro features and cloud sync are unlocked for your account.
               </p>
             </>
+          ) : isTrialUsed ? (
+            <>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 text-[11px] font-bold mb-2">
+                <ShieldCheck className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <span>Free Trial Already Used</span>
+              </div>
+              <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                Welcome Back to PropLead
+              </h1>
+              <p className="text-xs font-semibold text-rose-600 dark:text-rose-400 mt-1.5">
+                Free trial already used. Please subscribe to continue.
+              </p>
+            </>
           ) : step === 1 && trialStatus === 'not_started' ? (
             <>
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 text-[11px] font-bold mb-2">
@@ -159,7 +184,18 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
             </div>
           )}
 
-          {step === 1 && !isSubscribed && trialStatus === 'not_started' ? (
+          {isTrialUsed && !isSubscribed ? (
+            <div className="space-y-3 py-2">
+              <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 text-center">
+                <p className="text-xs text-amber-900 dark:text-amber-100 font-bold">
+                  Free trial already used. Please subscribe to continue.
+                </p>
+                <p className="text-[11px] text-amber-800 dark:text-amber-300 mt-1 leading-relaxed">
+                  Your 7-day free trial was already utilized for this account. Choose a flexible Pro plan to continue managing your property leads and listings.
+                </p>
+              </div>
+            </div>
+          ) : step === 1 && !isSubscribed && trialStatus === 'not_started' ? (
             <div className="space-y-3">
               {/* Benefit 1 */}
               <div className="flex items-start gap-3.5 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/60">
@@ -226,7 +262,35 @@ export const WelcomeOnboardingModal: React.FC<WelcomeOnboardingModalProps> = ({
 
         {/* Action Footer */}
         <div className="px-6 py-5 bg-slate-50 dark:bg-slate-850 border-t border-slate-100 dark:border-slate-800">
-          {step === 1 && !isSubscribed && trialStatus === 'not_started' ? (
+          {isTrialUsed && !isSubscribed ? (
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                id="btn_onboarding_subscribe"
+                onClick={() => {
+                  if (onOpenSubscription) {
+                    onOpenSubscription();
+                  } else {
+                    onComplete('dashboard');
+                  }
+                }}
+                className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold rounded-2xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
+              >
+                <span>View Plans &amp; Subscribe</span>
+                <ArrowRight className="w-4 h-4 ml-0.5" />
+              </button>
+
+              <button
+                type="button"
+                id="btn_explore_first"
+                onClick={handleExploreClick}
+                className="w-full py-2.5 px-4 bg-transparent hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+              >
+                <Compass className="w-3.5 h-3.5" />
+                <span>Explore Workspace</span>
+              </button>
+            </div>
+          ) : step === 1 && !isSubscribed && trialStatus === 'not_started' ? (
             <div className="space-y-2.5">
               <button
                 type="button"

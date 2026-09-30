@@ -206,6 +206,7 @@ export interface UserProfile {
   isTrialActive: boolean;
   trialStatus?: 'not_started' | 'active' | 'expired';
   trialEverStarted?: boolean;
+  trialAlreadyUsed?: boolean;
   trialStartDate?: string | null;
   trialEndDate?: string | null;
   serverTimestamp?: string;

@@ -97,6 +97,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Durable Trial Records: keyed by hashed email / stable identifier, managed strictly by backend server
+    match /trialRecords/{recordId} {
+      allow read, write: if false;
+    }
+
     // Public Photo Shares collection for WhatsApp property photo galleries
     match /publicPhotoShares/{shareId} {
       allow read: if true;

@@ -35,6 +35,7 @@ import {
   validateAttachmentFile,
   UploadProgress,
 } from '../../utils/attachmentStorage';
+import { hasProAccess } from '../../utils/billing';
 import { PropertyTypeSpecificFields } from './PropertyTypeSpecificFields';
 import { getBhkLabel, isPropertyFieldVisible, PROPERTY_TYPE_AMENITIES } from '../../utils/propertyTypeFields';
 
@@ -42,16 +43,20 @@ interface EditPropertyModalProps {
   isOpen: boolean;
   onClose: () => void;
   property: Property;
+  profile?: UserProfile | null;
   onSaveProperty?: (property: Property) => Promise<void | boolean> | void;
   onSave?: (property: Property) => Promise<void | boolean> | void;
+  onOpenSubscription?: () => void;
 }
 
 export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
   isOpen,
   onClose,
   property,
+  profile,
   onSaveProperty,
   onSave,
+  onOpenSubscription,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -129,6 +134,12 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
 
   const uploadFileList = async (fileList: File[]) => {
     if (fileList.length === 0) return;
+
+    if (profile && !hasProAccess(profile)) {
+      if (onOpenSubscription) onOpenSubscription();
+      setErrorMessage('Your trial has expired. Please subscribe to continue.');
+      return;
+    }
 
     const currentUid = auth.currentUser?.uid;
     if (!currentUid) {
@@ -208,6 +219,12 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
     e.preventDefault();
     setErrorMessage(null);
 
+    if (profile && !hasProAccess(profile)) {
+      if (onOpenSubscription) onOpenSubscription();
+      setErrorMessage('Your trial has expired. Please subscribe to continue.');
+      return;
+    }
+
     if (!title.trim()) {
       setErrorMessage('Please enter a property title / headline');
       return;
@@ -279,135 +296,139 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/65 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 pb-[env(safe-area-inset-bottom)]">
-      <div className="w-full sm:max-w-2xl bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden border border-slate-200 dark:border-slate-800 animate-in fade-in slide-in-from-bottom duration-200 pb-[env(safe-area-inset-bottom)]">
-        {/* Modal Header */}
-        <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/80 dark:bg-slate-900/80 sticky top-0 z-10">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-hidden">
+      <div className="relative w-full sm:max-w-2xl bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col h-[100dvh] sm:h-auto max-h-[100dvh] sm:max-h-[calc(100dvh-2rem)] overflow-hidden border border-slate-200 dark:border-slate-800 animate-in fade-in slide-in-from-bottom duration-200">
+        {/* Modal Header - Sticky Top */}
+        <div className="shrink-0 p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-xs z-10">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-9 h-9 rounded-2xl bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
               <Building className="w-5 h-5" />
             </div>
-            <div>
-              <h2 className="text-base font-extrabold text-slate-900 dark:text-white">
+            <div className="min-w-0">
+              <h2 className="text-base font-extrabold text-slate-900 dark:text-white truncate">
                 Edit Property Details
               </h2>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Update public specs, pricing & confidential owner info
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                Update public specs, pricing &amp; confidential owner info
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800 flex items-center justify-center transition-colors"
+            className="w-8 h-8 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800 flex items-center justify-center transition-colors shrink-0 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Scrollable Form Body */}
-        <form onSubmit={handleSubmit} className="p-4 sm:p-5 overflow-y-auto space-y-5 flex-1 pb-28 sm:pb-6">
-          {/* 1. Basic Details */}
-          <div className="space-y-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Property Title / Headline *
-              </label>
-              <input
-                type="text"
-                required
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-semibold"
-              />
-            </div>
-
-            {/* Transaction Type & Property Type */}
-            <div className="grid grid-cols-2 gap-3">
+        {/* Form Container */}
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          {/* Scrollable Form Body */}
+          <div className="p-4 sm:p-5 overflow-y-auto overscroll-contain space-y-5 flex-1 min-h-0 pb-8">
+            {/* 1. Basic Details */}
+            <div className="space-y-3">
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Transaction
-                </label>
-                <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-                  {(['sale', 'rent', 'lease'] as PropertyTransactionType[]).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setTransactionType(t)}
-                      className={`py-1.5 text-[11px] font-bold rounded-lg capitalize transition-all ${
-                        transactionType === t
-                          ? 'bg-emerald-600 text-white shadow-xs'
-                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                      }`}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Property Type
-                </label>
-                <select
-                  value={propertyType}
-                  onChange={(e) => setPropertyType(e.target.value as PropertyType)}
-                  className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="flat">Apartment / Flat</option>
-                  <option value="house">Independent House</option>
-                  <option value="villa">Gated Villa</option>
-                  <option value="plot">Residential Plot / Land</option>
-                  <option value="commercial">Commercial / Office</option>
-                  <option value="penthouse">Penthouse / Duplex</option>
-                  <option value="farmhouse">Farmhouse</option>
-                </select>
-              </div>
-            </div>
-
-            {/* BHK & Price input */}
-            <div className={`grid grid-cols-1 ${isPropertyFieldVisible(propertyType, 'bhk') ? 'sm:grid-cols-2' : ''} gap-3`}>
-              {isPropertyFieldVisible(propertyType, 'bhk') && <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {getBhkLabel(propertyType)}
+                  Property Title / Headline *
                 </label>
                 <input
                   type="text"
-                  value={bhk}
-                  onChange={(e) => setBhk(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  required
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-semibold"
                 />
-              </div>}
+              </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Price ({formatIndianCurrency(price)})
+              {/* Transaction Type & Property Type */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Transaction
                   </label>
-                  <label className="flex items-center gap-1 cursor-pointer text-[10px] text-slate-500">
-                    <input
-                      type="checkbox"
-                      checked={priceNegotiable}
-                      onChange={(e) => setPriceNegotiable(e.target.checked)}
-                      className="rounded text-emerald-600"
-                    />
-                    <span>Negotiable</span>
-                  </label>
+                  <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                    {(['sale', 'rent', 'lease'] as PropertyTransactionType[]).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setTransactionType(t)}
+                        className={`py-1.5 text-[11px] font-bold rounded-lg capitalize transition-all cursor-pointer ${
+                          transactionType === t
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="relative flex items-center">
-                  <span className="absolute left-3 text-xs font-bold text-slate-400">₹</span>
-                  <input
-                    type="number"
-                    step="50000"
-                    value={price}
-                    onChange={(e) => setPrice(Number(e.target.value))}
-                    className="w-full pl-7 pr-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-bold"
-                  />
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Property Type
+                  </label>
+                  <select
+                    value={propertyType}
+                    onChange={(e) => setPropertyType(e.target.value as PropertyType)}
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="flat">Apartment / Flat</option>
+                    <option value="house">Independent House</option>
+                    <option value="villa">Gated Villa</option>
+                    <option value="plot">Residential Plot / Land</option>
+                    <option value="commercial">Commercial / Office</option>
+                    <option value="penthouse">Penthouse / Duplex</option>
+                    <option value="farmhouse">Farmhouse</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* BHK & Price input */}
+              <div className={`grid grid-cols-1 ${isPropertyFieldVisible(propertyType, 'bhk') ? 'sm:grid-cols-2' : ''} gap-3`}>
+                {isPropertyFieldVisible(propertyType, 'bhk') && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      {getBhkLabel(propertyType)}
+                    </label>
+                    <input
+                      type="text"
+                      value={bhk}
+                      onChange={(e) => setBhk(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Price ({formatIndianCurrency(price)})
+                    </label>
+                    <label className="flex items-center gap-1 cursor-pointer text-[10px] text-slate-500">
+                      <input
+                        type="checkbox"
+                        checked={priceNegotiable}
+                        onChange={(e) => setPriceNegotiable(e.target.checked)}
+                        className="rounded text-emerald-600"
+                      />
+                      <span>Negotiable</span>
+                    </label>
+                  </div>
+                  <div className="relative flex items-center">
+                    <span className="absolute left-3 text-xs font-bold text-slate-400">₹</span>
+                    <input
+                      type="number"
+                      step="50000"
+                      value={price}
+                      onChange={(e) => setPrice(Number(e.target.value))}
+                      className="w-full pl-7 pr-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-bold"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
           {/* 2. Location & Specs */}
           <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800">
@@ -730,32 +751,40 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
             </div>
           </div>
 
-          {/* Error message banner with Retry button */}
-          {errorMessage && (
-            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-700 dark:text-rose-300 font-medium flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
-                <span className="truncate">{errorMessage}</span>
+            {/* Error message banner with Retry button */}
+            {errorMessage && (
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-700 dark:text-rose-300 font-medium flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                  <span className="truncate">{errorMessage}</span>
+                </div>
+                {failedPhotoFiles.length > 0 && !isUploadingPhotos && (
+                  <button
+                    type="button"
+                    onClick={handleRetryFailedPhotos}
+                    className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold rounded-lg text-[11px] inline-flex items-center gap-1 shadow-xs transition-all cursor-pointer flex-shrink-0"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Retry</span>
+                  </button>
+                )}
               </div>
-              {failedPhotoFiles.length > 0 && !isUploadingPhotos && (
-                <button
-                  type="button"
-                  onClick={handleRetryFailedPhotos}
-                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold rounded-lg text-[11px] inline-flex items-center gap-1 shadow-xs transition-all cursor-pointer flex-shrink-0"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                  <span>Retry</span>
-                </button>
-              )}
-            </div>
-          )}
+            )}
+          </div>
 
-          {/* Submit Button */}
-          <div className="pt-2 pb-8 sm:pb-0">
+          {/* Sticky Action Footer */}
+          <div className="shrink-0 p-3.5 sm:p-4 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs flex items-center gap-2.5 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] z-10">
+            <button
+              type="button"
+              onClick={onClose}
+              className="py-3 px-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs transition-all shrink-0 cursor-pointer min-h-[44px]"
+            >
+              Cancel
+            </button>
             <button
               type="submit"
               disabled={isSubmitting || isUploadingPhotos}
-              className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-2xl text-xs shadow-lg transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+              className="py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all flex-1 flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer min-h-[44px]"
             >
               {isSubmitting ? (
                 <>

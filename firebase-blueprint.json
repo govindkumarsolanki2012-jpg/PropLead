@@ -162,6 +162,23 @@
         "retryCount": { "type": "number", "description": "Number of retry attempts" },
         "lastError": { "type": "string", "description": "Error message from last failure", "optional": true }
       }
+    },
+    "TrialClaimRecord": {
+      "collection": "trialRecords",
+      "path": "trialRecords/{emailHash}",
+      "description": "Durable record of 7-day free trial claims by stable email hash to prevent trial reset upon account recreation",
+      "fields": {
+        "emailHash": { "type": "string", "description": "SHA-256 hash of normalized user email" },
+        "originalUid": { "type": "string", "description": "Original Firebase UID when trial was claimed" },
+        "trialClaimedAt": { "type": "string", "description": "ISO timestamp of initial trial claim" },
+        "trialStartDate": { "type": "string", "description": "ISO timestamp of trial start" },
+        "trialEndDate": { "type": "string", "description": "ISO timestamp of trial end" },
+        "trialStatus": { "type": "string", "description": "active | expired" },
+        "purchaseToken": { "type": "string", "description": "Google Play purchase token if any", "optional": true },
+        "orderId": { "type": "string", "description": "Google Play order ID if any", "optional": true },
+        "subscriptionStatus": { "type": "string", "description": "Subscription status", "optional": true },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
+      }
     }
   }
 }

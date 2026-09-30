@@ -990,6 +990,14 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 leadId={lead.id}
                 voiceNotes={lead.voiceNotes || []}
                 onAddVoiceNote={(newVn) => {
+                  if (!hasProAccess(profile)) {
+                    if (onRequirePro) {
+                      onRequirePro('Voice Notes');
+                    } else if (onOpenSchedule) {
+                      onOpenSchedule(lead);
+                    }
+                    return;
+                  }
                   if (!newVn || !newVn.audioUrl || newVn.audioUrl.trim().length < 20) {
                     return;
                   }
@@ -1024,6 +1032,14 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 leadId={lead.id}
                 attachments={lead.attachments || []}
                 onAddAttachment={(newAtt) => {
+                  if (!hasProAccess(profile)) {
+                    if (onRequirePro) {
+                      onRequirePro('Attachments');
+                    } else if (onOpenSchedule) {
+                      onOpenSchedule(lead);
+                    }
+                    return;
+                  }
                   onUpdateLead({
                     ...lead,
                     attachments: [newAtt, ...(lead.attachments || [])],

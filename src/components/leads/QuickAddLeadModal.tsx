@@ -193,6 +193,10 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLocked) {
+      onOpenSubscription();
+      return;
+    }
     if (!name.trim() || !phone.trim()) {
       alert('Please enter at least Customer Name and Phone Number');
       return;

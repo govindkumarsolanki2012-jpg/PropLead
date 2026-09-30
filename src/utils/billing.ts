@@ -200,15 +200,17 @@ export function maskToken(token?: string | null): string {
 }
 
 /**
- * Normalized resolution of the current subscription status and feature entitlement
+ * Normalized resolution of the current subscription status and feature entitlement.
+ * Respects backend authoritative status as the single source of truth.
  */
 export function getEffectiveSubscriptionStatus(
-  profile: UserProfile,
+  profile?: UserProfile | null,
   customServerNow?: number | string | Date
 ): {
   status: SubscriptionStatus;
   trialStatus: 'not_started' | 'active' | 'expired';
   trialEverStarted: boolean;
+  trialAlreadyUsed: boolean;
   daysRemaining: number;
   isSubscribed: boolean;
   isLocked: boolean;
@@ -216,6 +218,20 @@ export function getEffectiveSubscriptionStatus(
   displayStatusText: string;
   isTrialEndDateMissingOrInvalid: boolean;
 } {
+  if (!profile) {
+    return {
+      status: 'NOT_STARTED',
+      trialStatus: 'not_started',
+      trialEverStarted: false,
+      trialAlreadyUsed: false,
+      daysRemaining: 0,
+      isSubscribed: false,
+      isLocked: true,
+      displayStatusText: 'Free Trial Available',
+      isTrialEndDateMissingOrInvalid: false,
+    };
+  }
+
   // Normalize legacy string flags if present
   let rawStatus: SubscriptionStatus | string | undefined = profile.subscriptionStatus;
   if (typeof rawStatus === 'string') {
@@ -268,12 +284,6 @@ export function getEffectiveSubscriptionStatus(
       }
     }
   } else if (status === 'PAYMENT_ISSUE') {
-    // Bugs 5 & 6: PAYMENT_ISSUE Access Policy
-    // If PAYMENT_ISSUE has a verified future expiry:
-    // - keep Pro access during the grace period (isSubscribed = true)
-    // - status remains PAYMENT_ISSUE
-    // If expiry has passed:
-    // - remove Pro access (isSubscribed = false, status = 'EXPIRED')
     if (!resolvedExpiryDate) {
       status = 'EXPIRED';
       isSubscribed = false;
@@ -318,28 +328,44 @@ export function getEffectiveSubscriptionStatus(
     } catch {}
   }
 
-  // 2. Evaluate Trial Status
+  // 2. Evaluate Trial & Authoritative Expired Status
+  const isBackendExpired = rawStatus === 'EXPIRED';
+  const isBackendTrialAlreadyUsed = Boolean(profile.trialAlreadyUsed);
+  const isBackendTrialExpired = profile.trialStatus === 'expired';
+
   const trialEverStarted = Boolean(
+    isBackendTrialAlreadyUsed ||
     profile.trialEverStarted ||
+    isBackendExpired ||
     (profile.trialStartDate && profile.trialStartDate !== 'null') ||
     (profile.trialEndDate && profile.trialEndDate !== 'null') ||
-    rawStatus === 'TRIAL' ||
-    rawStatus === 'EXPIRED'
+    rawStatus === 'TRIAL'
   );
 
   let trialStatus: 'not_started' | 'active' | 'expired' = 'not_started';
   let days = 0;
   let isTrialEndDateMissingOrInvalid = false;
+  let trialAlreadyUsed = isBackendTrialAlreadyUsed;
 
-  // Bug 12: Paid subscription overrides trial state. If paid subscription is active, Pro comes from paid subscription.
+  // If paid subscription is active, Pro comes from paid subscription
   if (isSubscribed && (status === 'ACTIVE' || status === 'CANCELED_BUT_ACTIVE' || status === 'PAYMENT_ISSUE')) {
     trialStatus = trialEverStarted ? 'expired' : 'not_started';
-  } else if (!trialEverStarted && (profile.trialStatus === 'not_started' || !profile.trialStatus)) {
+    days = 0;
+  } else if (isBackendExpired || isBackendTrialAlreadyUsed || isBackendTrialExpired || profile.trialAlreadyUsed || profile.subscriptionStatus === 'EXPIRED' || profile.trialStatus === 'expired') {
+    // BACKEND TRUTH OVERRIDE:
+    // If backend returns EXPIRED or trialAlreadyUsed or trialStatus=expired,
+    // this user MUST be treated as EXPIRED everywhere without exception!
+    // No local dates, defaults, or recreated user states can grant active trial.
+    status = 'EXPIRED';
+    trialStatus = 'expired';
+    trialAlreadyUsed = true;
+    days = 0;
+  } else if (!trialEverStarted && (profile.trialStatus === 'not_started' || !profile.trialStatus) && rawStatus === 'NOT_STARTED') {
     trialStatus = 'not_started';
     status = 'NOT_STARTED';
     days = 0;
   } else {
-    // Trial was started or active or expired
+    // Genuine active trial evaluation
     const hasValidTrialEndDate = Boolean(
       profile.trialEndDate && !isNaN(new Date(profile.trialEndDate).getTime())
     );
@@ -347,12 +373,13 @@ export function getEffectiveSubscriptionStatus(
 
     days = calculateTrialDaysRemaining(profile.trialStartDate, profile.trialEndDate, serverNow);
 
-    if (days > 0 && hasValidTrialEndDate && profile.trialStatus !== 'expired') {
+    if (days > 0 && hasValidTrialEndDate && profile.trialStatus === 'active') {
       trialStatus = 'active';
       status = 'TRIAL';
     } else {
       trialStatus = 'expired';
       status = 'EXPIRED';
+      trialAlreadyUsed = true;
       days = 0;
     }
   }
@@ -387,6 +414,7 @@ export function getEffectiveSubscriptionStatus(
     status,
     trialStatus,
     trialEverStarted,
+    trialAlreadyUsed,
     daysRemaining: days,
     isSubscribed,
     isLocked,
@@ -396,21 +424,113 @@ export function getEffectiveSubscriptionStatus(
   };
 }
 
+export type ProFeatureCheckReason = 'ACTIVE' | 'TRIAL_ACTIVE' | 'EXPIRED' | 'TRIAL_AVAILABLE' | 'LOADING';
+
+export interface ProFeatureCheckResult {
+  allowed: boolean;
+  status: SubscriptionStatus;
+  reason: ProFeatureCheckReason;
+  message: string;
+}
+
+/**
+ * Single Authoritative Pro Feature Guard Helper
+ *
+ * Rules:
+ * - ACTIVE subscription = allow
+ * - TRIAL_ACTIVE = allow
+ * - EXPIRED + trialAlreadyUsed = block
+ * - NOT_STARTED and trial available = show trial/onboarding
+ * - UNKNOWN/loading = block action until backend status loads
+ */
+export function canUseProFeatures(
+  profile?: UserProfile | null,
+  isAuthLoading?: boolean,
+  customServerNow?: number | string | Date
+): ProFeatureCheckResult {
+  if (isAuthLoading || !profile || !profile.id) {
+    return {
+      allowed: false,
+      status: 'NOT_STARTED',
+      reason: 'LOADING',
+      message: 'Checking subscription status...',
+    };
+  }
+
+  const sub = getEffectiveSubscriptionStatus(profile, customServerNow);
+
+  // 1. ACTIVE subscription = allow
+  if (sub.isSubscribed && (sub.status === 'ACTIVE' || sub.status === 'CANCELED_BUT_ACTIVE' || sub.status === 'PAYMENT_ISSUE')) {
+    return {
+      allowed: true,
+      status: sub.status,
+      reason: 'ACTIVE',
+      message: '',
+    };
+  }
+
+  // 2. EXPIRED + trialAlreadyUsed = block (Must evaluate before trial check!)
+  if (
+    sub.status === 'EXPIRED' ||
+    sub.trialAlreadyUsed ||
+    profile.trialAlreadyUsed ||
+    profile.subscriptionStatus === 'EXPIRED' ||
+    profile.trialStatus === 'expired'
+  ) {
+    return {
+      allowed: false,
+      status: 'EXPIRED',
+      reason: 'EXPIRED',
+      message: 'Your trial has expired. Please subscribe to continue.',
+    };
+  }
+
+  // 3. TRIAL_ACTIVE = allow ONLY if not expired and trial not already used
+  if (
+    sub.status === 'TRIAL' &&
+    sub.trialStatus === 'active' &&
+    sub.daysRemaining > 0 &&
+    !sub.trialAlreadyUsed &&
+    !profile.trialAlreadyUsed
+  ) {
+    return {
+      allowed: true,
+      status: 'TRIAL',
+      reason: 'TRIAL_ACTIVE',
+      message: '',
+    };
+  }
+
+  // 4. NOT_STARTED and trial available = show trial/onboarding
+  if (
+    sub.status === 'NOT_STARTED' &&
+    !sub.trialAlreadyUsed &&
+    !profile.trialAlreadyUsed &&
+    !profile.trialEverStarted
+  ) {
+    return {
+      allowed: false,
+      status: 'NOT_STARTED',
+      reason: 'TRIAL_AVAILABLE',
+      message: 'Start your 7-day free trial to use this feature.',
+    };
+  }
+
+  // Fallback block
+  return {
+    allowed: false,
+    status: 'EXPIRED',
+    reason: 'EXPIRED',
+    message: 'Your trial has expired. Please subscribe to continue.',
+  };
+}
+
 /**
  * Authoritative Pro Access Check
- * Access is allowed ONLY when:
- *   trialActive === true (trial status with valid trial days remaining and not locked)
- *   OR
- *   subscriptionActive === true (active, canceled-but-active, or payment-issue with future expiry)
- * Expired users without an active subscription return false.
+ * Returns true ONLY when active subscription or active valid trial.
  */
 export function hasProAccess(profile?: UserProfile | null): boolean {
-  if (!profile) return false;
-  const { status, daysRemaining, isSubscribed, isLocked } = getEffectiveSubscriptionStatus(profile);
-  const trialActive = status === 'TRIAL' && daysRemaining > 0 && !isLocked;
-  // Bug 6: PAYMENT_ISSUE with future verified expiry maintains Pro access during grace period
-  const subscriptionActive = isSubscribed && (status === 'ACTIVE' || status === 'CANCELED_BUT_ACTIVE' || status === 'PAYMENT_ISSUE');
-  return trialActive || subscriptionActive;
+  return canUseProFeatures(profile).allowed;
 }
 
 export interface GooglePlayProductResult {
@@ -1188,6 +1308,7 @@ export interface StartTrialResult {
   trialStartDate?: string;
   trialEndDate?: string;
   trialEverStarted?: boolean;
+  trialAlreadyUsed?: boolean;
   serverNow?: string;
   error?: string;
   message?: string;
@@ -1212,15 +1333,19 @@ export async function startFreeTrialServer(userId: string): Promise<StartTrialRe
         'Content-Type': 'application/json',
         Authorization: `Bearer ${idToken}`,
       },
-      body: JSON.stringify({ userId }),
+      body: JSON.stringify({ userId, email: currentUser.email }),
     });
 
     const data = await res.json();
     if (!res.ok || !data.success) {
+      const isTrialUsed = data.error === 'TRIAL_ALREADY_USED' || Boolean(data.trialAlreadyUsed);
       return {
         success: false,
         error: data.error || 'Failed to activate trial',
-        message: data.message || 'Unable to start trial at this time. Please try again.',
+        message: isTrialUsed
+          ? 'Free trial already used. Please subscribe to continue.'
+          : (data.message || 'Unable to start trial at this time. Please try again.'),
+        trialAlreadyUsed: isTrialUsed,
       };
     }
 
@@ -1234,6 +1359,7 @@ export async function startFreeTrialServer(userId: string): Promise<StartTrialRe
       trialStartDate: data.trialStartDate,
       trialEndDate: data.trialEndDate,
       trialEverStarted: data.trialEverStarted,
+      trialAlreadyUsed: false,
       serverNow: data.serverNow,
     };
   } catch (err: any) {

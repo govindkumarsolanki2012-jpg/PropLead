@@ -44,7 +44,7 @@ export const TrialBanner: React.FC<TrialBannerProps> = ({ profile, onOpenSubscri
   }
 
   // 3. TRIAL NOT STARTED
-  if (status === 'NOT_STARTED') {
+  if (status === 'NOT_STARTED' && !profile.trialAlreadyUsed && !profile.trialEverStarted) {
     return (
       <div
         id="dashboard-trial-not-started-banner"
@@ -78,7 +78,7 @@ export const TrialBanner: React.FC<TrialBannerProps> = ({ profile, onOpenSubscri
   }
 
   // 4. TRIAL EXPIRED (View-Only Mode)
-  if (status === 'EXPIRED' || (status === 'TRIAL' && daysRemaining <= 0)) {
+  if (status === 'EXPIRED' || profile.trialAlreadyUsed || profile.trialEverStarted || (status === 'TRIAL' && daysRemaining <= 0)) {
     return (
       <div
         id="dashboard-trial-expired-banner"

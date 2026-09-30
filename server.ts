@@ -26,6 +26,7 @@ export interface UserSubscriptionRecord {
   subscriptionStatus: 'NOT_STARTED' | 'TRIAL' | 'ACTIVE' | 'CANCELED_BUT_ACTIVE' | 'PAYMENT_ISSUE' | 'EXPIRED' | 'ON_HOLD';
   trialStatus?: 'not_started' | 'active' | 'expired';
   trialEverStarted?: boolean;
+  trialAlreadyUsed?: boolean;
   trialStartDate?: string | null;
   trialEndDate?: string | null;
   subscriptionExpiryDate: string | null;
@@ -45,11 +46,71 @@ export interface UserSubscriptionRecord {
   updatedAt: string;
 }
 
+export interface DurableTrialClaimRecord {
+  emailHash: string;
+  originalUid: string;
+  trialClaimedAt: string;
+  trialStartDate: string;
+  trialEndDate: string;
+  trialStatus: 'active' | 'expired';
+  purchaseToken?: string;
+  orderId?: string;
+  subscriptionStatus?: string;
+  updatedAt: string;
+}
+
 // -------------------------------------------------------------------------
 // DURABLE PERSISTENCE LAYER (FIRESTORE + DISK FALLBACK)
 // -------------------------------------------------------------------------
 const DATA_DIR = path.join(process.cwd(), 'data');
 const SUBSCRIPTIONS_FILE = path.join(DATA_DIR, 'subscriptions.json');
+const TRIAL_RECORDS_FILE = path.join(DATA_DIR, 'trial-records.json');
+
+function hashIdentifier(val: string): string {
+  return crypto.createHash('sha256').update(val.trim().toLowerCase()).digest('hex');
+}
+
+function hashToken(val: string): string {
+  return crypto.createHash('sha256').update(val.trim()).digest('hex');
+}
+
+function initLocalTrialRecordStore(): Map<string, DurableTrialClaimRecord> {
+  const store = new Map<string, DurableTrialClaimRecord>();
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (fs.existsSync(TRIAL_RECORDS_FILE)) {
+      const data = fs.readFileSync(TRIAL_RECORDS_FILE, 'utf8');
+      const parsed = JSON.parse(data);
+      if (typeof parsed === 'object' && parsed !== null) {
+        for (const [key, item] of Object.entries(parsed)) {
+          if (item && (item as any).emailHash) {
+            store.set(key, item as DurableTrialClaimRecord);
+          }
+        }
+      }
+      console.log(`[Trial Persistence] Restored ${store.size} durable trial records from disk storage.`);
+    }
+  } catch (err) {
+    console.warn('[Trial Persistence] Failed to initialize local trial records cache:', err);
+  }
+  return store;
+}
+
+const trialRecordStore = initLocalTrialRecordStore();
+
+function persistTrialRecordStoreToDisk(): void {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const serialized = Object.fromEntries(trialRecordStore.entries());
+    fs.writeFileSync(TRIAL_RECORDS_FILE, JSON.stringify(serialized, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Trial Persistence] Error writing trial records to disk:', err);
+  }
+}
 
 let FIRESTORE_PROJECT_ID = 'proplead-e5c6a';
 let FIRESTORE_DATABASE_ID = 'ai-studio-proplead-10ea62d1-3291-4f7b-9549-788cd49f881d';
@@ -119,6 +180,7 @@ function toFirestoreFields(record: UserSubscriptionRecord): Record<string, any> 
     subscriptionStatus: { stringValue: rawStatus },
     trialStatus: { stringValue: record.trialStatus || (record.subscriptionStatus === 'TRIAL' ? 'active' : (record.trialStartDate ? 'expired' : 'not_started')) },
     trialEverStarted: { booleanValue: Boolean(record.trialEverStarted || record.trialStartDate || record.subscriptionStatus === 'TRIAL') },
+    trialAlreadyUsed: { booleanValue: Boolean(record.trialAlreadyUsed || (record.trialEverStarted && (record.trialStatus === 'expired' || record.subscriptionStatus === 'EXPIRED'))) },
     subscriptionProductId: { stringValue: record.subscriptionProductId || 'property_agent_pro' },
     subscriptionBasePlan: { stringValue: effectiveBasePlan },
     subscriptionBasePlanId: { stringValue: effectiveBasePlan },
@@ -717,13 +779,9 @@ async function processAccountDeletionJob(uid: string): Promise<void> {
     // 3. Delete user Cloud Storage objects fast with parallel batches
     await deleteUserStorageObjectsFast(uid, adminAccessToken);
 
-    // 4. Delete root user document & subscriptions document
+    // 4. Delete root user document (retain durable subscriptions & trial records for billing audit)
     await Promise.allSettled([
       fetch(`${FIRESTORE_REST_BASE}/users/${encodeURIComponent(uid)}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${adminAccessToken}` },
-      }),
-      fetch(`${FIRESTORE_REST_BASE}/subscriptions/${encodeURIComponent(uid)}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${adminAccessToken}` },
       }),
@@ -1092,6 +1150,8 @@ async function fetchDeletionJobFromFirestore(uid: string): Promise<AccountDeleti
 }
 
 async function fetchUserProfileFromFirestore(userId: string, idToken?: string): Promise<{
+  email?: string;
+  trialAlreadyUsed?: boolean;
   trialEndDate?: string;
   trialStartDate?: string;
   trialStatus?: string;
@@ -1120,6 +1180,8 @@ async function fetchUserProfileFromFirestore(userId: string, idToken?: string): 
     const docData = await res.json();
     const fields = docData.fields || {};
     return {
+      email: fields.email?.stringValue,
+      trialAlreadyUsed: fields.trialAlreadyUsed?.booleanValue,
       trialEndDate: fields.trialEndDate?.stringValue,
       trialStartDate: fields.trialStartDate?.stringValue,
       trialStatus: fields.trialStatus?.stringValue,
@@ -1153,6 +1215,7 @@ async function syncUserProfileTrialToFirestore(
     trialStartDate: string | null;
     trialEndDate: string | null;
     trialEverStarted: boolean;
+    trialAlreadyUsed?: boolean;
     subscriptionStatus: string;
   },
   idToken?: string
@@ -1177,6 +1240,11 @@ async function syncUserProfileTrialToFirestore(
       subscriptionStatus: { stringValue: trial.subscriptionStatus },
       updatedAt: { stringValue: new Date().toISOString() },
     };
+
+    if (trial.trialAlreadyUsed !== undefined) {
+      fieldMasks.push('updateMask.fieldPaths=trialAlreadyUsed');
+      fields.trialAlreadyUsed = { booleanValue: Boolean(trial.trialAlreadyUsed) };
+    }
 
     if (trial.trialStartDate) {
       fieldMasks.push('updateMask.fieldPaths=trialStartDate');
@@ -1217,6 +1285,197 @@ async function syncUserProfileTrialToFirestore(
   }
 }
 
+async function fetchDurableTrialRecord(
+  emailHash?: string | null,
+  purchaseToken?: string | null,
+  uid?: string | null
+): Promise<DurableTrialClaimRecord | null> {
+  // 1. Check in-memory / local disk cache by emailHash
+  if (emailHash && trialRecordStore.has(emailHash)) {
+    return trialRecordStore.get(emailHash)!;
+  }
+
+  // 2. Check in-memory cache by purchaseToken if provided
+  if (purchaseToken) {
+    for (const record of trialRecordStore.values()) {
+      if (record.purchaseToken === purchaseToken) {
+        return record;
+      }
+    }
+  }
+
+  // 3. Check in-memory cache by originalUid if provided
+  if (uid) {
+    for (const record of trialRecordStore.values()) {
+      if (record.originalUid === uid) {
+        return record;
+      }
+    }
+  }
+
+  // 4. Query Firestore /trialRecords/{emailHash} using service account credentials
+  if (emailHash) {
+    try {
+      const serviceToken = await getFirestoreServiceAccountToken();
+      if (serviceToken) {
+        const docUrl = `${FIRESTORE_REST_BASE}/trialRecords/${encodeURIComponent(emailHash)}`;
+        const res = await fetch(docUrl, {
+          headers: { Authorization: `Bearer ${serviceToken}` },
+        });
+        if (res.ok) {
+          const docData = await res.json();
+          const f = docData.fields || {};
+          const record: DurableTrialClaimRecord = {
+            emailHash: f.emailHash?.stringValue || emailHash,
+            originalUid: f.originalUid?.stringValue || '',
+            trialClaimedAt: f.trialClaimedAt?.stringValue || '',
+            trialStartDate: f.trialStartDate?.stringValue || '',
+            trialEndDate: f.trialEndDate?.stringValue || '',
+            trialStatus: (f.trialStatus?.stringValue as 'active' | 'expired') || 'expired',
+            purchaseToken: f.purchaseToken?.stringValue,
+            orderId: f.orderId?.stringValue,
+            subscriptionStatus: f.subscriptionStatus?.stringValue,
+            updatedAt: f.updatedAt?.stringValue || new Date().toISOString(),
+          };
+          trialRecordStore.set(emailHash, record);
+          persistTrialRecordStoreToDisk();
+          return record;
+        }
+      }
+    } catch (err) {
+      console.warn('[Trial Persistence] Error checking Firestore trialRecords:', err);
+    }
+  }
+
+  // 5. Query Firestore token document if purchaseToken provided
+  if (purchaseToken) {
+    try {
+      const serviceToken = await getFirestoreServiceAccountToken();
+      if (serviceToken) {
+        const tokenKey = `token_${hashToken(purchaseToken)}`;
+        const docUrl = `${FIRESTORE_REST_BASE}/trialRecords/${encodeURIComponent(tokenKey)}`;
+        const res = await fetch(docUrl, {
+          headers: { Authorization: `Bearer ${serviceToken}` },
+        });
+        if (res.ok) {
+          const docData = await res.json();
+          const f = docData.fields || {};
+          const linkedEmailHash = f.emailHash?.stringValue;
+          if (linkedEmailHash && trialRecordStore.has(linkedEmailHash)) {
+            return trialRecordStore.get(linkedEmailHash)!;
+          }
+          if (linkedEmailHash) {
+            return fetchDurableTrialRecord(linkedEmailHash);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[Trial Persistence] Error checking Firestore token document:', err);
+    }
+  }
+
+  // 6. Check past account deletion jobs in Firestore for this uid
+  if (uid) {
+    try {
+      const pastJob = await fetchDeletionJobFromFirestore(uid);
+      if (pastJob?.trialEverStarted) {
+        const syntheticRecord: DurableTrialClaimRecord = {
+          emailHash: pastJob.email ? hashIdentifier(pastJob.email) : hashIdentifier(uid),
+          originalUid: uid,
+          trialClaimedAt: pastJob.requestedAt || new Date().toISOString(),
+          trialStartDate: pastJob.requestedAt || new Date().toISOString(),
+          trialEndDate: pastJob.requestedAt || new Date().toISOString(),
+          trialStatus: 'expired',
+          subscriptionStatus: 'EXPIRED',
+          updatedAt: new Date().toISOString(),
+        };
+        trialRecordStore.set(syntheticRecord.emailHash, syntheticRecord);
+        persistTrialRecordStoreToDisk();
+        return syntheticRecord;
+      }
+    } catch (err) {
+      console.warn('[Trial Persistence] Error checking past deletion job:', err);
+    }
+  }
+
+  return null;
+}
+
+async function saveDurableTrialRecord(record: DurableTrialClaimRecord): Promise<boolean> {
+  try {
+    record.updatedAt = new Date().toISOString();
+    trialRecordStore.set(record.emailHash, record);
+    persistTrialRecordStoreToDisk();
+
+    const serviceToken = await getFirestoreServiceAccountToken();
+    if (!serviceToken) {
+      console.warn('[Trial Persistence] No service token available for Firestore trialRecords write.');
+      return false;
+    }
+
+    const fields: Record<string, any> = {
+      emailHash: { stringValue: record.emailHash },
+      originalUid: { stringValue: record.originalUid },
+      trialClaimedAt: { stringValue: record.trialClaimedAt },
+      trialStartDate: { stringValue: record.trialStartDate },
+      trialEndDate: { stringValue: record.trialEndDate },
+      trialStatus: { stringValue: record.trialStatus },
+      updatedAt: { stringValue: record.updatedAt },
+    };
+    if (record.purchaseToken) {
+      fields.purchaseToken = { stringValue: record.purchaseToken };
+    }
+    if (record.orderId) {
+      fields.orderId = { stringValue: record.orderId };
+    }
+    if (record.subscriptionStatus) {
+      fields.subscriptionStatus = { stringValue: record.subscriptionStatus };
+    }
+
+    const docUrl = `${FIRESTORE_REST_BASE}/trialRecords/${encodeURIComponent(record.emailHash)}`;
+    const res = await fetch(docUrl, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${serviceToken}`,
+      },
+      body: JSON.stringify({ fields }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn(`[Trial Persistence] Failed to write trial record to Firestore (${res.status}):`, errText);
+    } else {
+      console.log(`[Trial Persistence] Durable trial record saved to Firestore for hash: ${record.emailHash.slice(0, 10)}...`);
+    }
+
+    if (record.purchaseToken) {
+      const tokenKey = `token_${hashToken(record.purchaseToken)}`;
+      const tokenDocUrl = `${FIRESTORE_REST_BASE}/trialRecords/${encodeURIComponent(tokenKey)}`;
+      await fetch(tokenDocUrl, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${serviceToken}`,
+        },
+        body: JSON.stringify({
+          fields: {
+            emailHash: { stringValue: record.emailHash },
+            purchaseToken: { stringValue: record.purchaseToken },
+            trialStatus: { stringValue: record.trialStatus },
+            updatedAt: { stringValue: record.updatedAt },
+          },
+        }),
+      }).catch(() => {});
+    }
+
+    return true;
+  } catch (err) {
+    console.warn('[Trial Persistence] Error saving durable trial record:', err);
+    return false;
+  }
+}
+
 export interface GetSubscriptionResult {
   record: UserSubscriptionRecord | null;
   unavailable?: boolean;
@@ -1224,9 +1483,21 @@ export interface GetSubscriptionResult {
 
 export async function getSubscriptionRecord(
   userId: string,
-  idToken?: string
+  idToken?: string,
+  userEmail?: string,
+  purchaseToken?: string
 ): Promise<GetSubscriptionResult> {
   const serverNow = new Date();
+
+  // If userEmail not provided directly, attempt to read from Firestore user profile
+  let effectiveEmail = userEmail;
+  const userProfile = await fetchUserProfileFromFirestore(userId, idToken);
+  if (!effectiveEmail && userProfile?.email) {
+    effectiveEmail = userProfile.email;
+  }
+
+  const emailHash = effectiveEmail ? hashIdentifier(effectiveEmail) : null;
+  const durableTrial = await fetchDurableTrialRecord(emailHash, purchaseToken, userId);
 
   // 1. Authoritatively check Firestore /subscriptions/{userId}
   const remote = await fetchSubscriptionFromFirestore(userId, idToken);
@@ -1234,28 +1505,47 @@ export async function getSubscriptionRecord(
   if (remote.status === 'FOUND' && remote.record) {
     const record = remote.record;
     const resolvedExpiry = record.subscriptionExpiryTime || record.subscriptionExpiryDate;
+    const isPaidSubActive = (record.subscriptionStatus === 'ACTIVE' || record.subscriptionStatus === 'CANCELED_BUT_ACTIVE') &&
+      Boolean(resolvedExpiry && new Date(resolvedExpiry).getTime() > serverNow.getTime());
+
+    if (isPaidSubActive) {
+      // Active paid subscription takes full precedence!
+      subscriptionStore.set(userId, record);
+      persistSubscriptionStoreToDisk();
+      return { record, unavailable: false };
+    }
+
+    // If paid subscription expired, mark it expired
     if (resolvedExpiry && (record.subscriptionStatus === 'ACTIVE' || record.subscriptionStatus === 'CANCELED_BUT_ACTIVE')) {
       const expTime = new Date(resolvedExpiry).getTime();
       if (!isNaN(expTime) && serverNow.getTime() > expTime) {
         record.subscriptionStatus = 'EXPIRED';
-        saveSubscriptionRecord(record, idToken).catch(() => {});
-      }
-    } else if (record.subscriptionStatus === 'TRIAL' && record.trialEndDate) {
-      const trialEndTime = new Date(record.trialEndDate).getTime();
-      if (!isNaN(trialEndTime) && serverNow.getTime() > trialEndTime) {
-        record.subscriptionStatus = 'EXPIRED';
-        record.trialStatus = 'expired';
-        saveSubscriptionRecord(record, idToken).catch(() => {});
       }
     }
+
+    // If durable trial record exists or remote record had trial:
+    if (durableTrial || record.trialEverStarted || record.subscriptionStatus === 'TRIAL') {
+      const trialEndDateStr = durableTrial?.trialEndDate || record.trialEndDate;
+      const trialEndTime = trialEndDateStr ? new Date(trialEndDateStr).getTime() : NaN;
+      const isTrialExpired = isNaN(trialEndTime) || serverNow.getTime() > trialEndTime;
+
+      record.trialEverStarted = true;
+      record.trialAlreadyUsed = true;
+      record.trialStartDate = durableTrial?.trialStartDate || record.trialStartDate || serverNow.toISOString();
+      record.trialEndDate = trialEndDateStr || serverNow.toISOString();
+      record.trialStatus = isTrialExpired ? 'expired' : 'active';
+      if (record.subscriptionStatus !== 'ACTIVE' && record.subscriptionStatus !== 'CANCELED_BUT_ACTIVE') {
+        record.subscriptionStatus = isTrialExpired ? 'EXPIRED' : 'TRIAL';
+      }
+      saveSubscriptionRecord(record, idToken).catch(() => {});
+    }
+
     subscriptionStore.set(userId, record);
     persistSubscriptionStoreToDisk();
     return { record, unavailable: false };
   }
 
-  // 2. Check if user already had an existing account in /users/{userId} to restore verified subscription
-  const userProfile = await fetchUserProfileFromFirestore(userId, idToken);
-
+  // 2. Check user profile for existing active subscription or genuine trial
   if (userProfile) {
     const rawSubStatus = userProfile.subscriptionStatus || '';
     const isSubActive =
@@ -1273,9 +1563,10 @@ export async function getSubscriptionRecord(
         userId,
         subscriptionStatus: isExpiredNow ? 'EXPIRED' : (rawSubStatus.toUpperCase() === 'CANCELED_BUT_ACTIVE' ? 'CANCELED_BUT_ACTIVE' : 'ACTIVE'),
         trialStatus: (userProfile.trialStatus as any) || (userProfile.trialEverStarted ? 'expired' : 'not_started'),
-        trialEverStarted: Boolean(userProfile.trialEverStarted),
-        trialStartDate: userProfile.trialStartDate || null,
-        trialEndDate: userProfile.trialEndDate || null,
+        trialEverStarted: Boolean(userProfile.trialEverStarted || durableTrial),
+        trialAlreadyUsed: Boolean(userProfile.trialAlreadyUsed || isExpiredNow || durableTrial),
+        trialStartDate: userProfile.trialStartDate || durableTrial?.trialStartDate || null,
+        trialEndDate: userProfile.trialEndDate || durableTrial?.trialEndDate || null,
         subscriptionExpiryDate: resolvedExpiry,
         subscriptionExpiryTime: resolvedExpiry,
         expiryDate: resolvedExpiry,
@@ -1285,7 +1576,7 @@ export async function getSubscriptionRecord(
         planId: userProfile.planId || userProfile.subscriptionBasePlanId || userProfile.subscriptionBasePlan || 'quarterly',
         autoRenewing: userProfile.autoRenewing ?? true,
         acknowledged: true,
-        purchaseToken: userProfile.purchaseToken,
+        purchaseToken: userProfile.purchaseToken || purchaseToken,
         lastVerifiedAt: userProfile.lastVerifiedAt || serverNow.toISOString(),
         updatedAt: serverNow.toISOString(),
       };
@@ -1295,85 +1586,60 @@ export async function getSubscriptionRecord(
       syncSubscriptionToFirestore(restoredRecord, idToken).catch(() => {});
       return { record: restoredRecord, unavailable: false };
     }
-
-    // Check if older existing user already genuinely started a trial before
-    const hasGenuineTrial = Boolean(
-      (userProfile.trialStartDate && userProfile.trialStartDate !== 'null') ||
-      (userProfile.trialEndDate && userProfile.trialEndDate !== 'null') ||
-      userProfile.trialEverStarted === true ||
-      rawSubStatus.toUpperCase() === 'TRIAL'
-    );
-
-    if (hasGenuineTrial) {
-      let trialStart: Date = serverNow;
-      let trialEnd: Date = serverNow;
-      let isExpired = false;
-
-      if (userProfile?.trialEndDate) {
-        const parsedEnd = new Date(userProfile.trialEndDate);
-        if (!isNaN(parsedEnd.getTime())) {
-          trialEnd = parsedEnd;
-          if (userProfile.trialStartDate) {
-            const parsedStart = new Date(userProfile.trialStartDate);
-            trialStart = !isNaN(parsedStart.getTime()) ? parsedStart : new Date(parsedEnd.getTime() - TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
-          } else {
-            trialStart = new Date(parsedEnd.getTime() - TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
-          }
-          const maxAllowedEnd = new Date(trialStart.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
-          if (trialEnd.getTime() > maxAllowedEnd.getTime()) {
-            trialEnd = maxAllowedEnd;
-          }
-          if (serverNow.getTime() >= trialEnd.getTime()) {
-            isExpired = true;
-          }
-        } else {
-          isExpired = true;
-        }
-      } else if (userProfile?.trialStartDate) {
-        const parsedStart = new Date(userProfile.trialStartDate);
-        if (!isNaN(parsedStart.getTime())) {
-          trialStart = parsedStart;
-          trialEnd = new Date(parsedStart.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
-          if (serverNow.getTime() >= trialEnd.getTime()) {
-            isExpired = true;
-          }
-        } else {
-          isExpired = true;
-        }
-      } else {
-        isExpired = true;
-      }
-
-      const existingTrialRecord: UserSubscriptionRecord = {
-        userId,
-        subscriptionStatus: isExpired ? 'EXPIRED' : 'TRIAL',
-        trialStatus: isExpired ? 'expired' : 'active',
-        trialEverStarted: true,
-        trialStartDate: trialStart.toISOString(),
-        trialEndDate: trialEnd.toISOString(),
-        subscriptionExpiryDate: null,
-        subscriptionExpiryTime: null,
-        expiryDate: null,
-        subscriptionProductId: 'property_agent_pro',
-        subscriptionBasePlan: 'monthly',
-        subscriptionBasePlanId: 'monthly',
-        planId: 'monthly',
-        autoRenewing: false,
-        acknowledged: false,
-        updatedAt: serverNow.toISOString(),
-      };
-
-      subscriptionStore.set(userId, existingTrialRecord);
-      persistSubscriptionStoreToDisk();
-      syncSubscriptionToFirestore(existingTrialRecord, idToken).catch(() => {});
-      return { record: existingTrialRecord, unavailable: false };
-    }
   }
 
-  // 3. If cached in durable disk store, return it only if genuinely recorded
+  // 3. Durable trial record enforcement: If this user (by email hash, token, or uid) previously claimed trial
+  if (durableTrial) {
+    const trialEndTime = new Date(durableTrial.trialEndDate).getTime();
+    const isRecreatedAccount = Boolean(durableTrial.originalUid && durableTrial.originalUid !== userId);
+    const isExpired =
+      durableTrial.trialStatus === 'expired' ||
+      isRecreatedAccount ||
+      durableTrial.subscriptionStatus === 'EXPIRED' ||
+      isNaN(trialEndTime) ||
+      serverNow.getTime() >= trialEndTime;
+
+    const restoredTrialRecord: UserSubscriptionRecord = {
+      userId,
+      subscriptionStatus: isExpired ? 'EXPIRED' : 'TRIAL',
+      trialStatus: isExpired ? 'expired' : 'active',
+      trialEverStarted: true,
+      trialAlreadyUsed: true,
+      trialStartDate: durableTrial.trialStartDate,
+      trialEndDate: durableTrial.trialEndDate,
+      subscriptionExpiryDate: null,
+      subscriptionExpiryTime: null,
+      expiryDate: null,
+      subscriptionProductId: 'property_agent_pro',
+      subscriptionBasePlan: 'monthly',
+      subscriptionBasePlanId: 'monthly',
+      planId: 'monthly',
+      autoRenewing: false,
+      acknowledged: false,
+      updatedAt: serverNow.toISOString(),
+    };
+
+    subscriptionStore.set(userId, restoredTrialRecord);
+    persistSubscriptionStoreToDisk();
+    syncSubscriptionToFirestore(restoredTrialRecord, idToken).catch(() => {});
+    syncUserProfileTrialToFirestore(
+      userId,
+      {
+        trialStatus: restoredTrialRecord.trialStatus as any,
+        trialStartDate: restoredTrialRecord.trialStartDate,
+        trialEndDate: restoredTrialRecord.trialEndDate,
+        trialEverStarted: true,
+        trialAlreadyUsed: true,
+        subscriptionStatus: restoredTrialRecord.subscriptionStatus,
+      },
+      idToken
+    ).catch(() => {});
+    return { record: restoredTrialRecord, unavailable: false };
+  }
+
+  // 4. If cached in durable disk store, return it only if genuinely recorded
   if (subscriptionStore.has(userId)) {
     const cached = subscriptionStore.get(userId)!;
-    // Guard against any legacy automated trial activation in cache:
     if (cached.subscriptionStatus === 'TRIAL' && !cached.trialEverStarted && !cached.trialStartDate) {
       cached.subscriptionStatus = 'NOT_STARTED';
       cached.trialStatus = 'not_started';
@@ -1385,13 +1651,14 @@ export async function getSubscriptionRecord(
     return { record: cached, unavailable: false };
   }
 
-  // 4. Default state for a brand-new user: Trial is NOT STARTED until manually tapped.
-  // Missing subscription record means NO PAID SUBSCRIPTION and NOT_STARTED trial.
+  // 5. Default state for a brand-new user who has never claimed a trial:
+  // Trial is NOT STARTED until manually tapped.
   const defaultRecord: UserSubscriptionRecord = {
     userId,
     subscriptionStatus: 'NOT_STARTED',
     trialStatus: 'not_started',
     trialEverStarted: false,
+    trialAlreadyUsed: false,
     trialStartDate: null,
     trialEndDate: null,
     subscriptionExpiryDate: null,
@@ -2082,7 +2349,11 @@ async function startServer() {
       if (!verifiedUid) return;
 
       const idToken = extractIdToken(req);
-      const subResult = await getSubscriptionRecord(verifiedUid, idToken);
+      const verifiedToken = idToken ? await verifyFirebaseIdToken(idToken) : null;
+      const userEmail = verifiedToken?.email || (typeof req.query.email === 'string' ? req.query.email : undefined);
+      const purchaseToken = (typeof req.query.purchaseToken === 'string' ? req.query.purchaseToken : undefined);
+
+      const subResult = await getSubscriptionRecord(verifiedUid, idToken, userEmail, purchaseToken);
 
       if (subResult.unavailable || !subResult.record) {
         return res.status(503).json({
@@ -2102,6 +2373,8 @@ async function startServer() {
         if (isNaN(trialEndTime) || now > trialEndTime) {
           currentStatus = 'EXPIRED';
           record.subscriptionStatus = 'EXPIRED';
+          record.trialStatus = 'expired';
+          record.trialAlreadyUsed = true;
           await saveSubscriptionRecord(record, idToken);
         }
       } else if (currentStatus === 'CANCELED_BUT_ACTIVE') {
@@ -2167,8 +2440,6 @@ async function startServer() {
                   await saveSubscriptionRecord(record, idToken);
                 } else if (refreshed.verificationPending) {
                   // Temporary network/API failure while re-verifying an already past-due expiry timestamp.
-                  // Since the stored paid expiry has already elapsed and cannot be renewed without Google Play confirmation,
-                  // mark as expired to prevent granting unverified Pro access beyond expiryTime.
                   currentStatus = 'EXPIRED';
                   record.subscriptionStatus = 'EXPIRED';
                   await saveSubscriptionRecord(record, idToken);
@@ -2201,20 +2472,60 @@ async function startServer() {
       const serverTimestamp = new Date(now).toISOString();
       const trialStatus = record.trialStatus || (currentStatus === 'TRIAL' ? 'active' : (record.trialEverStarted ? 'expired' : 'not_started'));
       const isTrialActive = currentStatus === 'TRIAL' && trialStatus === 'active';
+      const isSubscribed = currentStatus === 'ACTIVE' || currentStatus === 'CANCELED_BUT_ACTIVE';
+
+      // Check durable trial record for final authoritative trial claim check
+      const effectiveHash = userEmail ? hashIdentifier(userEmail) : null;
+      const durableTrial = await fetchDurableTrialRecord(effectiveHash, purchaseToken || record.purchaseToken, verifiedUid);
+      const isRecreatedAccount = Boolean(durableTrial && durableTrial.originalUid && durableTrial.originalUid !== verifiedUid);
+      const isDurableTrialExpired = Boolean(
+        durableTrial && (
+          durableTrial.trialStatus === 'expired' ||
+          isRecreatedAccount ||
+          durableTrial.subscriptionStatus === 'EXPIRED' ||
+          now >= new Date(durableTrial.trialEndDate).getTime()
+        )
+      );
+      const trialAlreadyUsed = Boolean(
+        record.trialAlreadyUsed ||
+        record.trialEverStarted ||
+        durableTrial ||
+        isDurableTrialExpired ||
+        trialStatus === 'expired' ||
+        currentStatus === 'EXPIRED'
+      );
+
+      let effectiveStatus = currentStatus;
+      let effectiveTrialStatus = trialStatus;
+      let effectiveIsTrialActive = isTrialActive;
+      let effectiveTrialDaysRemaining = trialDaysRemaining;
+
+      if (!isSubscribed && (isDurableTrialExpired || trialAlreadyUsed || currentStatus === 'EXPIRED' || trialStatus === 'expired')) {
+        effectiveStatus = 'EXPIRED';
+        effectiveTrialStatus = 'expired';
+        effectiveIsTrialActive = false;
+        effectiveTrialDaysRemaining = 0;
+        record.subscriptionStatus = 'EXPIRED';
+        record.trialStatus = 'expired';
+        record.trialAlreadyUsed = true;
+        saveSubscriptionRecord(record, idToken).catch(() => {});
+      }
 
       res.json({
         success: true,
         userId: record.userId,
-        subscriptionStatus: currentStatus,
-        trialStatus,
-        isTrialActive,
-        trialEverStarted: Boolean(record.trialEverStarted),
+        subscriptionStatus: effectiveStatus,
+        trialStatus: effectiveTrialStatus,
+        isTrialActive: effectiveIsTrialActive,
+        trialEverStarted: Boolean(record.trialEverStarted || durableTrial || trialAlreadyUsed),
+        trialAlreadyUsed: Boolean(trialAlreadyUsed && !isSubscribed),
+        trialMessage: trialAlreadyUsed && !isSubscribed ? 'Free trial already used. Please subscribe to continue.' : undefined,
         trialStartDate: record.trialStartDate || null,
         trialEndDate: record.trialEndDate || null,
         serverTimestamp,
         serverNow: serverTimestamp,
         currentServerTimestamp: serverTimestamp,
-        trialDaysRemaining,
+        trialDaysRemaining: effectiveTrialDaysRemaining,
         subscriptionExpiryDate: record.subscriptionExpiryDate,
         subscriptionExpiryTime: record.subscriptionExpiryTime || record.subscriptionExpiryDate,
         expiryDate: record.expiryDate || record.subscriptionExpiryDate,
@@ -2226,8 +2537,8 @@ async function startServer() {
         lastVerifiedAt: record.lastVerifiedAt,
         autoRenewing: record.autoRenewing,
         paymentIssueMessage: record.paymentIssueMessage,
-        isSubscribed: currentStatus === 'ACTIVE' || currentStatus === 'CANCELED_BUT_ACTIVE',
-        isFeatureLocked: currentStatus === 'EXPIRED',
+        isSubscribed,
+        isFeatureLocked: effectiveStatus === 'EXPIRED',
       });
     } catch (err: any) {
       console.error('[Subscription Status Error]:', err);
@@ -2271,10 +2582,17 @@ async function startServer() {
         });
       }
 
+      const userEmail = verified.email || (typeof req.body?.email === 'string' ? req.body.email : undefined);
+      const purchaseToken = typeof req.body?.purchaseToken === 'string' ? req.body.purchaseToken : undefined;
+
       // Check current authoritative record
-      const subResult = await getSubscriptionRecord(verifiedUid, idToken);
+      const subResult = await getSubscriptionRecord(verifiedUid, idToken, userEmail, purchaseToken);
       const currentRecord = subResult.record;
       const userProfile = await fetchUserProfileFromFirestore(verifiedUid, idToken);
+
+      const effectiveEmail = userEmail || userProfile?.email;
+      const emailHash = effectiveEmail ? hashIdentifier(effectiveEmail) : null;
+      const durableTrial = await fetchDurableTrialRecord(emailHash, purchaseToken || currentRecord?.purchaseToken, verifiedUid);
 
       // Check if user already has an active paid subscription
       const isPaidActive =
@@ -2289,15 +2607,17 @@ async function startServer() {
         });
       }
 
-      // Check if user has already started or completed a free trial (including on an earlier deleted account)
+      // Check if user has already started or completed a free trial (including durable trial records across account deletions)
       const pastJob = await fetchDeletionJobFromFirestore(verifiedUid);
       const trialAlreadyUsed = Boolean(
+        durableTrial ||
         pastJob?.trialEverStarted ||
         currentRecord?.trialEverStarted ||
         currentRecord?.trialStartDate ||
         currentRecord?.trialEndDate ||
         currentRecord?.subscriptionStatus === 'TRIAL' ||
         currentRecord?.subscriptionStatus === 'EXPIRED' ||
+        userProfile?.trialAlreadyUsed ||
         userProfile?.trialEverStarted ||
         userProfile?.trialStartDate ||
         userProfile?.trialEndDate ||
@@ -2309,7 +2629,8 @@ async function startServer() {
         return res.status(400).json({
           success: false,
           error: 'TRIAL_ALREADY_USED',
-          message: 'The 7-day free trial has already been activated for this account.',
+          message: 'Free trial already used. Please subscribe to continue.',
+          trialAlreadyUsed: true,
         });
       }
 
@@ -2324,6 +2645,7 @@ async function startServer() {
         subscriptionStatus: 'TRIAL',
         trialStatus: 'active',
         trialEverStarted: true,
+        trialAlreadyUsed: false,
         trialStartDate,
         trialEndDate,
         subscriptionExpiryDate: null,
@@ -2343,6 +2665,21 @@ async function startServer() {
       subscriptionStore.set(verifiedUid, updatedRecord);
       persistSubscriptionStoreToDisk();
 
+      // Persist durable trial claim record across account recreations
+      const durableRecord: DurableTrialClaimRecord = {
+        emailHash: emailHash || hashIdentifier(verifiedUid),
+        originalUid: verifiedUid,
+        trialClaimedAt: trialStartDate,
+        trialStartDate,
+        trialEndDate,
+        trialStatus: 'active',
+        purchaseToken,
+        orderId: typeof req.body?.orderId === 'string' ? req.body.orderId : undefined,
+        subscriptionStatus: 'TRIAL',
+        updatedAt: trialStartDate,
+      };
+      await saveDurableTrialRecord(durableRecord);
+
       await syncSubscriptionToFirestore(updatedRecord, idToken);
       await syncUserProfileTrialToFirestore(
         verifiedUid,
@@ -2351,6 +2688,7 @@ async function startServer() {
           trialStartDate,
           trialEndDate,
           trialEverStarted: true,
+          trialAlreadyUsed: false,
           subscriptionStatus: 'TRIAL',
         },
         idToken
@@ -2365,6 +2703,7 @@ async function startServer() {
         trialStartDate,
         trialEndDate,
         trialEverStarted: true,
+        trialAlreadyUsed: false,
         serverNow: trialStartDate,
         serverTimestamp: trialStartDate,
         trialDaysRemaining: TRIAL_DURATION_DAYS,
@@ -2911,17 +3250,51 @@ async function startServer() {
 
       // 2. Determine if user ever started a trial before deleting
       const existingSub = subscriptionStore.get(verifiedUid) || (await fetchSubscriptionFromFirestore(verifiedUid)).record;
+      const userProf = await fetchUserProfileFromFirestore(verifiedUid, token);
+      const userEmail = verified.email || (typeof req.body?.email === 'string' ? req.body.email : undefined) || userProf?.email;
+      const emailHash = userEmail ? hashIdentifier(userEmail) : null;
+      const durableTrial = await fetchDurableTrialRecord(emailHash, existingSub?.purchaseToken || userProf?.purchaseToken, verifiedUid);
+
       const hadTrial = Boolean(
+        durableTrial ||
+        existingSub?.trialAlreadyUsed ||
         existingSub?.trialEverStarted ||
         existingSub?.trialStartDate ||
         existingSub?.trialEndDate ||
-        existingSub?.subscriptionStatus === 'TRIAL'
+        existingSub?.subscriptionStatus === 'TRIAL' ||
+        existingSub?.subscriptionStatus === 'EXPIRED' ||
+        userProf?.trialAlreadyUsed ||
+        userProf?.trialEverStarted ||
+        userProf?.trialStartDate ||
+        userProf?.trialEndDate ||
+        userProf?.subscriptionStatus === 'TRIAL' ||
+        userProf?.subscriptionStatus === 'EXPIRED'
       );
 
-      // Immediately revoke in-memory access & billing cache
+      // Save durable trial record to ensure trial never resets upon recreation
+      if (hadTrial && (emailHash || verifiedUid)) {
+        await saveDurableTrialRecord({
+          emailHash: emailHash || hashIdentifier(verifiedUid),
+          originalUid: verifiedUid,
+          trialClaimedAt: durableTrial?.trialClaimedAt || existingSub?.trialStartDate || userProf?.trialStartDate || new Date().toISOString(),
+          trialStartDate: durableTrial?.trialStartDate || existingSub?.trialStartDate || userProf?.trialStartDate || new Date().toISOString(),
+          trialEndDate: durableTrial?.trialEndDate || existingSub?.trialEndDate || userProf?.trialEndDate || new Date().toISOString(),
+          trialStatus: 'expired',
+          purchaseToken: durableTrial?.purchaseToken || existingSub?.purchaseToken || userProf?.purchaseToken,
+          orderId: durableTrial?.orderId || existingSub?.orderId,
+          subscriptionStatus: existingSub?.subscriptionStatus || 'EXPIRED',
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      // Immediately revoke in-memory access
       revokedUids.add(verifiedUid);
-      subscriptionStore.delete(verifiedUid);
-      persistSubscriptionStoreToDisk();
+      if (existingSub) {
+        existingSub.subscriptionStatus = 'EXPIRED';
+        existingSub.trialAlreadyUsed = true;
+        subscriptionStore.set(verifiedUid, existingSub);
+        persistSubscriptionStoreToDisk();
+      }
 
       // 3. Mark account as deleted/disabled in durable storage (Firestore /users/{uid})
       // This immediately causes Firestore security rules to reject any further reads/writes
