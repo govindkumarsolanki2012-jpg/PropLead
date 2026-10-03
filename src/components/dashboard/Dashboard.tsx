@@ -21,7 +21,7 @@ import {
   X,
   MapPin,
 } from 'lucide-react';
-import { Lead, Property, UserProfile, LeadStatus, TabType } from '../../types';
+import { Lead, Property, UserProfile, LeadStatus, TabType, SubscriptionResolution } from '../../types';
 import {
   formatRelativeDate,
   formatBudgetRange,
@@ -42,6 +42,7 @@ interface DashboardProps {
   leads: Lead[];
   properties?: Property[];
   profile: UserProfile;
+  subscriptionResolution: SubscriptionResolution;
   searchQuery?: string;
   onClearSearch?: () => void;
   onOpenQuickAdd: () => void;
@@ -59,6 +60,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   leads,
   properties = [],
   profile,
+  subscriptionResolution,
   searchQuery = '',
   onClearSearch,
   onOpenQuickAdd,
@@ -377,7 +379,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   return (
     <div id="dashboard-main-view" className="flex-1 pb-8 space-y-4 w-full max-w-full">
       {/* Trial Reminders Banner */}
-      <TrialBanner profile={profile} onOpenSubscription={onOpenSubscription} />
+      <TrialBanner profile={profile} subscriptionResolution={subscriptionResolution} onOpenSubscription={onOpenSubscription} />
 
       {/* Hero Welcome & Quick Stats */}
       <div className="px-4 pt-1">
@@ -822,3 +824,4 @@ export const Dashboard: React.FC<DashboardProps> = ({
     </div>
   );
 };
+

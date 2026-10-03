@@ -19,7 +19,7 @@ import {
   getDownloadURL,
   deleteObject,
 } from 'firebase/storage';
-import { db, storage, auth, googleProvider, FirebaseUser } from '../lib/firebase';
+import { db, storage, auth, authReady, googleProvider, FirebaseUser } from '../lib/firebase';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -122,24 +122,45 @@ const DEMO_PROP_IDS = new Set([
 export type { ConfirmationResult, RecaptchaVerifier };
 
 export function subscribeToAuth(callback: (user: FirebaseUser | null) => void): Unsubscribe {
-  return onAuthStateChanged(auth, (user) => {
-    if (isNativeAndroid()) {
-      console.info('[GoogleAuth] auth_state_received', { authenticated: Boolean(user) });
-      if (isGoogleAuthDiagnosticsActive()) {
-        reportGoogleAuthDiagnostic({
-          stage: 12,
-          status: 'success',
-          detail: 'Firebase auth-state listener fired',
-        });
-        reportGoogleAuthDiagnostic({
-          stage: 13,
-          status: user ? 'success' : 'failed',
-          detail: user ? 'Final state: authenticated' : 'Final state: not authenticated',
-        });
-      }
+  let unsubscribeAuth: Unsubscribe | null = null;
+  let cancelled = false;
+
+  void authReady
+    .catch((error) => {
+      // Do not treat persistence restoration trouble as an explicit logout.
+      // The authoritative auth listener still gets the opportunity to resolve.
+      console.warn('[FirebaseAuth] Persistence restoration notice:', error);
+    })
+    .then(() => {
+      if (cancelled) return;
+
+      unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+        if (isNativeAndroid()) {
+          console.info('[GoogleAuth] auth_state_received', { authenticated: Boolean(user) });
+          if (isGoogleAuthDiagnosticsActive()) {
+            reportGoogleAuthDiagnostic({
+              stage: 12,
+              status: 'success',
+              detail: 'Firebase auth-state listener fired',
+            });
+            reportGoogleAuthDiagnostic({
+              stage: 13,
+              status: user ? 'success' : 'failed',
+              detail: user ? 'Final state: authenticated' : 'Final state: not authenticated',
+            });
+          }
+        }
+        callback(user);
+      });
+    });
+
+  return () => {
+    cancelled = true;
+    if (unsubscribeAuth) {
+      unsubscribeAuth();
+      unsubscribeAuth = null;
     }
-    callback(user);
-  });
+  };
 }
 
 /**
@@ -887,3 +908,4 @@ export async function uploadPropertyPhoto(
     throw err;
   }
 }
+

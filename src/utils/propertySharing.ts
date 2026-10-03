@@ -93,3 +93,5 @@ export async function openWhatsAppPropertyShare(
   const message = generateCustomerPropertyMessage(property, profile, customerName, galleryUrl);
   openWhatsApp(customerPhone || '', message);
 }
+
+

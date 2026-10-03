@@ -8,6 +8,45 @@ export const GOOGLE_PLAY_BASE_PLAN_ID = 'quarterly';
 export const GOOGLE_PLAY_PRICE_TEXT = '₹199 / 3 months';
 export const GOOGLE_PLAY_PACKAGE_NAME = 'com.proplead.tracker';
 
+export type RestoreDiagnosticCode =
+  | 'RESTORE_SUCCESS'
+  | 'NO_PLAY_PURCHASE'
+  | 'PLAY_QUERY_FAILED'
+  | 'NO_PURCHASE_TOKEN'
+  | 'BACKEND_VERIFY_FAILED'
+  | 'TOKEN_OWNER_MISMATCH'
+  | 'FIREBASE_TOKEN_FAILED'
+  | 'RESTORE_NOT_SUPPORTED'
+  | 'RESTORE_PENDING';
+
+export interface GooglePlayRestoreResult {
+  success: boolean;
+  restored: boolean;
+  code: RestoreDiagnosticCode;
+  billingUnavailable?: boolean;
+  profileUpdates?: Partial<UserProfile>;
+  message: string;
+}
+
+const isPurchasedState = (purchaseState: unknown): boolean => {
+  const normalized = String(purchaseState ?? '').trim().toUpperCase();
+  return normalized === '1' || normalized === 'PURCHASED';
+};
+
+const logRestoreDiagnostic = (
+  userId: string,
+  code: RestoreDiagnosticCode,
+  purchaseTokenFound: boolean,
+  backendRestored: boolean
+): void => {
+  console.info('[Google Play Restore]', {
+    uidPrefix: userId.slice(0, 6),
+    code,
+    purchaseTokenFound,
+    backendRestored,
+  });
+};
+
 export const SUBSCRIPTION_PLANS: Record<SubscriptionPlanId, SubscriptionPlanDetails> = {
   monthly: {
     id: 'monthly',
@@ -1063,13 +1102,13 @@ export async function launchGooglePlayPurchase(
 export async function restoreGooglePlayPurchases(
   userId: string,
   onProgress?: (step: string) => void
-): Promise<{
-  success: boolean;
-  restored: boolean;
-  billingUnavailable?: boolean;
-  profileUpdates?: Partial<UserProfile>;
-  message: string;
-}> {
+): Promise<GooglePlayRestoreResult> {
+  let purchaseTokenFound = false;
+  const finish = (result: GooglePlayRestoreResult): GooglePlayRestoreResult => {
+    logRestoreDiagnostic(userId, result.code, purchaseTokenFound, result.restored);
+    return result;
+  };
+
   try {
     onProgress?.('Checking Google Play...');
 
@@ -1094,23 +1133,62 @@ export async function restoreGooglePlayPurchases(
             productType: PURCHASE_TYPE.SUBS,
           });
 
-          if (result.purchases && result.purchases.length > 0) {
-            const matching =
-              result.purchases.find(
-                (p) =>
-                  (p.productIdentifier === GOOGLE_PLAY_PRODUCT_ID || !p.productIdentifier) &&
-                  p.purchaseToken &&
-                  p.purchaseState !== '0'
-              ) || result.purchases[0];
+          const matching = result.purchases?.find(
+            (p) =>
+              p.productIdentifier === GOOGLE_PLAY_PRODUCT_ID &&
+              isPurchasedState(p.purchaseState)
+          );
 
-            if (matching && matching.purchaseToken && matching.purchaseState !== '0') {
-              purchaseToken = matching.purchaseToken;
-            }
+          if (!matching) {
+            const pending = result.purchases?.some(
+              (p) => p.productIdentifier === GOOGLE_PLAY_PRODUCT_ID && String(p.purchaseState) === '2'
+            );
+            return finish({
+              success: true,
+              restored: false,
+              code: pending ? 'RESTORE_PENDING' : 'NO_PLAY_PURCHASE',
+              message: 'No active subscription found for this account.',
+            });
           }
+
+          if (!matching.purchaseToken) {
+            return finish({
+              success: false,
+              restored: false,
+              code: 'NO_PURCHASE_TOKEN',
+              message: 'No active subscription found for this account.',
+            });
+          }
+
+          purchaseToken = matching.purchaseToken;
+          purchaseTokenFound = true;
+        } else {
+          return finish({
+            success: false,
+            restored: false,
+            code: 'RESTORE_NOT_SUPPORTED',
+            billingUnavailable: true,
+            message: 'Google Play billing is not supported on this device.',
+          });
         }
       } catch (nativeErr) {
-        console.warn('[NativePurchases] getPurchases failed:', nativeErr);
+        console.warn('[NativePurchases] purchase query failed safely.');
+        return finish({
+          success: false,
+          restored: false,
+          code: 'PLAY_QUERY_FAILED',
+          billingUnavailable: true,
+          message: 'Google Play billing is currently unavailable. Please try again.',
+        });
       }
+    } else {
+      return finish({
+        success: false,
+        restored: false,
+        code: 'RESTORE_NOT_SUPPORTED',
+        billingUnavailable: true,
+        message: 'Google Play billing is not supported on this device.',
+      });
     }
 
     // Backend verification & restore endpoint
@@ -1120,7 +1198,25 @@ export async function restoreGooglePlayPurchases(
       if (idToken) {
         headers['Authorization'] = `Bearer ${idToken}`;
       }
-    } catch {}
+    } catch {
+      return finish({
+        success: false,
+        restored: false,
+        code: 'FIREBASE_TOKEN_FAILED',
+        billingUnavailable: true,
+        message: 'Could not verify your account. Please sign in again.',
+      });
+    }
+
+    if (!headers.Authorization) {
+      return finish({
+        success: false,
+        restored: false,
+        code: 'FIREBASE_TOKEN_FAILED',
+        billingUnavailable: true,
+        message: 'Could not verify your account. Please sign in again.',
+      });
+    }
 
     const restoreEndpoint = getBillingApiUrl('/api/billing/restore-purchases');
     const res = await fetch(restoreEndpoint, {
@@ -1143,29 +1239,36 @@ export async function restoreGooglePlayPurchases(
         endpoint: restoreEndpoint,
         httpStatus: res.status,
         statusText: res.statusText,
-        responseBody: restoreText,
       });
-      return {
+      return finish({
         success: false,
         restored: false,
+        code: 'BACKEND_VERIFY_FAILED',
         billingUnavailable: true,
         message: 'Google Play billing service returned invalid response. Please try again.',
-      };
+      });
     }
 
     if (!res.ok) {
+      const code: RestoreDiagnosticCode =
+        data?.code === 'TOKEN_OWNER_MISMATCH' || data?.error === 'PURCHASE_TOKEN_OWNED_BY_ANOTHER_USER'
+          ? 'TOKEN_OWNER_MISMATCH'
+          : 'BACKEND_VERIFY_FAILED';
       console.warn('[Google Play Restore Notice - Server Response]', {
         endpoint: restoreEndpoint,
         httpStatus: res.status,
         statusText: res.statusText,
-        responseBody: restoreText,
+        code,
       });
-      return {
+      return finish({
         success: false,
         restored: false,
+        code,
         billingUnavailable: true,
-        message: data?.message || 'Google Play billing is currently unavailable. Please try again.',
-      };
+        message: code === 'TOKEN_OWNER_MISMATCH'
+          ? 'No active subscription found for this account.'
+          : 'Google Play billing is currently unavailable. Please try again.',
+      });
     }
 
     const rawStatus = (data.subscriptionStatus || '').toUpperCase();
@@ -1205,38 +1308,42 @@ export async function restoreGooglePlayPurchases(
         paymentIssueMessage: effectiveStatus === 'PAYMENT_ISSUE' ? data.paymentIssueMessage || 'Payment issue with Google Play subscription. Please update your payment method.' : undefined,
       };
 
-      return {
+      return finish({
         success: true,
         restored: true,
+        code: 'RESTORE_SUCCESS',
         message: effectiveStatus === 'PAYMENT_ISSUE'
           ? 'Subscription restored with active grace period!'
           : 'Active PropLead subscription restored via Google Play!',
         profileUpdates,
-      };
+      });
     }
 
     if (data.billingUnavailable) {
-      return {
+      return finish({
         success: false,
         restored: false,
+        code: 'BACKEND_VERIFY_FAILED',
         billingUnavailable: true,
         message: data.message || 'Google Play billing is currently unavailable. Please try again.',
-      };
+      });
     }
 
-    return {
+    return finish({
       success: true,
       restored: false,
+      code: data.code === 'NO_ACTIVE_SUBSCRIPTION' ? 'NO_PLAY_PURCHASE' : 'BACKEND_VERIFY_FAILED',
       message: data.message || 'No active PropLead subscription was found for this Google Play account.',
-    };
+    });
   } catch (err: any) {
-    console.warn('Restore purchases notice:', err?.message || err);
-    return {
+    console.warn('Restore purchases failed safely.');
+    return finish({
       success: false,
       restored: false,
+      code: 'BACKEND_VERIFY_FAILED',
       billingUnavailable: true,
       message: 'Google Play billing is currently unavailable. Please try again.',
-    };
+    });
   }
 }
 
@@ -1244,30 +1351,8 @@ export async function restoreGooglePlayPurchases(
  * Automatically checks for any existing Google Play subscription purchases on device startup/login
  * and restores entitlement if present and verified.
  */
-export async function checkAndRestoreGooglePlayEntitlement(userId: string): Promise<Partial<UserProfile> | null> {
-  if (!userId) return null;
-  try {
-    if (Capacitor.isNativePlatform()) {
-      const supported = await NativePurchases.isBillingSupported();
-      if (supported.isBillingSupported) {
-        const result = await NativePurchases.getPurchases({ productType: PURCHASE_TYPE.SUBS });
-        if (result.purchases && result.purchases.length > 0) {
-          const match = result.purchases.find(
-            (p) => (p.productIdentifier === GOOGLE_PLAY_PRODUCT_ID || !p.productIdentifier) && p.purchaseToken && p.purchaseState !== '0'
-          ) || result.purchases[0];
-          if (match && match.purchaseToken) {
-            const restoredResult = await restoreGooglePlayPurchases(userId);
-            if (restoredResult.success && restoredResult.restored && restoredResult.profileUpdates) {
-              return restoredResult.profileUpdates;
-            }
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[Startup Google Play Entitlement Check Notice]:', err);
-  }
-  return null;
+export async function checkAndRestoreGooglePlayEntitlement(userId: string): Promise<GooglePlayRestoreResult> {
+  return restoreGooglePlayPurchases(userId);
 }
 
 /**

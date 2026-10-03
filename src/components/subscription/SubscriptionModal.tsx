@@ -13,7 +13,7 @@ import {
   AlertTriangle,
   RotateCcw,
 } from 'lucide-react';
-import { UserProfile, GooglePlaySubscriptionProduct, SubscriptionPlanId } from '../../types';
+import { UserProfile, GooglePlaySubscriptionProduct, SubscriptionPlanId, SubscriptionResolution } from '../../types';
 import {
   fetchGooglePlayProduct,
   GooglePlayProductResult,
@@ -35,6 +35,7 @@ interface SubscriptionModalProps {
   isOpen: boolean;
   onClose: () => void;
   profile: UserProfile;
+  subscriptionResolution: SubscriptionResolution;
   onUpdateProfile: (updates: Partial<UserProfile>) => void;
   onSubscribe?: (plan: string) => void;
   initialMessage?: string | null;
@@ -44,6 +45,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   isOpen,
   onClose,
   profile,
+  subscriptionResolution,
   onUpdateProfile,
   onSubscribe,
   initialMessage,
@@ -265,10 +267,10 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           confetti({ particleCount: 40, spread: 60, origin: { y: 0.6 } });
         } catch {}
       } else {
-        setErrorMessage(result.message);
+        setErrorMessage('No active subscription found for this account.');
       }
     } catch (err) {
-      setErrorMessage('Google Play billing is currently unavailable. Please try again.');
+      setErrorMessage('No active subscription found for this account.');
     } finally {
       setIsProcessing(false);
       setProcessingStatus('');
@@ -305,6 +307,12 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
 
         {/* Content Body */}
         <div className="p-5 overflow-y-auto space-y-4 flex-1">
+          {subscriptionResolution !== 'ready' && (
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-600 dark:text-slate-300 flex items-center gap-2">
+              <RefreshCw className={`w-4 h-4 ${subscriptionResolution === 'loading' ? 'animate-spin' : ''}`} />
+              <span>{subscriptionResolution === 'offline' ? 'Subscription check unavailable. Showing the last verified access.' : 'Checking subscription...'}</span>
+            </div>
+          )}
           {/* Status Message Banners */}
           {errorMessage && (
             <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
@@ -375,7 +383,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           )}
 
           {/* Manual Free Trial Available Banner */}
-          {trialStatus === 'not_started' && status !== 'ACTIVE' && status !== 'CANCELED_BUT_ACTIVE' && status !== 'PAYMENT_ISSUE' && !trialEverStarted && !trialAlreadyUsed && !profile.trialAlreadyUsed && (
+          {subscriptionResolution === 'ready' && trialStatus === 'not_started' && status !== 'ACTIVE' && status !== 'CANCELED_BUT_ACTIVE' && status !== 'PAYMENT_ISSUE' && !trialEverStarted && !trialAlreadyUsed && !profile.trialAlreadyUsed && (
             <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-emerald-500/5 border-2 border-emerald-500/30 dark:border-emerald-500/20 text-xs flex flex-col gap-3 shadow-xs">
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
@@ -470,7 +478,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           )}
 
           {/* Trial Already Used / Expired State */}
-          {(status === 'EXPIRED' || trialAlreadyUsed || profile.trialAlreadyUsed || trialStatus === 'expired' || (!isSubscribed && trialEverStarted)) && !isSubscribed && (
+          {subscriptionResolution === 'ready' && (status === 'EXPIRED' || trialAlreadyUsed || profile.trialAlreadyUsed || trialStatus === 'expired' || (!isSubscribed && trialEverStarted)) && !isSubscribed && (
             <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-700 rounded-2xl text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2.5">
               <div className="w-7 h-7 rounded-xl bg-rose-600 text-white flex items-center justify-center flex-shrink-0 mt-0.5 shadow-2xs">
                 <AlertCircle className="w-3.5 h-3.5" />
@@ -685,3 +693,4 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     </div>
   );
 };
+

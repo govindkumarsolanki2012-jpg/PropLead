@@ -238,6 +238,8 @@ export interface UserProfile {
 
 export type TabType = 'home' | 'leads' | 'properties' | 'calendar' | 'analytics' | 'settings';
 
+export type SubscriptionResolution = 'loading' | 'ready' | 'offline';
+
 export type PropertyTransactionType = 'sale' | 'rent' | 'lease';
 
 export type PropertyStatus =
@@ -387,3 +389,4 @@ export interface PhoneContact {
   phone: string;
   email?: string;
 }
+

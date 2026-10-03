@@ -1,6 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
+  initializeAuth,
   getAuth,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
   GoogleAuthProvider,
   signInWithPopup,
   signInWithRedirect,
@@ -8,6 +11,7 @@ import {
   signOut as fbSignOut,
   onAuthStateChanged,
   User as FirebaseUser,
+  Auth,
 } from 'firebase/auth';
 import {
   initializeFirestore,
@@ -22,8 +26,25 @@ import firebaseConfig from '../../firebase-applet-config.json';
 // Initialize Firebase App instance
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Auth
-export const auth = getAuth(app);
+// Initialize Auth with durable WebView-safe persistence.
+// IndexedDB is preferred for Firebase's auth state and refresh token, with
+// localStorage as a fallback for environments where IndexedDB is unavailable.
+let authInstance: Auth;
+try {
+  authInstance = initializeAuth(app, {
+    persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+  });
+} catch (error: any) {
+  // Supports Vite hot reload or another module that initialized this app first.
+  // Production startup normally takes the initializeAuth branch above.
+  if (error?.code !== 'auth/already-initialized') {
+    throw error;
+  }
+  authInstance = getAuth(app);
+}
+
+export const auth = authInstance;
+export const authReady = auth.authStateReady();
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
@@ -48,3 +69,4 @@ export const db = firestoreInstance;
 export const storage = getStorage(app, firebaseConfig.storageBucket || 'proplead-e5c6a.firebasestorage.app');
 
 export type { FirebaseUser };
+

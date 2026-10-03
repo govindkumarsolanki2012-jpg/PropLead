@@ -47,7 +47,7 @@ import {
   clearUserScopedStorage,
 } from './utils/storage';
 import { clearUserAudioFromIndexedDB } from './utils/audioStorage';
-import { Lead, Property, UserProfile, WhatsAppTemplate, FollowUpType, TabType, SubscriptionStatus } from './types';
+import { Lead, Property, UserProfile, WhatsAppTemplate, FollowUpType, TabType, SubscriptionStatus, SubscriptionResolution } from './types';
 import { INITIAL_USER_PROFILE } from './data/initialData';
 import { formatRelativeDate, normalizePhoneForMatch } from './utils/formatters';
 import { getEffectiveSubscriptionStatus, hasProAccess, canUseProFeatures, setAuthoritativeServerTime, getBillingApiUrl, checkAndRestoreGooglePlayEntitlement, startFreeTrialServer } from './utils/billing';
@@ -97,10 +97,11 @@ export function App() {
   // Single fast branded splash shown once after the native Android splash
   const [isSplashActive, setIsSplashActive] = useState<boolean>(true);
   const [isAppContentVisible, setIsAppContentVisible] = useState<boolean>(false);
+  const [hasMinimumSplashElapsed, setHasMinimumSplashElapsed] = useState<boolean>(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      setIsSplashActive(false);
+      setHasMinimumSplashElapsed(true);
     }, 900);
     return () => clearTimeout(timer);
   }, []);
@@ -111,19 +112,19 @@ export function App() {
   const firestoreCleanupRef = useRef<(() => void) | null>(null);
   const activeAuthUidRef = useRef<string | null>(null);
 
+  // The branded splash can exit only after both its minimum display time and
+  // Firebase's first authoritative auth-state callback have completed.
+  useEffect(() => {
+    if (hasMinimumSplashElapsed && isAuthResolved) {
+      setIsSplashActive(false);
+    }
+  }, [hasMinimumSplashElapsed, isAuthResolved]);
+
   // Account deletion standalone success notice state
   const [accountDeletedNotice, setAccountDeletedNotice] = useState<{
     isPartial?: boolean;
     partialMessage?: string;
   } | null>(null);
-
-  // Safety fallback for offline / extreme latency
-  useEffect(() => {
-    const safetyTimer = setTimeout(() => {
-      setIsAuthResolved((prev) => (prev ? prev : true));
-    }, 4000);
-    return () => clearTimeout(safetyTimer);
-  }, []);
 
   // Pre-initialize native Google Credential Manager on Android startup
   useEffect(() => {
@@ -149,6 +150,14 @@ export function App() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>(WHATSAPP_TEMPLATES);
   const [isCloudSynced, setIsCloudSynced] = useState<boolean>(false);
+  const [subscriptionResolution, setSubscriptionResolution] = useState<SubscriptionResolution>('loading');
+  const subscriptionResolutionRef = useRef<SubscriptionResolution>('loading');
+  const startupRestorePendingRef = useRef<boolean>(false);
+
+  const updateSubscriptionResolution = useCallback((next: SubscriptionResolution) => {
+    subscriptionResolutionRef.current = next;
+    setSubscriptionResolution(next);
+  }, []);
 
   // Tab navigation state & history (Dashboard/home is root)
   const [currentTab, setCurrentTab] = useState<TabType>('home');
@@ -416,6 +425,7 @@ export function App() {
 
       if (!user) {
         activeAuthUidRef.current = null;
+        startupRestorePendingRef.current = false;
         setCurrentUser(null);
         setIsAuthResolved(true);
         setIsCloudSynced(false);
@@ -423,11 +433,14 @@ export function App() {
         setProperties([]);
         setProfile(INITIAL_USER_PROFILE);
         setTemplates(WHATSAPP_TEMPLATES);
+        updateSubscriptionResolution('loading');
         return;
       }
 
       // Capture current authenticated UID to lock callbacks
       const activeUid = user.uid;
+      startupRestorePendingRef.current = true;
+      updateSubscriptionResolution('loading');
       activeAuthUidRef.current = activeUid;
       setCurrentUser(user);
       setIsAuthResolved(true);
@@ -465,39 +478,26 @@ export function App() {
         if (activeAuthUidRef.current !== activeUid) return;
         if (firestoreProfile) {
           setProfile((prev) => {
-            let effectiveTrialEndDate = firestoreProfile.trialEndDate || prev.trialEndDate;
-            const effectiveTrialStartDate = firestoreProfile.trialStartDate || prev.trialStartDate;
-            if (effectiveTrialStartDate && effectiveTrialEndDate) {
-              const sTime = new Date(effectiveTrialStartDate).getTime();
-              const eTime = new Date(effectiveTrialEndDate).getTime();
-              if (!isNaN(sTime) && !isNaN(eTime) && eTime > sTime + 7 * 86400000) {
-                effectiveTrialEndDate = new Date(sTime + 7 * 86400000).toISOString();
-              }
-            }
-
-            const isBackendExpired = prev.subscriptionStatus === 'EXPIRED' || Boolean(prev.trialAlreadyUsed) || prev.trialStatus === 'expired';
-
             const merged: UserProfile = {
               ...prev,
               ...firestoreProfile,
-              subscriptionStatus: isBackendExpired
-                ? 'EXPIRED'
-                : (firestoreProfile.subscriptionStatus || prev.subscriptionStatus),
-              trialStatus: isBackendExpired
-                ? 'expired'
-                : (firestoreProfile.trialStatus || prev.trialStatus),
-              trialAlreadyUsed: Boolean(prev.trialAlreadyUsed || isBackendExpired || firestoreProfile.trialAlreadyUsed),
-              trialEverStarted: Boolean(prev.trialEverStarted || firestoreProfile.trialEverStarted || isBackendExpired),
-              isTrialActive: isBackendExpired ? false : (firestoreProfile.isTrialActive ?? prev.isTrialActive),
-              trialDaysRemaining: isBackendExpired ? 0 : (firestoreProfile.trialDaysRemaining ?? prev.trialDaysRemaining),
-              isSubscribed: firestoreProfile.isSubscribed !== undefined ? firestoreProfile.isSubscribed : prev.isSubscribed,
-              subscriptionProductId: firestoreProfile.subscriptionProductId || prev.subscriptionProductId,
-              subscriptionBasePlan: firestoreProfile.subscriptionBasePlan || prev.subscriptionBasePlan,
-              subscriptionBasePlanId: firestoreProfile.subscriptionBasePlanId || prev.subscriptionBasePlanId,
-              subscriptionExpiryDate: firestoreProfile.subscriptionExpiryDate || prev.subscriptionExpiryDate,
-              subscriptionExpiryTime: firestoreProfile.subscriptionExpiryTime || prev.subscriptionExpiryTime,
-              trialEndDate: isBackendExpired ? null : effectiveTrialEndDate,
-              trialStartDate: isBackendExpired ? null : effectiveTrialStartDate,
+              // /users/{uid} is a profile mirror, not the entitlement source of
+              // truth. Preserve the last verified entitlement until the current
+              // UID's subscription record or backend response is processed.
+              subscriptionStatus: prev.subscriptionStatus,
+              trialStatus: prev.trialStatus,
+              trialAlreadyUsed: prev.trialAlreadyUsed,
+              trialEverStarted: prev.trialEverStarted,
+              isTrialActive: prev.isTrialActive,
+              trialDaysRemaining: prev.trialDaysRemaining,
+              isSubscribed: prev.isSubscribed,
+              subscriptionProductId: prev.subscriptionProductId,
+              subscriptionBasePlan: prev.subscriptionBasePlan,
+              subscriptionBasePlanId: prev.subscriptionBasePlanId,
+              subscriptionExpiryDate: prev.subscriptionExpiryDate,
+              subscriptionExpiryTime: prev.subscriptionExpiryTime,
+              trialEndDate: prev.trialEndDate,
+              trialStartDate: prev.trialStartDate,
               onboardingCompleted:
                 firestoreProfile.onboardingCompleted !== undefined
                   ? firestoreProfile.onboardingCompleted
@@ -549,6 +549,7 @@ export function App() {
               saveStoredProfile(merged, activeUid);
               return merged;
             });
+            if (!startupRestorePendingRef.current) updateSubscriptionResolution('ready');
           } else if (rawSubStatus === 'expired' || (!isUnexpired && !isNaN(subExpiryMs) && subExpiryMs <= Date.now())) {
             setProfile((prev) => {
               const merged: UserProfile = {
@@ -563,6 +564,7 @@ export function App() {
               saveStoredProfile(merged, activeUid);
               return merged;
             });
+            if (!startupRestorePendingRef.current) updateSubscriptionResolution('ready');
           }
         }
       });
@@ -591,7 +593,7 @@ export function App() {
       cleanupFirestoreListeners();
       firestoreCleanupRef.current = null;
     };
-  }, []);
+  }, [updateSubscriptionResolution]);
 
   // Subscription calculation
   const { isLocked, status, daysRemaining } = getEffectiveSubscriptionStatus(profile);
@@ -601,9 +603,16 @@ export function App() {
     const syncSubscription = async () => {
       if (!currentUser) return;
       const targetUid = currentUser.uid;
+      startupRestorePendingRef.current = true;
+      updateSubscriptionResolution('loading');
+      let backendResolved = false;
       try {
         const token = await currentUser.getIdToken();
-        if (!token) return;
+        if (!token) {
+          startupRestorePendingRef.current = false;
+          if (activeAuthUidRef.current === targetUid) updateSubscriptionResolution('offline');
+          return;
+        }
 
         const emailParam = currentUser.email ? `&email=${encodeURIComponent(currentUser.email)}` : '';
         const endpoint = getBillingApiUrl(`/api/billing/subscription-status?userId=${encodeURIComponent(targetUid)}${emailParam}`);
@@ -618,7 +627,7 @@ export function App() {
           try {
             data = JSON.parse(resText);
           } catch {
-            return;
+            data = null;
           }
           if (data && data.subscriptionStatus && activeAuthUidRef.current === targetUid) {
             if (data.serverTimestamp || data.serverNow) {
@@ -674,32 +683,58 @@ export function App() {
               saveStoredProfile(updated, targetUid);
               return updated;
             });
+            backendResolved = true;
           }
         }
 
-        // On native device, check if there's an active Google Play purchase to restore
+        // On native Android, subscription resolution remains loading until the
+        // Google Play purchase query and backend restore verification complete.
         if (Capacitor.isNativePlatform()) {
-          checkAndRestoreGooglePlayEntitlement(targetUid)
-            .then((restoredUpdates) => {
-              if (restoredUpdates && activeAuthUidRef.current === targetUid) {
-                setProfile((prev) => {
-                  const updated: UserProfile = {
-                    ...prev,
-                    ...restoredUpdates,
-                  };
-                  saveStoredProfile(updated, targetUid);
-                  return updated;
-                });
-              }
-            })
-            .catch((err) => console.warn('[Startup Google Play Check Notice]:', err));
+          const restoreResult = await checkAndRestoreGooglePlayEntitlement(targetUid);
+          if (
+            restoreResult.restored &&
+            restoreResult.profileUpdates &&
+            activeAuthUidRef.current === targetUid
+          ) {
+            setProfile((prev) => {
+              const updated: UserProfile = {
+                ...prev,
+                ...restoreResult.profileUpdates,
+              };
+              saveStoredProfile(updated, targetUid);
+              return updated;
+            });
+          }
+
+          const restoreCompleted = [
+            'RESTORE_SUCCESS',
+            'NO_PLAY_PURCHASE',
+            'NO_PURCHASE_TOKEN',
+            'TOKEN_OWNER_MISMATCH',
+            'RESTORE_PENDING',
+          ].includes(restoreResult.code);
+          startupRestorePendingRef.current = false;
+          if (activeAuthUidRef.current === targetUid) {
+            updateSubscriptionResolution(
+              backendResolved || restoreCompleted ? 'ready' : 'offline'
+            );
+          }
+        } else {
+          startupRestorePendingRef.current = false;
+          if (activeAuthUidRef.current === targetUid) {
+            updateSubscriptionResolution(backendResolved ? 'ready' : 'offline');
+          }
         }
       } catch (err) {
         console.log('Subscription sync offline or fallback to local state:', err);
+        startupRestorePendingRef.current = false;
+        if (activeAuthUidRef.current === currentUser?.uid) {
+          updateSubscriptionResolution('offline');
+        }
       }
     };
     syncSubscription();
-  }, [currentUser]);
+  }, [currentUser, updateSubscriptionResolution]);
 
   // Ensure Light Mode is permanently active and cleanup any legacy theme storage
   useEffect(() => {
@@ -1515,6 +1550,7 @@ export function App() {
                 leads={leads}
                 properties={properties}
                 profile={profile}
+                subscriptionResolution={subscriptionResolution}
                 searchQuery={dashboardSearchQuery}
                 onClearSearch={() => setDashboardSearchQuery('')}
                 onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
@@ -1797,6 +1833,7 @@ export function App() {
             setSubscriptionModalMessage(null);
           }}
           profile={profile}
+          subscriptionResolution={subscriptionResolution}
           onUpdateProfile={handleUpdateProfile}
           initialMessage={subscriptionModalMessage}
         />
@@ -1818,3 +1855,4 @@ export function App() {
 }
 
 export default App;
+

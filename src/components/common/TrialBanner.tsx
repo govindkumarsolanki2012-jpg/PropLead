@@ -1,15 +1,32 @@
 import React from 'react';
 import { Sparkles, AlertCircle, ChevronRight, Clock, AlertTriangle } from 'lucide-react';
-import { UserProfile } from '../../types';
+import { SubscriptionResolution, UserProfile } from '../../types';
 import { getEffectiveSubscriptionStatus } from '../../utils/billing';
 
 interface TrialBannerProps {
   profile: UserProfile;
+  subscriptionResolution: SubscriptionResolution;
   onOpenSubscription: () => void;
 }
 
-export const TrialBanner: React.FC<TrialBannerProps> = ({ profile, onOpenSubscription }) => {
+export const TrialBanner: React.FC<TrialBannerProps> = ({ profile, subscriptionResolution, onOpenSubscription }) => {
   const { status, daysRemaining, isSubscribed } = getEffectiveSubscriptionStatus(profile);
+
+  if (subscriptionResolution !== 'ready') {
+    const hasValidCachedEntitlement =
+      status === 'ACTIVE' || status === 'CANCELED_BUT_ACTIVE' || isSubscribed || (status === 'TRIAL' && daysRemaining > 0);
+
+    if (hasValidCachedEntitlement) {
+      if (status !== 'TRIAL') return null;
+    } else {
+      return (
+        <div className="mx-4 mt-3 p-2.5 rounded-xl border bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+          <Clock className="w-3.5 h-3.5 animate-pulse" />
+          <span>{subscriptionResolution === 'offline' ? 'Subscription check unavailable' : 'Checking subscription...'}</span>
+        </div>
+      );
+    }
+  }
 
   // 1. ACTIVE SUBSCRIPTION
   // For users with an active subscription, do not show the Trial Expired upgrade banner.
@@ -78,7 +95,7 @@ export const TrialBanner: React.FC<TrialBannerProps> = ({ profile, onOpenSubscri
   }
 
   // 4. TRIAL EXPIRED (View-Only Mode)
-  if (status === 'EXPIRED' || profile.trialAlreadyUsed || profile.trialEverStarted || (status === 'TRIAL' && daysRemaining <= 0)) {
+  if (subscriptionResolution === 'ready' && (status === 'EXPIRED' || profile.trialAlreadyUsed || (status === 'TRIAL' && daysRemaining <= 0))) {
     return (
       <div
         id="dashboard-trial-expired-banner"
