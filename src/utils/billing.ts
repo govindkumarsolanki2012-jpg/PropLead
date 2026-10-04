@@ -13,6 +13,8 @@ export type RestoreDiagnosticCode =
   | 'NO_PLAY_PURCHASE'
   | 'PLAY_QUERY_FAILED'
   | 'NO_PURCHASE_TOKEN'
+  | 'CLIENT_NO_PURCHASE_TOKEN'
+  | 'CLIENT_NO_PLAY_PURCHASE'
   | 'BACKEND_VERIFY_FAILED'
   | 'TOKEN_OWNER_MISMATCH'
   | 'FIREBASE_TOKEN_FAILED'
@@ -1124,6 +1126,7 @@ export async function restoreGooglePlayPurchases(
   onProgress?: (step: string) => void
 ): Promise<GooglePlayRestoreResult> {
   let purchaseTokenFound = false;
+  let clientPreBackendCode: RestoreDiagnosticCode | null = null;
   const debug: GooglePlayRestoreDebug = {
     billingSupported: null,
     restorePurchasesCalled: false,
@@ -1216,26 +1219,14 @@ export async function restoreGooglePlayPurchases(
             const pending = result.purchases?.some(
               (p) => p.productIdentifier === GOOGLE_PLAY_PRODUCT_ID && String(p.purchaseState) === '2'
             );
-            return finish({
-              success: true,
-              restored: false,
-              code: pending ? 'RESTORE_PENDING' : 'NO_PLAY_PURCHASE',
-              message: 'No active subscription found for this account.',
-            });
+            clientPreBackendCode = pending ? 'RESTORE_PENDING' : 'CLIENT_NO_PLAY_PURCHASE';
+          } else if (!matching.purchaseToken) {
+            clientPreBackendCode = 'CLIENT_NO_PURCHASE_TOKEN';
+          } else {
+            purchaseToken = matching.purchaseToken;
+            purchaseTokenFound = true;
+            debug.tokenFound = true;
           }
-
-          if (!matching.purchaseToken) {
-            return finish({
-              success: false,
-              restored: false,
-              code: 'NO_PURCHASE_TOKEN',
-              message: 'No active subscription found for this account.',
-            });
-          }
-
-          purchaseToken = matching.purchaseToken;
-          purchaseTokenFound = true;
-          debug.tokenFound = true;
         } else {
           return finish({
             success: false,
@@ -1303,9 +1294,16 @@ export async function restoreGooglePlayPurchases(
       headers,
       body: JSON.stringify({
         userId,
-        purchaseToken,
+        purchaseToken: purchaseToken ?? null,
         isBridgeAvailable,
         productId: GOOGLE_PLAY_PRODUCT_ID,
+        clientDiagnostic: {
+          billingSupported: debug.billingSupported,
+          purchasesCount: debug.playPurchaseCount,
+          matchingProductFound: debug.matchingProductFound,
+          purchaseState: debug.purchaseState,
+          tokenFound: debug.tokenFound,
+        },
       }),
     });
 
@@ -1424,10 +1422,17 @@ export async function restoreGooglePlayPurchases(
       });
     }
 
+    const backendCode = data.code === 'CLIENT_NO_PURCHASE_TOKEN'
+      ? 'CLIENT_NO_PURCHASE_TOKEN'
+      : data.code === 'CLIENT_NO_PLAY_PURCHASE'
+        ? 'CLIENT_NO_PLAY_PURCHASE'
+        : data.code === 'NO_ACTIVE_SUBSCRIPTION'
+          ? 'NO_PLAY_PURCHASE'
+          : clientPreBackendCode || 'BACKEND_VERIFY_FAILED';
     return finish({
       success: true,
       restored: false,
-      code: data.code === 'NO_ACTIVE_SUBSCRIPTION' ? 'NO_PLAY_PURCHASE' : 'BACKEND_VERIFY_FAILED',
+      code: backendCode,
       message: data.message || 'No active PropLead subscription was found for this Google Play account.',
     });
   } catch (err: any) {
