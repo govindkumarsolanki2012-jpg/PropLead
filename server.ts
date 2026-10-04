@@ -2786,9 +2786,16 @@ async function startServer() {
     }): void => {
       if (restoreLogged) return;
       restoreLogged = true;
-      console.log(
-        `[RESTORE_PURCHASE] uidPrefix=${details.uidPrefix} restored=${details.restored} code=${details.code} tokenFound=${details.tokenFound} ownerMatch=${details.ownerMatch} persistSubscription=${details.persistSubscription} persistUser=${details.persistUser}`
-      );
+      const safeDiagnosticObject = {
+        uidPrefix: details.uidPrefix,
+        restored: details.restored,
+        code: details.code,
+        tokenFound: details.tokenFound,
+        ownerMatch: details.ownerMatch,
+        persistSubscription: details.persistSubscription,
+        persistUser: details.persistUser,
+      };
+      console.log('[RESTORE_PURCHASE]', safeDiagnosticObject);
     };
 
     let verifiedUid = '';
