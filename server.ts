@@ -2168,6 +2168,21 @@ async function startServer() {
   // ==========================================
 
   // 1. Health check
+  app.get('/api/debug/backend-version', (_req, res) => {
+    const timestamp = new Date().toISOString();
+    console.log('[BACKEND_VERSION_CHECK]', {
+      debugVersion: 'restore-diagnostics-v1',
+      timestamp,
+    });
+    return res.json({
+      success: true,
+      service: 'proplead',
+      debugVersion: 'restore-diagnostics-v1',
+      timestamp,
+      hasRestoreDiagnostics: true,
+    });
+  });
+
   app.get('/api/health', (req, res) => {
     const rawKey = process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY || '';
     const trimmed = rawKey.trim();
