@@ -112,16 +112,16 @@ export const SharePropertyModal: React.FC<SharePropertyModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-hidden">
-      <div className="relative w-full sm:max-w-lg bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col h-[100dvh] sm:h-auto max-h-[100dvh] sm:max-h-[calc(100dvh-2rem)] overflow-hidden border border-slate-200 dark:border-slate-800 animate-in fade-in slide-in-from-bottom duration-200">
+    <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-xs flex flex-col justify-end sm:justify-center items-center p-0 sm:p-4 overflow-hidden">
+      <div className="relative w-full sm:max-w-lg bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[100dvh] sm:max-h-[min(90dvh,800px)] h-full sm:h-auto overflow-hidden border border-slate-200 dark:border-slate-800 box-border animate-in fade-in slide-in-from-bottom duration-200">
         {/* Header - Sticky Top */}
-        <div className="shrink-0 p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-xs z-10">
+        <div className="shrink-0 px-4 py-3 sm:px-5 sm:py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-xs z-10">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-9 h-9 rounded-2xl bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
               <Share2 className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-sm font-extrabold text-slate-900 dark:text-white truncate">
+              <h2 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white truncate">
                 Share Property with Customer
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
@@ -139,7 +139,7 @@ export const SharePropertyModal: React.FC<SharePropertyModalProps> = ({
         </div>
 
         {/* Content Body - Scrollable */}
-        <div className="p-4 overflow-y-auto overscroll-contain space-y-4 flex-1 min-h-0 pb-6">
+        <div className="p-4 overflow-y-auto overscroll-contain space-y-4 flex-1 min-h-0 pb-10 sm:pb-8">
           {/* STRICT PRIVACY BANNER */}
           <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800/80 rounded-2xl flex items-start gap-2.5">
             <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
@@ -166,7 +166,7 @@ export const SharePropertyModal: React.FC<SharePropertyModalProps> = ({
               <select
                 value={selectedLeadId}
                 onChange={(e) => handleSelectLead(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
+                className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 box-border"
               >
                 <option value="custom">✏️ Enter Custom Customer / Direct Share</option>
                 <optgroup label="Your Leads in CRM">
@@ -189,7 +189,7 @@ export const SharePropertyModal: React.FC<SharePropertyModalProps> = ({
                       setEditedMessage(generateCustomerPropertyMessage(property, profile, e.target.value));
                     }}
                     placeholder="Customer Name (e.g. Vikram Ji)"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-1 focus:ring-emerald-500"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-1 focus:ring-emerald-500 box-border"
                   />
                 </div>
                 <div>
@@ -198,7 +198,7 @@ export const SharePropertyModal: React.FC<SharePropertyModalProps> = ({
                     value={customPhone}
                     onChange={(e) => setCustomPhone(e.target.value)}
                     placeholder="Phone / WhatsApp Number"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-1 focus:ring-emerald-500"
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-1 focus:ring-emerald-500 box-border"
                   />
                 </div>
               </div>
@@ -258,27 +258,27 @@ export const SharePropertyModal: React.FC<SharePropertyModalProps> = ({
               </button>
             </div>
             <textarea
-              rows={5}
+              rows={4}
               value={editedMessage}
               onChange={(e) => setEditedMessage(e.target.value)}
-              className="w-full p-3 text-xs font-mono rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 outline-hidden focus:ring-2 focus:ring-emerald-500 leading-relaxed resize-none min-h-[110px]"
+              className="w-full p-3 text-xs font-mono rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 outline-hidden focus:ring-2 focus:ring-emerald-500 leading-relaxed resize-none min-h-[90px] max-h-[160px] sm:max-h-[200px] box-border"
             />
           </div>
         </div>
 
         {/* Action Buttons Footer - Sticky Bottom */}
-        <div className="shrink-0 p-3.5 sm:p-4 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs flex items-center gap-2 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] z-10">
+        <div className="shrink-0 p-3 sm:p-4 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs flex items-center gap-2 sm:gap-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] z-10 w-full box-border">
           <button
             type="button"
             onClick={onClose}
-            className="py-3 px-4 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 transition-all shrink-0 cursor-pointer min-h-[44px]"
+            className="py-2.5 sm:py-3 px-3.5 sm:px-4 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700 active:scale-95 transition-all shrink-0 cursor-pointer min-h-[44px]"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={handleSendWhatsApp}
-            className="py-3 px-4 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 flex-1 cursor-pointer min-h-[44px]"
+            className="py-2.5 sm:py-3 px-4 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 flex-1 min-w-0 cursor-pointer min-h-[44px]"
           >
             <Send className="w-4 h-4 shrink-0" />
             <span className="truncate">Open WhatsApp &amp; Send</span>

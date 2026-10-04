@@ -296,16 +296,16 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-hidden">
-      <div className="relative w-full sm:max-w-2xl bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col h-[100dvh] sm:h-auto max-h-[100dvh] sm:max-h-[calc(100dvh-2rem)] overflow-hidden border border-slate-200 dark:border-slate-800 animate-in fade-in slide-in-from-bottom duration-200">
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex flex-col justify-end sm:justify-center items-center p-0 sm:p-4 overflow-hidden">
+      <div className="relative w-full sm:max-w-2xl bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[100dvh] sm:max-h-[min(90dvh,850px)] h-full sm:h-auto overflow-hidden border border-slate-200 dark:border-slate-800 box-border animate-in fade-in slide-in-from-bottom duration-200">
         {/* Modal Header - Sticky Top */}
-        <div className="shrink-0 p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-xs z-10">
+        <div className="shrink-0 px-4 py-3 sm:px-5 sm:py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-xs z-10">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-9 h-9 rounded-2xl bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
               <Building className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-base font-extrabold text-slate-900 dark:text-white truncate">
+              <h2 className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white truncate">
                 Edit Property Details
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
@@ -325,7 +325,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
         {/* Form Container */}
         <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
           {/* Scrollable Form Body */}
-          <div className="p-4 sm:p-5 overflow-y-auto overscroll-contain space-y-5 flex-1 min-h-0 pb-8">
+          <div className="p-4 sm:p-5 overflow-y-auto overscroll-contain space-y-4 sm:space-y-5 flex-1 min-h-0 pb-10 sm:pb-8">
             {/* 1. Basic Details */}
             <div className="space-y-3">
               <div>
@@ -337,7 +337,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                   required
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-semibold"
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-semibold box-border"
                 />
               </div>
 
@@ -372,7 +372,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                   <select
                     value={propertyType}
                     onChange={(e) => setPropertyType(e.target.value as PropertyType)}
-                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 box-border"
                   >
                     <option value="flat">Apartment / Flat</option>
                     <option value="house">Independent House</option>
@@ -396,7 +396,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                       type="text"
                       value={bhk}
                       onChange={(e) => setBhk(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 box-border"
                     />
                   </div>
                 )}
@@ -423,180 +423,179 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                       step="50000"
                       value={price}
                       onChange={(e) => setPrice(Number(e.target.value))}
-                      className="w-full pl-7 pr-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-bold"
+                      className="w-full pl-7 pr-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-bold box-border"
                     />
                   </div>
                 </div>
               </div>
             </div>
 
-          {/* 2. Location & Specs */}
-          <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
-              2. Location & Specifications (Public Details)
-            </span>
+            {/* 2. Location & Specs */}
+            <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
+                2. Location & Specifications (Public Details)
+              </span>
 
-            {(isPropertyFieldVisible(propertyType, 'superBuiltUpAreaSqFt') || isPropertyFieldVisible(propertyType, 'carpetAreaSqFt')) && <div className="grid grid-cols-2 gap-3">
-              {isPropertyFieldVisible(propertyType, 'superBuiltUpAreaSqFt') && <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Locality / Area *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={locality}
-                  onChange={(e) => setLocality(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Locality / Area *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={locality}
+                    onChange={(e) => setLocality(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 box-border"
+                  />
+                </div>
 
-              {isPropertyFieldVisible(propertyType, 'carpetAreaSqFt') && <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  City
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>}
-            </div>}
-
-            {/* Area */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Super Built-Up Area (sq.ft)
-                </label>
-                <input
-                  type="number"
-                  value={superBuiltUpAreaSqFt || ''}
-                  onChange={(e) => setSuperBuiltUpAreaSqFt(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden"
-                />
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    City
+                  </label>
+                  <input
+                    type="text"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 box-border"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Carpet Area (sq.ft)
-                </label>
-                <input
-                  type="number"
-                  value={carpetAreaSqFt || ''}
-                  onChange={(e) => setCarpetAreaSqFt(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden"
-                />
+              {/* Area */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Super Built-Up Area (sq.ft)
+                  </label>
+                  <input
+                    type="number"
+                    value={superBuiltUpAreaSqFt || ''}
+                    onChange={(e) => setSuperBuiltUpAreaSqFt(Number(e.target.value))}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden box-border"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Carpet Area (sq.ft)
+                  </label>
+                  <input
+                    type="number"
+                    value={carpetAreaSqFt || ''}
+                    onChange={(e) => setCarpetAreaSqFt(Number(e.target.value))}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden box-border"
+                  />
+                </div>
               </div>
-            </div>
 
-            {/* Floor, Facing, Furnishing */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-              {isPropertyFieldVisible(propertyType, 'floor') && <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Floor
-                </label>
-                <input
-                  type="text"
-                  value={floor}
-                  onChange={(e) => setFloor(e.target.value)}
-                  className="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden"
-                />
-              </div>}
+              {/* Floor, Facing, Furnishing */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                {isPropertyFieldVisible(propertyType, 'floor') && <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Floor
+                  </label>
+                  <input
+                    type="text"
+                    value={floor}
+                    onChange={(e) => setFloor(e.target.value)}
+                    className="w-full px-2.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden box-border"
+                  />
+                </div>}
 
-              {isPropertyFieldVisible(propertyType, 'facing') && <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Facing
-                </label>
-                <select
-                  value={facing}
-                  onChange={(e) => setFacing(e.target.value as FacingDirection)}
-                  className="w-full px-2 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden"
-                >
-                  <option value="East">East</option>
-                  <option value="West">West</option>
-                  <option value="North">North</option>
-                  <option value="South">South</option>
-                  <option value="North-East">North-East</option>
-                  <option value="North-West">North-West</option>
-                  <option value="South-East">South-East</option>
-                  <option value="South-West">South-West</option>
-                </select>
-              </div>}
-
-              {isPropertyFieldVisible(propertyType, 'furnishing') && <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Furnishing
-                </label>
-                <select
-                  value={furnishing}
-                  onChange={(e) => setFurnishing(e.target.value as FurnishingStatus)}
-                  className="w-full px-2 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden"
-                >
-                  <option value="semi_furnished">Semi-Furnished</option>
-                  <option value="fully_furnished">Fully Furnished</option>
-                  <option value="unfurnished">Unfurnished</option>
-                </select>
-              </div>}
-            </div>
-
-            <PropertyTypeSpecificFields
-              propertyType={propertyType}
-              values={extraFields}
-              onChange={(field, value) => setExtraFields((prev) => ({ ...prev, [field]: value }))}
-            />
-
-            {/* Status */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                Property Inventory Status
-              </label>
-              <div className="grid grid-cols-5 gap-1">
-                {(['available', 'hold', 'negotiation', 'sold_rented', 'archived'] as PropertyStatus[]).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setStatus(s)}
-                    className={`py-1.5 px-1 text-[10px] font-bold rounded-xl border capitalize transition-all truncate ${
-                      status === s
-                        ? 'bg-emerald-600 text-white border-emerald-600'
-                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
-                    }`}
+                {isPropertyFieldVisible(propertyType, 'facing') && <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Facing
+                  </label>
+                  <select
+                    value={facing}
+                    onChange={(e) => setFacing(e.target.value as FacingDirection)}
+                    className="w-full px-2 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden box-border"
                   >
-                    {s === 'sold_rented' ? 'Sold/Rent' : s}
-                  </button>
-                ))}
-              </div>
-            </div>
+                    <option value="East">East</option>
+                    <option value="West">West</option>
+                    <option value="North">North</option>
+                    <option value="South">South</option>
+                    <option value="North-East">North-East</option>
+                    <option value="North-West">North-West</option>
+                    <option value="South-East">South-East</option>
+                    <option value="South-West">South-West</option>
+                  </select>
+                </div>}
 
-            {/* Amenities Chips */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                Amenities & Features ({amenities.length} selected)
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {PROPERTY_TYPE_AMENITIES[propertyType].map((item) => {
-                  const selected = amenities.includes(item);
-                  return (
+                {isPropertyFieldVisible(propertyType, 'furnishing') && <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Furnishing
+                  </label>
+                  <select
+                    value={furnishing}
+                    onChange={(e) => setFurnishing(e.target.value as FurnishingStatus)}
+                    className="w-full px-2 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden box-border"
+                  >
+                    <option value="semi_furnished">Semi-Furnished</option>
+                    <option value="fully_furnished">Fully Furnished</option>
+                    <option value="unfurnished">Unfurnished</option>
+                  </select>
+                </div>}
+              </div>
+
+              <PropertyTypeSpecificFields
+                propertyType={propertyType}
+                values={extraFields}
+                onChange={(field, value) => setExtraFields((prev) => ({ ...prev, [field]: value }))}
+              />
+
+              {/* Status */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Property Inventory Status
+                </label>
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+                  {(['available', 'hold', 'negotiation', 'sold_rented', 'archived'] as PropertyStatus[]).map((s) => (
                     <button
-                      key={item}
+                      key={s}
                       type="button"
-                      onClick={() => toggleAmenity(item)}
-                      className={`text-[11px] px-2.5 py-1 rounded-lg border font-medium transition-all ${
-                        selected
-                          ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 font-bold'
-                          : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                      onClick={() => setStatus(s)}
+                      className={`py-2 px-1 text-[11px] sm:text-[10px] font-bold rounded-xl border capitalize transition-all truncate cursor-pointer ${
+                        status === s
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
                       }`}
                     >
-                      {selected && '✓ '}
-                      {item}
+                      {s === 'sold_rented' ? 'Sold/Rent' : s}
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
+              </div>
+
+              {/* Amenities Chips */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Amenities & Features ({amenities.length} selected)
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {PROPERTY_TYPE_AMENITIES[propertyType].map((item) => {
+                    const selected = amenities.includes(item);
+                    return (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => toggleAmenity(item)}
+                        className={`text-[11px] px-2.5 py-1 rounded-lg border font-medium transition-all cursor-pointer ${
+                          selected
+                            ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 font-bold'
+                            : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        {selected && '✓ '}
+                        {item}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
-          </div>
 
           {/* 3. Photos */}
           <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800">
@@ -773,28 +772,28 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
           </div>
 
           {/* Sticky Action Footer */}
-          <div className="shrink-0 p-3.5 sm:p-4 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs flex items-center gap-2.5 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] z-10">
+          <div className="shrink-0 p-3 sm:p-4 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs flex items-center gap-2 sm:gap-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] z-10 w-full box-border">
             <button
               type="button"
               onClick={onClose}
-              className="py-3 px-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs transition-all shrink-0 cursor-pointer min-h-[44px]"
+              className="py-2.5 sm:py-3 px-3.5 sm:px-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs transition-all shrink-0 cursor-pointer min-h-[44px]"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting || isUploadingPhotos}
-              className="py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all flex-1 flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer min-h-[44px]"
+              className="py-2.5 sm:py-3 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all flex-1 min-w-0 flex items-center justify-center gap-2 disabled:opacity-60 cursor-pointer min-h-[44px]"
             >
               {isSubmitting ? (
                 <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Saving Property...</span>
+                  <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+                  <span className="truncate">Saving Property...</span>
                 </>
               ) : (
                 <>
-                  <Check className="w-4 h-4" />
-                  <span>Update Property Details</span>
+                  <Check className="w-4 h-4 shrink-0" />
+                  <span className="truncate">Update Property Details</span>
                 </>
               )}
             </button>
