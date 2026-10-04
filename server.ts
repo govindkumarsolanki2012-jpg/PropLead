@@ -2774,167 +2774,310 @@ async function startServer() {
 
   // 5. Restore purchases for returning or multi-device user
   app.post('/api/billing/restore-purchases', async (req, res) => {
-    const verifiedUid = await authenticateRequest(req, res);
-    if (!verifiedUid) return;
+    let restoreLogged = false;
+    const logRestoreOutcome = (details: {
+      uidPrefix: string;
+      restored: boolean;
+      code: string;
+      tokenFound: boolean;
+      ownerMatch: boolean;
+      persistSubscription: boolean;
+      persistUser: boolean;
+    }): void => {
+      if (restoreLogged) return;
+      restoreLogged = true;
+      console.log(
+        `[RESTORE_PURCHASE] uidPrefix=${details.uidPrefix} restored=${details.restored} code=${details.code} tokenFound=${details.tokenFound} ownerMatch=${details.ownerMatch} persistSubscription=${details.persistSubscription} persistUser=${details.persistUser}`
+      );
+    };
 
-    const { purchaseToken, isBridgeAvailable = false, productId = 'property_agent_pro' } = req.body;
-    const idToken = extractIdToken(req);
-    const subResult = await getSubscriptionRecord(verifiedUid, idToken);
+    let verifiedUid = '';
+    let tokenFound = false;
+    let ownerMatch = false;
+    let persistSubscription = false;
+    let persistUser = false;
 
-    if (subResult.unavailable || !subResult.record) {
-      return res.status(503).json({
-        success: false,
-        restored: false,
-        code: 'VERIFY_FAILED',
-        error: 'Subscription service temporarily unavailable. Please retry shortly.',
-      });
-    }
+    try {
+      verifiedUid = (await authenticateRequest(req, res)) || '';
+      if (!verifiedUid) {
+        logRestoreOutcome({
+          uidPrefix: 'none',
+          restored: false,
+          code: 'BACKEND_VERIFY_FAILED',
+          tokenFound: false,
+          ownerMatch: false,
+          persistSubscription: false,
+          persistUser: false,
+        });
+        return;
+      }
 
-    const record = subResult.record;
-    const client = getAndroidPublisherClient();
-    const tokenToVerify = purchaseToken || record.purchaseToken;
+      const uidPrefix = verifiedUid.slice(0, 6);
+      const { purchaseToken, isBridgeAvailable = false, productId = 'property_agent_pro' } = req.body;
+      const idToken = extractIdToken(req);
+      const subResult = await getSubscriptionRecord(verifiedUid, idToken);
 
-    if (tokenToVerify) {
-      const verification = await verifyGooglePlaySubscriptionToken(tokenToVerify, productId);
-
-      if (verification.verificationPending) {
+      if (subResult.unavailable || !subResult.record) {
+        logRestoreOutcome({
+          uidPrefix,
+          restored: false,
+          code: 'BACKEND_VERIFY_FAILED',
+          tokenFound: Boolean(purchaseToken),
+          ownerMatch: false,
+          persistSubscription: false,
+          persistUser: false,
+        });
         return res.status(503).json({
           success: false,
           restored: false,
-          code: 'VERIFY_FAILED',
-          error: 'SUBSCRIPTION_VERIFICATION_PENDING',
-          message: 'Google Play verification is temporarily unavailable. Please retry shortly.',
+          code: 'BACKEND_VERIFY_FAILED',
+          error: 'Subscription service temporarily unavailable. Please retry shortly.',
         });
       }
 
-      if (
-        verification.isValid &&
-        (verification.subscriptionStatus === 'ACTIVE' || verification.subscriptionStatus === 'CANCELED_BUT_ACTIVE')
-      ) {
-        const ownership = await claimPurchaseTokenForUid(tokenToVerify, verifiedUid);
-        if (!ownership.allowed) {
-          if ('reason' in ownership && ownership.reason === 'OWNED_BY_ANOTHER_USER') {
-            console.warn('[Google Play Restore] Refused cross-account token restore.', {
-              uidPrefix: verifiedUid.slice(0, 6),
-              code: 'TOKEN_OWNER_MISMATCH',
+      const record = subResult.record;
+      const client = getAndroidPublisherClient();
+      const tokenToVerify = purchaseToken || record.purchaseToken;
+      tokenFound = Boolean(tokenToVerify);
+
+      if (tokenToVerify) {
+        const verification = await verifyGooglePlaySubscriptionToken(tokenToVerify, productId);
+
+        if (verification.verificationPending) {
+          logRestoreOutcome({
+            uidPrefix,
+            restored: false,
+            code: 'BACKEND_VERIFY_FAILED',
+            tokenFound,
+            ownerMatch: false,
+            persistSubscription: false,
+            persistUser: false,
+          });
+          return res.status(503).json({
+            success: false,
+            restored: false,
+            code: 'BACKEND_VERIFY_FAILED',
+            error: 'SUBSCRIPTION_VERIFICATION_PENDING',
+            message: 'Google Play verification is temporarily unavailable. Please retry shortly.',
+          });
+        }
+
+        if (
+          verification.isValid &&
+          (verification.subscriptionStatus === 'ACTIVE' || verification.subscriptionStatus === 'CANCELED_BUT_ACTIVE')
+        ) {
+          const ownership = await claimPurchaseTokenForUid(tokenToVerify, verifiedUid);
+          if (!ownership.allowed) {
+            if ('reason' in ownership && ownership.reason === 'OWNED_BY_ANOTHER_USER') {
+              logRestoreOutcome({
+                uidPrefix,
+                restored: false,
+                code: 'TOKEN_OWNER_MISMATCH',
+                tokenFound,
+                ownerMatch: false,
+                persistSubscription: false,
+                persistUser: false,
+              });
+              return res.status(409).json({
+                success: false,
+                restored: false,
+                code: 'TOKEN_OWNER_MISMATCH',
+                error: 'PURCHASE_TOKEN_OWNED_BY_ANOTHER_USER',
+                message: 'This Google Play subscription is linked to another PropLead account.',
+              });
+            }
+            logRestoreOutcome({
+              uidPrefix,
+              restored: false,
+              code: 'BACKEND_VERIFY_FAILED',
+              tokenFound,
+              ownerMatch: false,
+              persistSubscription: false,
+              persistUser: false,
             });
-            return res.status(409).json({
+            return res.status(503).json({
               success: false,
               restored: false,
-              code: 'TOKEN_OWNER_MISMATCH',
-              error: 'PURCHASE_TOKEN_OWNED_BY_ANOTHER_USER',
-              message: 'This Google Play subscription is linked to another PropLead account.',
+              code: 'BACKEND_VERIFY_FAILED',
+              error: 'PURCHASE_TOKEN_OWNERSHIP_CHECK_UNAVAILABLE',
+              message: 'Purchase ownership could not be verified. Please retry shortly.',
             });
           }
-          return res.status(503).json({
-            success: false,
-            restored: false,
-            code: 'VERIFY_FAILED',
-            error: 'PURCHASE_TOKEN_OWNERSHIP_CHECK_UNAVAILABLE',
-            message: 'Purchase ownership could not be verified. Please retry shortly.',
-          });
-        }
 
-        record.subscriptionStatus = verification.subscriptionStatus;
-        record.subscriptionExpiryDate = verification.subscriptionExpiryDate;
-        record.subscriptionExpiryTime = verification.subscriptionExpiryDate;
-        record.subscriptionBasePlanId = verification.basePlanId || record.subscriptionBasePlanId || record.subscriptionBasePlan || 'quarterly';
-        record.subscriptionBasePlan = record.subscriptionBasePlanId;
-        record.planId = record.subscriptionBasePlanId;
-        record.autoRenewing = verification.autoRenewing;
-        record.purchaseToken = tokenToVerify;
-        record.lastVerifiedAt = new Date().toISOString();
+          ownerMatch = true;
+          record.subscriptionStatus = verification.subscriptionStatus;
+          record.subscriptionExpiryDate = verification.subscriptionExpiryDate;
+          record.subscriptionExpiryTime = verification.subscriptionExpiryDate;
+          record.subscriptionBasePlanId = verification.basePlanId || record.subscriptionBasePlanId || record.subscriptionBasePlan || 'quarterly';
+          record.subscriptionBasePlan = record.subscriptionBasePlanId;
+          record.planId = record.subscriptionBasePlanId;
+          record.autoRenewing = verification.autoRenewing;
+          record.purchaseToken = tokenToVerify;
+          record.lastVerifiedAt = new Date().toISOString();
 
-        const persistence = await saveSubscriptionRecord(record, idToken);
-        if (!persistence.subscriptionsCollectionSynced || !persistence.userProfileSynced) {
-          console.error('[Google Play Restore] Verified entitlement could not be persisted.', {
-            uidPrefix: verifiedUid.slice(0, 6),
-            code: 'ENTITLEMENT_PERSIST_FAILED',
-            subscriptionsCollectionSynced: persistence.subscriptionsCollectionSynced,
-            userProfileSynced: persistence.userProfileSynced,
+          const persistence = await saveSubscriptionRecord(record, idToken);
+          persistSubscription = persistence.subscriptionsCollectionSynced;
+          persistUser = persistence.userProfileSynced;
+          if (!persistSubscription || !persistUser) {
+            logRestoreOutcome({
+              uidPrefix,
+              restored: false,
+              code: 'ENTITLEMENT_PERSIST_FAILED',
+              tokenFound,
+              ownerMatch,
+              persistSubscription,
+              persistUser,
+            });
+            return res.status(503).json({
+              success: false,
+              restored: false,
+              code: 'ENTITLEMENT_PERSIST_FAILED',
+              subscriptionStatus: record.subscriptionStatus,
+              error: 'Verified subscription entitlement could not be saved. Please retry shortly.',
+            });
+          }
+
+          logRestoreOutcome({
+            uidPrefix,
+            restored: true,
+            code: 'RESTORE_SUCCESS',
+            tokenFound,
+            ownerMatch,
+            persistSubscription,
+            persistUser,
           });
-          return res.status(503).json({
-            success: false,
-            restored: false,
-            code: 'ENTITLEMENT_PERSIST_FAILED',
+          return res.json({
+            success: true,
+            restored: true,
+            code: 'RESTORE_SUCCESS',
+            hasLiveGooglePlayAuth: Boolean(client),
             subscriptionStatus: record.subscriptionStatus,
-            error: 'Verified subscription entitlement could not be saved. Please retry shortly.',
+            subscriptionExpiryDate: record.subscriptionExpiryDate,
+            subscriptionExpiryTime: record.subscriptionExpiryDate,
+            expiryDate: record.subscriptionExpiryDate,
+            subscriptionProductId: record.subscriptionProductId,
+            subscriptionBasePlan: record.subscriptionBasePlan,
+            subscriptionBasePlanId: record.subscriptionBasePlanId,
+            planId: record.planId,
+            autoRenewing: record.autoRenewing,
+            message: 'Active PropLead subscription restored via Google Play!',
           });
         }
 
-        return res.json({
-          success: true,
-          restored: true,
-          code: 'RESTORE_SUCCESS',
-          hasLiveGooglePlayAuth: Boolean(client),
-          subscriptionStatus: record.subscriptionStatus,
-          subscriptionExpiryDate: record.subscriptionExpiryDate,
-          subscriptionExpiryTime: record.subscriptionExpiryDate,
-          expiryDate: record.subscriptionExpiryDate,
-          subscriptionProductId: record.subscriptionProductId,
-          subscriptionBasePlan: record.subscriptionBasePlan,
-          subscriptionBasePlanId: record.subscriptionBasePlanId,
-          planId: record.planId,
-          autoRenewing: record.autoRenewing,
-          message: 'Active PropLead subscription restored via Google Play!',
+        logRestoreOutcome({
+          uidPrefix,
+          restored: false,
+          code: 'NO_PLAY_PURCHASE',
+          tokenFound,
+          ownerMatch: false,
+          persistSubscription: false,
+          persistUser: false,
         });
-      } else {
         return res.json({
           success: true,
           restored: false,
-          code: 'NO_ACTIVE_SUBSCRIPTION',
+          code: 'NO_PLAY_PURCHASE',
           hasLiveGooglePlayAuth: Boolean(client),
           subscriptionStatus: record.subscriptionStatus,
           message: 'No active PropLead subscription was found for this Google Play account.',
         });
       }
-    }
 
-    // Check if user already has an active, unexpired record in Firestore
-    if (record.subscriptionStatus === 'ACTIVE' || record.subscriptionStatus === 'CANCELED_BUT_ACTIVE') {
-      const resolvedExpiry = record.subscriptionExpiryTime || record.subscriptionExpiryDate;
-      const expTime = resolvedExpiry ? new Date(resolvedExpiry).getTime() : 0;
-      if (expTime > Date.now()) {
-        return res.json({
-          success: true,
-          restored: true,
-          code: 'RESTORE_SUCCESS',
-          hasLiveGooglePlayAuth: Boolean(client),
-          subscriptionStatus: record.subscriptionStatus,
-          subscriptionExpiryDate: record.subscriptionExpiryDate,
-          subscriptionExpiryTime: record.subscriptionExpiryTime || record.subscriptionExpiryDate,
-          expiryDate: record.subscriptionExpiryTime || record.subscriptionExpiryDate,
-          subscriptionProductId: record.subscriptionProductId,
-          subscriptionBasePlan: record.subscriptionBasePlan,
-          subscriptionBasePlanId: record.subscriptionBasePlanId || record.subscriptionBasePlan || 'quarterly',
-          planId: record.planId || record.subscriptionBasePlan || 'quarterly',
-          autoRenewing: record.autoRenewing,
-          message: 'Active PropLead subscription restored from verified account record!',
+      // Check if user already has an active, unexpired record in Firestore.
+      if (record.subscriptionStatus === 'ACTIVE' || record.subscriptionStatus === 'CANCELED_BUT_ACTIVE') {
+        const resolvedExpiry = record.subscriptionExpiryTime || record.subscriptionExpiryDate;
+        const expTime = resolvedExpiry ? new Date(resolvedExpiry).getTime() : 0;
+        if (expTime > Date.now()) {
+          logRestoreOutcome({
+            uidPrefix,
+            restored: true,
+            code: 'RESTORE_SUCCESS',
+            tokenFound: false,
+            ownerMatch: true,
+            persistSubscription: false,
+            persistUser: false,
+          });
+          return res.json({
+            success: true,
+            restored: true,
+            code: 'RESTORE_SUCCESS',
+            hasLiveGooglePlayAuth: Boolean(client),
+            subscriptionStatus: record.subscriptionStatus,
+            subscriptionExpiryDate: record.subscriptionExpiryDate,
+            subscriptionExpiryTime: record.subscriptionExpiryTime || record.subscriptionExpiryDate,
+            expiryDate: record.subscriptionExpiryTime || record.subscriptionExpiryDate,
+            subscriptionProductId: record.subscriptionProductId,
+            subscriptionBasePlan: record.subscriptionBasePlan,
+            subscriptionBasePlanId: record.subscriptionBasePlanId || record.subscriptionBasePlan || 'quarterly',
+            planId: record.planId || record.subscriptionBasePlan || 'quarterly',
+            autoRenewing: record.autoRenewing,
+            message: 'Active PropLead subscription restored from verified account record!',
+          });
+        }
+      }
+
+      if (!client && !isBridgeAvailable) {
+        logRestoreOutcome({
+          uidPrefix,
+          restored: false,
+          code: 'BACKEND_VERIFY_FAILED',
+          tokenFound: false,
+          ownerMatch: false,
+          persistSubscription: false,
+          persistUser: false,
+        });
+        return res.status(503).json({
+          success: false,
+          restored: false,
+          code: 'BACKEND_VERIFY_FAILED',
+          billingUnavailable: true,
+          hasLiveGooglePlayAuth: false,
+          message: 'Google Play billing is currently unavailable. Please try again.',
+        });
+      }
+
+      logRestoreOutcome({
+        uidPrefix,
+        restored: false,
+        code: 'NO_PURCHASE_TOKEN',
+        tokenFound: false,
+        ownerMatch: false,
+        persistSubscription: false,
+        persistUser: false,
+      });
+      return res.json({
+        success: true,
+        restored: false,
+        code: 'NO_PURCHASE_TOKEN',
+        hasLiveGooglePlayAuth: Boolean(client),
+        subscriptionStatus: record.subscriptionStatus,
+        message: 'No Google Play purchase token was available to restore.',
+      });
+    } catch (error) {
+      const code = 'BACKEND_VERIFY_FAILED';
+      logRestoreOutcome({
+        uidPrefix: verifiedUid ? verifiedUid.slice(0, 6) : 'none',
+        restored: false,
+        code,
+        tokenFound,
+        ownerMatch,
+        persistSubscription,
+        persistUser,
+      });
+      console.error('[Google Play Restore] Unexpected restore failure.', {
+        uidPrefix: verifiedUid ? verifiedUid.slice(0, 6) : 'none',
+        code,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      if (!res.headersSent) {
+        return res.status(500).json({
+          success: false,
+          restored: false,
+          code,
+          error: 'Subscription restore failed unexpectedly. Please retry shortly.',
         });
       }
     }
-
-    // If no purchase token exists and running in web preview without live Google Play auth or native bridge:
-    if (!client && !isBridgeAvailable) {
-      return res.json({
-        success: false,
-        restored: false,
-        code: 'VERIFY_FAILED',
-        billingUnavailable: true,
-        hasLiveGooglePlayAuth: false,
-        message: 'Google Play billing is currently unavailable. Please try again.',
-      });
-    }
-
-    // In a live environment where Google Play connected but no active subscription was found
-    return res.json({
-      success: true,
-      restored: false,
-      code: 'NO_ACTIVE_SUBSCRIPTION',
-      hasLiveGooglePlayAuth: Boolean(client),
-      subscriptionStatus: record.subscriptionStatus,
-      message: 'No active PropLead subscription was found for this Google Play account.',
-    });
   });
 
   // 6. Handle Google Play Real-Time Developer Notifications (RTDN Pub/Sub Webhook)
