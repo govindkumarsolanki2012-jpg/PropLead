@@ -27,6 +27,7 @@ import {
   startFreeTrialServer,
   formatTrialEndDateTime,
   getBillingApiUrl,
+  GooglePlayRestoreDebug,
 } from '../../utils/billing';
 import { auth } from '../../lib/firebase';
 import confetti from 'canvas-confetti';
@@ -56,6 +57,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   const [processingStatus, setProcessingStatus] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [restoreDebug, setRestoreDebug] = useState<GooglePlayRestoreDebug | null>(null);
   const [productState, setProductState] = useState<{
     isLoading: boolean;
     isAvailable: boolean;
@@ -256,10 +258,12 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     setIsProcessing(true);
     setErrorMessage(null);
     setSuccessMessage(null);
+    setRestoreDebug(null);
     setProcessingStatus('Checking Google Play...');
 
     try {
       const result = await restoreGooglePlayPurchases(profile.id, (step) => setProcessingStatus(step));
+      setRestoreDebug(result.debug ?? null);
       if (result.success && result.restored && result.profileUpdates) {
         onUpdateProfile(result.profileUpdates);
         setSuccessMessage(result.message);
@@ -688,6 +692,29 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
               {isLocked ? 'View-Only Mode' : 'Close'}
             </button>
           </div>
+          {restoreDebug && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+              <div className="font-semibold">Temporary restore diagnostics</div>
+              <div>Billing supported: {restoreDebug.billingSupported == null ? 'unknown' : restoreDebug.billingSupported ? 'yes' : 'no'}</div>
+              <div>Restore call: {restoreDebug.restorePurchasesResult.replace('_', ' ')}</div>
+              <div>Purchases found: {restoreDebug.playPurchaseCount}</div>
+              <div>Matching product found: {restoreDebug.matchingProductFound ? 'yes' : 'no'}</div>
+              <div>Purchase state: {restoreDebug.purchaseState ?? 'none'}</div>
+              <div>Token found: {restoreDebug.tokenFound ? 'yes' : 'no'}</div>
+              <div>Backend called: {restoreDebug.backendCalled ? 'yes' : 'no'}</div>
+              <div>Result code: {restoreDebug.backendRestoreCode ?? 'none'}</div>
+              <div>HTTP status: {restoreDebug.backendHttpStatus ?? 'none'}</div>
+              <div>response.success: {restoreDebug.backendResponseSuccess == null ? 'not present' : String(restoreDebug.backendResponseSuccess)}</div>
+              <div>response.restored: {restoreDebug.backendResponseRestored == null ? 'not present' : String(restoreDebug.backendResponseRestored)}</div>
+              <div>response.code: {restoreDebug.backendRestoreCode ?? 'not present'}</div>
+              <div>response.error: {restoreDebug.backendResponseError ?? 'not present'}</div>
+              <div>response.subscriptionStatus: {restoreDebug.backendSubscriptionStatus ?? 'not present'}</div>
+              <div>response.expiryTimeMillis: {restoreDebug.backendExpiryTimeMillis ?? 'not present'}</div>
+              {restoreDebug.backendRawResponse && (
+                <div className="break-all">Raw response (first 300 chars): {restoreDebug.backendRawResponse}</div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
