@@ -364,10 +364,12 @@ async function getFirestoreServiceAccountToken(): Promise<string | null> {
     return cachedDatastoreToken.token;
   }
 
-  const rawKey =
-    process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_KEY ||
-    process.env.GOOGLE_PLAY_SERVICE_ACCOUNT_KEY ||
-    process.env.SERVICE_ACCOUNT_KEY;
+  // Firestore must never use the Google Play Developer API credential. That
+  // credential is intentionally scoped to Play verification and may not have
+  // any Firestore IAM permissions. Prefer an explicitly configured Firebase
+  // Admin credential; otherwise use the Cloud Run runtime service account via
+  // Application Default Credentials.
+  const rawKey = process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_KEY;
   const credentials = parseServiceAccountCredentials(rawKey);
 
   try {
@@ -2843,7 +2845,22 @@ async function startServer() {
         record.purchaseToken = tokenToVerify;
         record.lastVerifiedAt = new Date().toISOString();
 
-        await saveSubscriptionRecord(record, idToken);
+        const persistence = await saveSubscriptionRecord(record, idToken);
+        if (!persistence.subscriptionsCollectionSynced || !persistence.userProfileSynced) {
+          console.error('[Google Play Restore] Verified entitlement could not be persisted.', {
+            uidPrefix: verifiedUid.slice(0, 6),
+            code: 'ENTITLEMENT_PERSIST_FAILED',
+            subscriptionsCollectionSynced: persistence.subscriptionsCollectionSynced,
+            userProfileSynced: persistence.userProfileSynced,
+          });
+          return res.status(503).json({
+            success: false,
+            restored: false,
+            code: 'ENTITLEMENT_PERSIST_FAILED',
+            subscriptionStatus: record.subscriptionStatus,
+            error: 'Verified subscription entitlement could not be saved. Please retry shortly.',
+          });
+        }
 
         return res.json({
           success: true,
