@@ -2835,7 +2835,7 @@ async function startServer() {
       }
 
       const uidPrefix = verifiedUid.slice(0, 6);
-      const { purchaseToken, isBridgeAvailable = false, productId = 'property_agent_pro' } = req.body;
+      const { purchaseToken, isBridgeAvailable = false, productId = 'property_agent_pro', clientDiagnostic } = req.body;
       const idToken = extractIdToken(req);
       const subResult = await getSubscriptionRecord(verifiedUid, idToken);
 
@@ -2861,6 +2861,23 @@ async function startServer() {
       const client = getAndroidPublisherClient();
       const tokenToVerify = purchaseToken || record.purchaseToken;
       tokenFound = Boolean(tokenToVerify);
+
+      const clientMissingCode = clientDiagnostic?.matchingProductFound === false
+        ? 'CLIENT_NO_PLAY_PURCHASE'
+        : clientDiagnostic?.tokenFound === false
+          ? 'CLIENT_NO_PURCHASE_TOKEN'
+          : null;
+      if (!purchaseToken && clientMissingCode) {
+        logRestoreOutcome({
+          uidPrefix,
+          restored: false,
+          code: clientMissingCode,
+          tokenFound: false,
+          ownerMatch: false,
+          persistSubscription: false,
+          persistUser: false,
+        });
+      }
 
       if (tokenToVerify) {
         const verification = await verifyGooglePlaySubscriptionToken(tokenToVerify, productId);
@@ -3058,10 +3075,11 @@ async function startServer() {
         });
       }
 
+      const noTokenCode = clientMissingCode || 'NO_PURCHASE_TOKEN';
       logRestoreOutcome({
         uidPrefix,
         restored: false,
-        code: 'NO_PURCHASE_TOKEN',
+        code: noTokenCode,
         tokenFound: false,
         ownerMatch: false,
         persistSubscription: false,
@@ -3070,7 +3088,7 @@ async function startServer() {
       return res.json({
         success: true,
         restored: false,
-        code: 'NO_PURCHASE_TOKEN',
+        code: noTokenCode,
         hasLiveGooglePlayAuth: Boolean(client),
         subscriptionStatus: record.subscriptionStatus,
         message: 'No Google Play purchase token was available to restore.',
