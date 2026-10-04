@@ -19,6 +19,25 @@ export type RestoreDiagnosticCode =
   | 'RESTORE_NOT_SUPPORTED'
   | 'RESTORE_PENDING';
 
+export interface GooglePlayRestoreDebug {
+  billingSupported: boolean | null;
+  restorePurchasesCalled: boolean;
+  restorePurchasesResult: 'not_called' | 'success' | 'failed';
+  playPurchaseCount: number;
+  matchingProductFound: boolean;
+  purchaseState: string | null;
+  tokenFound: boolean;
+  backendCalled: boolean;
+  backendRestoreCode: string | null;
+  backendHttpStatus: number | null;
+  backendResponseSuccess: boolean | null;
+  backendResponseRestored: boolean | null;
+  backendResponseError: string | null;
+  backendSubscriptionStatus: string | null;
+  backendExpiryTimeMillis: string | number | null;
+  backendRawResponse: string | null;
+}
+
 export interface GooglePlayRestoreResult {
   success: boolean;
   restored: boolean;
@@ -26,6 +45,7 @@ export interface GooglePlayRestoreResult {
   billingUnavailable?: boolean;
   profileUpdates?: Partial<UserProfile>;
   message: string;
+  debug?: GooglePlayRestoreDebug;
 }
 
 const isPurchasedState = (purchaseState: unknown): boolean => {
@@ -1104,9 +1124,43 @@ export async function restoreGooglePlayPurchases(
   onProgress?: (step: string) => void
 ): Promise<GooglePlayRestoreResult> {
   let purchaseTokenFound = false;
+  const debug: GooglePlayRestoreDebug = {
+    billingSupported: null,
+    restorePurchasesCalled: false,
+    restorePurchasesResult: 'not_called',
+    playPurchaseCount: 0,
+    matchingProductFound: false,
+    purchaseState: null,
+    tokenFound: false,
+    backendCalled: false,
+    backendRestoreCode: null,
+    backendHttpStatus: null,
+    backendResponseSuccess: null,
+    backendResponseRestored: null,
+    backendResponseError: null,
+    backendSubscriptionStatus: null,
+    backendExpiryTimeMillis: null,
+    backendRawResponse: null,
+  };
+  const debugLog = (code: string, value?: boolean | number | string | null): void => {
+    console.info(`[Restore Purchase Debug] ${code}`, value ?? '');
+  };
+  debugLog('RESTORE_DEBUG_START');
   const finish = (result: GooglePlayRestoreResult): GooglePlayRestoreResult => {
     logRestoreDiagnostic(userId, result.code, purchaseTokenFound, result.restored);
-    return result;
+    if (!debug.backendRestoreCode) {
+      debug.backendRestoreCode = result.code;
+    }
+    debugLog('BILLING_SUPPORTED', debug.billingSupported);
+    debugLog('RESTORE_PURCHASES_CALLED', debug.restorePurchasesCalled);
+    debugLog('RESTORE_PURCHASES_RESULT', debug.restorePurchasesResult);
+    debugLog('PLAY_PURCHASE_COUNT', debug.playPurchaseCount);
+    debugLog('MATCHING_PRODUCT_FOUND', debug.matchingProductFound);
+    debugLog('PURCHASE_STATE', debug.purchaseState);
+    debugLog('TOKEN_FOUND', debug.tokenFound);
+    debugLog('BACKEND_RESTORE_CALLED', debug.backendCalled);
+    debugLog('BACKEND_RESTORE_CODE', debug.backendRestoreCode);
+    return { ...result, debug: { ...debug } };
   };
 
   try {
@@ -1118,13 +1172,19 @@ export async function restoreGooglePlayPurchases(
     if (Capacitor.isNativePlatform()) {
       try {
         const supported = await NativePurchases.isBillingSupported();
+        debug.billingSupported = Boolean(supported.isBillingSupported);
+        debugLog('BILLING_SUPPORTED', debug.billingSupported);
         if (supported.isBillingSupported) {
           isBridgeAvailable = true;
 
           // Request native store restore
           try {
+            debug.restorePurchasesCalled = true;
+            debugLog('RESTORE_PURCHASES_CALLED', true);
             await NativePurchases.restorePurchases();
+            debug.restorePurchasesResult = 'success';
           } catch (e) {
+            debug.restorePurchasesResult = 'failed';
             console.warn('[NativePurchases] restorePurchases warning:', e);
           }
 
@@ -1133,11 +1193,24 @@ export async function restoreGooglePlayPurchases(
             productType: PURCHASE_TYPE.SUBS,
           });
 
-          const matching = result.purchases?.find(
-            (p) =>
-              p.productIdentifier === GOOGLE_PLAY_PRODUCT_ID &&
-              isPurchasedState(p.purchaseState)
+          debug.playPurchaseCount = result.purchases?.length ?? 0;
+          debugLog('PLAY_PURCHASE_COUNT', debug.playPurchaseCount);
+
+          const productPurchase = result.purchases?.find(
+            (p) => p.productIdentifier === GOOGLE_PLAY_PRODUCT_ID
           );
+          debug.matchingProductFound = Boolean(productPurchase);
+          debug.purchaseState = productPurchase?.purchaseState == null
+            ? null
+            : String(productPurchase.purchaseState);
+          debug.tokenFound = Boolean(productPurchase?.purchaseToken);
+          debugLog('MATCHING_PRODUCT_FOUND', debug.matchingProductFound);
+          debugLog('PURCHASE_STATE', debug.purchaseState);
+          debugLog('TOKEN_FOUND', debug.tokenFound);
+
+          const matching = productPurchase && isPurchasedState(productPurchase.purchaseState)
+            ? productPurchase
+            : undefined;
 
           if (!matching) {
             const pending = result.purchases?.some(
@@ -1162,6 +1235,7 @@ export async function restoreGooglePlayPurchases(
 
           purchaseToken = matching.purchaseToken;
           purchaseTokenFound = true;
+          debug.tokenFound = true;
         } else {
           return finish({
             success: false,
@@ -1172,6 +1246,7 @@ export async function restoreGooglePlayPurchases(
           });
         }
       } catch (nativeErr) {
+        debugLog('PLAY_QUERY_FAILED');
         console.warn('[NativePurchases] purchase query failed safely.');
         return finish({
           success: false,
@@ -1182,6 +1257,8 @@ export async function restoreGooglePlayPurchases(
         });
       }
     } else {
+      debug.billingSupported = false;
+      debugLog('BILLING_SUPPORTED', false);
       return finish({
         success: false,
         restored: false,
@@ -1219,6 +1296,8 @@ export async function restoreGooglePlayPurchases(
     }
 
     const restoreEndpoint = getBillingApiUrl('/api/billing/restore-purchases');
+    debug.backendCalled = true;
+    debugLog('BACKEND_RESTORE_CALLED', true);
     const res = await fetch(restoreEndpoint, {
       method: 'POST',
       headers,
@@ -1231,10 +1310,26 @@ export async function restoreGooglePlayPurchases(
     });
 
     const restoreText = await res.text();
+    debug.backendHttpStatus = res.status;
     let data: any = null;
     try {
       data = JSON.parse(restoreText);
+      debug.backendRestoreCode = data?.code || (res.ok ? 'HTTP_OK_NO_CODE' : `HTTP_${res.status}`);
+      debug.backendResponseSuccess = typeof data?.success === 'boolean' ? data.success : null;
+      debug.backendResponseRestored = typeof data?.restored === 'boolean' ? data.restored : null;
+      debug.backendResponseError = typeof data?.error === 'string' ? data.error.slice(0, 300) : null;
+      debug.backendSubscriptionStatus = typeof data?.subscriptionStatus === 'string'
+        ? data.subscriptionStatus
+        : null;
+      debug.backendExpiryTimeMillis =
+        typeof data?.expiryTimeMillis === 'string' || typeof data?.expiryTimeMillis === 'number'
+          ? data.expiryTimeMillis
+          : null;
+      debugLog('BACKEND_RESTORE_CODE', debug.backendRestoreCode);
     } catch (parseErr) {
+      debug.backendRestoreCode = `HTTP_${res.status}_NON_JSON`;
+      debug.backendRawResponse = restoreText.slice(0, 300);
+      debugLog('BACKEND_RESTORE_CODE', debug.backendRestoreCode);
       console.warn('[Google Play Restore Notice - Non-JSON Response]', {
         endpoint: restoreEndpoint,
         httpStatus: res.status,
