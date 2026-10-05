@@ -9,8 +9,8 @@ import { savePublicPhotoShare } from '../services/firebaseService';
  */
 export function getPublicGalleryUrl(propertyId: string): string {
   const customBase = typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_PUBLIC_SHARE_BASE_URL;
-  const base = customBase || 'https://proplead-e5c6a.web.app';
-  return `${base}/share/photos/${propertyId}`;
+  const base = String(customBase || 'https://proplead.in').replace(/\/$/, '');
+  return `${base}/p/${encodeURIComponent(propertyId)}`;
 }
 
 /**
@@ -57,9 +57,9 @@ export function generateCustomerPropertyMessage(
   }
   details += `• Status: ${statusText}\n\n`;
 
-  if (galleryUrl && property.photos && normalizePropertyPhotos(property.photos).length > 0) {
-    details += `*Photos:* ${galleryUrl}\n\n`;
-  }
+  // CRITICAL: Do NOT list individual image URLs here. Always keep as single public gallery URL.
+  const publicGalleryUrl = galleryUrl || getPublicGalleryUrl(property.id);
+  details += `📸 *Photos & View:*\n👉 ${publicGalleryUrl}\n\n`;
 
   details += `--------------------------------\n`;
   details += `*Presented by:* ${profile?.name || 'Property Advisor'}\n\n`;
@@ -93,5 +93,4 @@ export async function openWhatsAppPropertyShare(
   const message = generateCustomerPropertyMessage(property, profile, customerName, galleryUrl);
   openWhatsApp(customerPhone || '', message);
 }
-
 
