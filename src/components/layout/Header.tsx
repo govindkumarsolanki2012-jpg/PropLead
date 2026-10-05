@@ -46,7 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header
       id="app-header"
-      className="flex-shrink-0 sticky top-0 z-40 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-2.5 sm:px-4 pb-2 sm:pb-3 transition-colors safe-header w-full opacity-100"
+      className="flex-shrink-0 sticky top-0 z-50 pointer-events-auto bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-2.5 sm:px-4 pb-2 sm:pb-3 transition-colors safe-header w-full opacity-100"
       style={{
         paddingTop: 'calc(0.75rem + max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)))',
         isolation: 'isolate',
@@ -81,7 +81,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Right Actions: Pro Status (if subscribed) + Quick Add Button */}
-        <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0 ml-auto">
+        <div className="relative z-50 pointer-events-auto flex items-center gap-1 sm:gap-2 flex-shrink-0 ml-auto">
           {/* Pro Badge: Only shown if user has an active paid subscription */}
           {profile?.isSubscribed && (
             <span
@@ -97,8 +97,9 @@ export const Header: React.FC<HeaderProps> = ({
           {!isPropertiesTab && (
             <button
               id="header-add-lead-btn"
+              type="button"
               onClick={onOpenQuickAdd}
-              className="flex items-center gap-1 sm:gap-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-[11px] sm:text-xs font-semibold px-2 sm:px-3 py-1.5 rounded-lg shadow-xs transition-all flex-shrink-0 whitespace-nowrap"
+              className="relative z-50 pointer-events-auto flex items-center gap-1 sm:gap-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-[11px] sm:text-xs font-semibold px-2 sm:px-3 py-1.5 rounded-lg shadow-xs transition-all flex-shrink-0 whitespace-nowrap"
               aria-label={addBtnLabel}
             >
               <Plus className="w-3.5 h-3.5 flex-shrink-0" />
@@ -154,3 +155,4 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
+
