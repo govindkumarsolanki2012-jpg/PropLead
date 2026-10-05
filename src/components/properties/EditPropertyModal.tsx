@@ -296,10 +296,16 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex flex-col justify-end sm:justify-center items-center p-0 sm:p-4 overflow-hidden">
-      <div className="relative w-full sm:max-w-2xl bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[100dvh] sm:max-h-[min(90dvh,850px)] h-full sm:h-auto overflow-hidden border border-slate-200 dark:border-slate-800 box-border animate-in fade-in slide-in-from-bottom duration-200">
+    <div
+      className="fixed inset-0 z-50 h-full min-h-[100dvh] overflow-y-auto overscroll-y-contain bg-black/70 backdrop-blur-xs flex flex-col justify-start sm:justify-center items-center px-0 sm:px-4"
+      style={{
+        paddingTop: 'max(env(safe-area-inset-top, 0px), 16px)',
+        paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 20px)',
+      }}
+    >
+      <div className="relative w-full sm:max-w-2xl bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col max-h-full sm:max-h-[min(90dvh,850px)] h-full sm:h-auto min-h-0 overflow-hidden border border-slate-200 dark:border-slate-800 box-border animate-in fade-in slide-in-from-bottom duration-200">
         {/* Modal Header - Sticky Top */}
-        <div className="shrink-0 px-4 py-3 sm:px-5 sm:py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-xs z-10">
+        <div className="relative sticky top-0 z-50 pointer-events-auto shrink-0 px-4 py-3 sm:px-5 sm:py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-xs">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-9 h-9 rounded-2xl bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
               <Building className="w-5 h-5" />
@@ -316,7 +322,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800 flex items-center justify-center transition-colors shrink-0 cursor-pointer"
+            className="relative z-50 pointer-events-auto w-9 h-9 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-200 dark:hover:bg-slate-800 flex items-center justify-center transition-colors shrink-0 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
