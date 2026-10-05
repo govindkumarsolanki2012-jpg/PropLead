@@ -1502,9 +1502,7 @@ export function App() {
           {/* Header */}
           <Header
             profile={profile}
-            leads={leads}
-            properties={properties}
-            isLocked={isLocked}
+            currentTab={currentTab}
             searchQuery={
               currentTab === 'home'
                 ? dashboardSearchQuery
@@ -1514,21 +1512,7 @@ export function App() {
             }
             onSearchChange={handleSearchChange}
             onSearchFocus={handleSearchFocus}
-            onSelectLead={(l) => {
-              setDetailLead(l);
-              setCurrentTab('leads');
-            }}
-            onSelectProperty={(p) => {
-              setDetailProperty(p);
-              setCurrentTab('properties');
-            }}
-            onOpenAddModal={() => {
-              if (currentTab === 'properties') {
-                guardLockedFeature('Add Property', () => setIsAddPropertyOpen(true));
-              } else {
-                guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true));
-              }
-            }}
+            onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
             onOpenSubscription={() => setIsSubscriptionOpen(true)}
             onOpenSettings={() => {
               if (currentTab === 'settings') {
