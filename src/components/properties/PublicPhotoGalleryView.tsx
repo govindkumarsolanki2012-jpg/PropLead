@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Image as ImageIcon } from 'lucide-react';
 import { getPublicPhotoShare } from '../../services/firebaseService';
+import { preloadImageUrls } from '../../utils/imagePreloader';
 
 interface PublicPhotoGalleryViewProps {
   shareId: string;
@@ -33,6 +34,11 @@ export const PublicPhotoGalleryView: React.FC<PublicPhotoGalleryViewProps> = ({ 
     loadPhotos();
     return () => { isMounted = false; };
   }, [shareId]);
+
+  useEffect(() => {
+    if (photoUrls.length === 0) return;
+    return preloadImageUrls(photoUrls);
+  }, [photoUrls]);
 
   const handlePrev = () => {
     setCurrentIndex((prev) => (prev > 0 ? prev - 1 : photoUrls.length - 1));
@@ -89,6 +95,8 @@ export const PublicPhotoGalleryView: React.FC<PublicPhotoGalleryViewProps> = ({ 
         <img
           src={photoUrls[currentIndex]}
           alt={`Property Photo ${currentIndex + 1}`}
+          loading="eager"
+          decoding="async"
           className="max-h-full max-w-full object-contain rounded-xl shadow-2xl transition-transform duration-200"
         />
 
@@ -124,7 +132,19 @@ export const PublicPhotoGalleryView: React.FC<PublicPhotoGalleryViewProps> = ({ 
                 currentIndex === idx ? 'border-emerald-500 scale-105 shadow-md' : 'border-transparent opacity-60 hover:opacity-100'
               }`}
             >
-              <img src={url} alt={`Thumbnail ${idx + 1}`} className="w-full h-full object-cover" />
+              <img
+                src={url}
+                alt={`Thumbnail ${idx + 1}`}
+                loading={
+                  idx === currentIndex ||
+                  idx === (currentIndex - 1 + photoUrls.length) % photoUrls.length ||
+                  idx === (currentIndex + 1) % photoUrls.length
+                    ? 'eager'
+                    : 'lazy'
+                }
+                decoding="async"
+                className="w-full h-full object-cover"
+              />
             </button>
           ))}
         </div>
@@ -132,5 +152,4 @@ export const PublicPhotoGalleryView: React.FC<PublicPhotoGalleryViewProps> = ({ 
     </div>
   );
 };
-
 
