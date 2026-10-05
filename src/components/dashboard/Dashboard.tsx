@@ -383,7 +383,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* Hero Welcome & Quick Stats */}
       <div className="px-4 pt-1">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
             <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight truncate">
               {t('dash_namaste')}, {profile?.name ? profile.name.split(' ')[0] : 'Agent'} 🙏
@@ -392,13 +392,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
               {t('dash_daily_focus')}
             </p>
           </div>
-          <button
-            onClick={onOpenQuickAdd}
-            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all flex-shrink-0 whitespace-nowrap"
-          >
-            <Plus className="w-4 h-4" />
-            <span>{t('dash_add_lead')}</span>
-          </button>
         </div>
       </div>
 
