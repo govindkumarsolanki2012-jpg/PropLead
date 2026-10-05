@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   Share2,
@@ -41,6 +41,7 @@ import { findMatchingLeads } from '../../utils/propertyMatching';
 import { openDialer, openWhatsApp } from '../../utils/whatsapp';
 import { generateCustomerPropertyMessage, openWhatsAppPropertyShare } from '../../utils/propertySharing';
 import { getRelevantPropertySpecs, isPropertyFieldVisible, PROPERTY_TYPE_AMENITIES } from '../../utils/propertyTypeFields';
+import { preloadImageUrls } from '../../utils/imagePreloader';
 
 interface PropertyDetailModalProps {
   isOpen: boolean;
@@ -78,6 +79,12 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const propertyPhotos = normalizePropertyPhotos(property.photos);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    return preloadImageUrls(propertyPhotos);
+  }, [isOpen, property.id, property.photos]);
 
   const handleShare = (prop: Property, preselectedLead?: Lead | null) => {
     console.log('Property modal share clicked');
@@ -108,7 +115,6 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
 
   if (!isOpen) return null;
 
-  const propertyPhotos = normalizePropertyPhotos(property.photos);
   console.log('[PropertyDetailModal] photo field loaded when reopening property:', {
     propertyId: property.id,
     rawPhotos: property.photos,
@@ -296,6 +302,8 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
               <img
                 src={propertyPhotos[activePhotoIdx] || propertyPhotos[0]}
                 alt={property.title}
+                loading="eager"
+                decoding="async"
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-cover"
               />
