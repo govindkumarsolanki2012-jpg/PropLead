@@ -1,7 +1,7 @@
 import React from 'react';
 import { Sparkles, AlertCircle, ChevronRight, Clock, AlertTriangle } from 'lucide-react';
 import { SubscriptionResolution, UserProfile } from '../../types';
-import { getEffectiveSubscriptionStatus } from '../../utils/billing';
+import { BYPASS_TRIAL_FOR_TESTING, getEffectiveSubscriptionStatus } from '../../utils/billing';
 
 interface TrialBannerProps {
   profile: UserProfile;
@@ -10,6 +10,7 @@ interface TrialBannerProps {
 }
 
 export const TrialBanner: React.FC<TrialBannerProps> = ({ profile, subscriptionResolution, onOpenSubscription }) => {
+  if (BYPASS_TRIAL_FOR_TESTING) return null;
   const { status, daysRemaining, isSubscribed } = getEffectiveSubscriptionStatus(profile);
 
   if (subscriptionResolution !== 'ready') {
