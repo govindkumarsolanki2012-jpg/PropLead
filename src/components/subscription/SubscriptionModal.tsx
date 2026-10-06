@@ -16,6 +16,7 @@ import {
 import { UserProfile, GooglePlaySubscriptionProduct, SubscriptionPlanId, SubscriptionResolution } from '../../types';
 import {
   fetchGooglePlayProduct,
+  BYPASS_TRIAL_FOR_TESTING,
   GooglePlayProductResult,
   launchGooglePlayPurchase,
   restoreGooglePlayPurchases,
@@ -482,7 +483,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
           )}
 
           {/* Trial Already Used / Expired State */}
-          {subscriptionResolution === 'ready' && (status === 'EXPIRED' || trialAlreadyUsed || profile.trialAlreadyUsed || trialStatus === 'expired' || (!isSubscribed && trialEverStarted)) && !isSubscribed && (
+          {!BYPASS_TRIAL_FOR_TESTING && subscriptionResolution === 'ready' && (status === 'EXPIRED' || trialAlreadyUsed || profile.trialAlreadyUsed || trialStatus === 'expired' || (!isSubscribed && trialEverStarted)) && !isSubscribed && (
             <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-700 rounded-2xl text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2.5">
               <div className="w-7 h-7 rounded-xl bg-rose-600 text-white flex items-center justify-center flex-shrink-0 mt-0.5 shadow-2xs">
                 <AlertCircle className="w-3.5 h-3.5" />
