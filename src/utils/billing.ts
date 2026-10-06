@@ -3,6 +3,10 @@ import { NativePurchases, PURCHASE_TYPE } from '@capgo/native-purchases';
 import { UserProfile, SubscriptionStatus, GooglePlaySubscriptionProduct, SubscriptionPlanId, SubscriptionPlanDetails } from '../types';
 import { auth } from '../lib/firebase';
 
+// CLOSED TESTING ONLY: unlock features without changing trial dates or paid entitlement.
+// Set to false and rebuild BEFORE publishing a public production release.
+export const BYPASS_TRIAL_FOR_TESTING = true;
+
 export const GOOGLE_PLAY_PRODUCT_ID = 'property_agent_pro';
 export const GOOGLE_PLAY_BASE_PLAN_ID = 'quarterly';
 export const GOOGLE_PLAY_PRICE_TEXT = '₹199 / 3 months';
@@ -445,7 +449,7 @@ export function getEffectiveSubscriptionStatus(
     }
   }
 
-  const isLocked = status === 'EXPIRED';
+  const isLocked = !BYPASS_TRIAL_FOR_TESTING && status === 'EXPIRED';
 
   let displayStatusText = '';
   switch (status) {
@@ -516,6 +520,10 @@ export function canUseProFeatures(
       reason: 'LOADING',
       message: 'Checking subscription status...',
     };
+  }
+
+  if (BYPASS_TRIAL_FOR_TESTING) {
+    return { allowed: true, status: 'NOT_STARTED', reason: 'ACTIVE', message: '' };
   }
 
   const sub = getEffectiveSubscriptionStatus(profile, customServerNow);
