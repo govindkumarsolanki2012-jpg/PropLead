@@ -1,4 +1,14 @@
 # Add project specific ProGuard rules here.
+# Preserve WebView JavaScript interface methods for Capacitor bridge communication
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+
+# Preserve Capacitor plugins and their public methods
+-keep public class * extends com.getcapacitor.Plugin {
+    public *;
+}
+
 # You can control the set of applied configuration files using the
 # proguardFiles setting in build.gradle.
 #
