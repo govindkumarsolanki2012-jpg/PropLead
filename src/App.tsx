@@ -1065,9 +1065,10 @@ export function App() {
     }
 
     try {
-      if (currentUser?.uid) {
-        await updatePropertyInFirestore(currentUser.uid, updatedProperty);
+      if (!currentUser?.uid) {
+        throw new Error('Please sign in to save property changes.');
       }
+      await updatePropertyInFirestore(currentUser.uid, updatedProperty);
       const updated = properties.map((p) => (p.id === updatedProperty.id ? updatedProperty : p));
       setProperties(updated);
       saveStoredProperties(updated, currentUser?.uid);
@@ -1077,15 +1078,8 @@ export function App() {
       showToast('Property details updated.');
       return true;
     } catch (err: any) {
-      console.warn('Firestore update property offline/fallback:', err);
-      const updated = properties.map((p) => (p.id === updatedProperty.id ? updatedProperty : p));
-      setProperties(updated);
-      saveStoredProperties(updated, currentUser?.uid);
-      if (detailProperty && detailProperty.id === updatedProperty.id) {
-        setDetailProperty(updatedProperty);
-      }
-      showToast('Property details updated locally.');
-      return true;
+      console.error('Firestore update property failed:', err);
+      throw err;
     }
   };
 
