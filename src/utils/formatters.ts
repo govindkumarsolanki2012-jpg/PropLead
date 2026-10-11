@@ -334,7 +334,7 @@ import { PropertyPhoto } from '../types';
 export function getPropertyPhotoUrl(photo: string | PropertyPhoto | undefined | null): string {
   if (!photo) return '';
   if (typeof photo === 'string') return photo;
-  return photo.downloadURL || photo.url || '';
+  return photo.downloadURL || photo.downloadUrl || photo.url || '';
 }
 
 export function normalizePropertyPhotos(photos: (string | PropertyPhoto)[] | undefined | null): string[] {
