@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import {
   Property,
+  PropertyPhoto,
   PropertyType,
   PropertyTransactionType,
   PropertyStatus,
@@ -28,7 +29,7 @@ import {
   FacingDirection,
   UserProfile,
 } from '../../types';
-import { formatIndianCurrency } from '../../utils/formatters';
+import { formatIndianCurrency, getPropertyPhotoUrl } from '../../utils/formatters';
 import { auth } from '../../lib/firebase';
 import {
   uploadPropertyPhotoToStorage,
@@ -75,7 +76,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
   const [facing, setFacing] = useState<FacingDirection>(property?.facing || 'East');
   const [status, setStatus] = useState<PropertyStatus>(property?.status || 'available');
   const [amenities, setAmenities] = useState<string[]>(property?.amenities || []);
-  const [photos, setPhotos] = useState<string[]>(property?.photos || []);
+  const [photos, setPhotos] = useState<(string | PropertyPhoto)[]>(property?.photos || []);
   const [extraFields, setExtraFields] = useState<Partial<Property>>({ ...property });
 
   // PRIVATE OWNER FIELDS
@@ -87,6 +88,9 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
 
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isUploadingPhotos, setIsUploadingPhotos] = useState<boolean>(false);
+  const [photoUploadProgress, setPhotoUploadProgress] = useState<UploadProgress | null>(null);
+  const [failedPhotoFiles, setFailedPhotoFiles] = useState<File[]>([]);
 
   // Sync state whenever property changes or modal opens
   useEffect(() => {
@@ -128,9 +132,6 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
     }
   };
 
-  const [isUploadingPhotos, setIsUploadingPhotos] = useState<boolean>(false);
-  const [photoUploadProgress, setPhotoUploadProgress] = useState<UploadProgress | null>(null);
-  const [failedPhotoFiles, setFailedPhotoFiles] = useState<File[]>([]);
 
   const uploadFileList = async (fileList: File[]) => {
     if (fileList.length === 0) return;
@@ -164,7 +165,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
         }
 
         try {
-          const { downloadUrl } = await uploadPropertyPhotoToStorage({
+          const photoMeta = await uploadPropertyPhotoToStorage({
             userId: currentUid,
             propertyId: propId,
             file,
@@ -176,7 +177,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
               });
             },
           });
-          setPhotos((prev) => [...prev, downloadUrl]);
+          setPhotos((prev) => [...prev, photoMeta]);
         } catch (storageErr: any) {
           console.error('[EditPropertyModal] Photo upload failed:', storageErr);
           newlyFailed.push(file);
@@ -280,7 +281,12 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
         return;
       }
 
-      await saveFn(updatedProperty);
+      const saved = await saveFn(updatedProperty);
+      if (saved === false) {
+        setIsSubmitting(false);
+        setErrorMessage('Property was not saved. Please try again.');
+        return;
+      }
       console.log('[UPLOAD_STAGE: 10. FIRESTORE_METADATA_SAVED]', {
         propertyId: updatedProperty.id,
         photoCount: updatedProperty.photos.length,
@@ -618,7 +624,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                   className="relative group rounded-xl overflow-hidden aspect-4/3 border border-slate-200 dark:border-slate-700"
                 >
                   <img
-                    src={url}
+                    src={getPropertyPhotoUrl(url)}
                     alt={`Photo ${idx + 1}`}
                     referrerPolicy="no-referrer"
                     className="w-full h-full object-cover"
