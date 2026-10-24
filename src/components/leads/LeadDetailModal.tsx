@@ -37,6 +37,7 @@ import {
 import {
   formatBudgetRange,
   formatIndianCurrency,
+  getPropertyPhotoUrl,
   formatRelativeDate,
   formatDisplayPhone,
   formatDateTime,
@@ -641,9 +642,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                           className="p-3.5 bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-emerald-400 transition-all shadow-xs space-y-2.5"
                         >
                           <div className="flex items-start gap-3">
-                            {property.photos && property.photos.length > 0 ? (
+                            {getPropertyPhotoUrl(property.photos?.[0]) ? (
                               <img
-                                src={property.photos[0]}
+                                src={getPropertyPhotoUrl(property.photos?.[0])}
                                 alt={property.title}
                                 referrerPolicy="no-referrer"
                                 className="w-16 h-16 rounded-xl object-cover border border-slate-200 dark:border-slate-700 flex-shrink-0"
@@ -757,9 +758,9 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                           className="p-3 bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-blue-400 transition-all shadow-xs space-y-2.5"
                         >
                           <div className="flex items-start gap-3">
-                            {property.photos && property.photos.length > 0 ? (
+                            {getPropertyPhotoUrl(property.photos?.[0]) ? (
                               <img
-                                src={property.photos[0]}
+                                src={getPropertyPhotoUrl(property.photos?.[0])}
                                 alt={property.title}
                                 referrerPolicy="no-referrer"
                                 className="w-16 h-16 rounded-xl object-cover border border-slate-200 dark:border-slate-700 flex-shrink-0"
