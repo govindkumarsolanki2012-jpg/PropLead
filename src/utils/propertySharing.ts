@@ -22,48 +22,126 @@ export function getPublicGalleryUrl(propertyId: string): string {
  * - NO Internal documents
  * - Show ONLY general locality & city (e.g. MVP Colony, Visakhapatnam)
  */
+// Public data is explicitly allowlisted below. Never iterate over the whole property:
+// owner details, exactAddress, private/internal notes and documents must stay private.
+type LegacyPublicPropertyFields = Partial<Record<
+  'location' | 'landmark' | 'type' | 'forSale' | 'isNegotiable' | 'configuration' |
+  'carpetArea' | 'superBuiltUpArea' | 'builtUpArea' | 'plotArea' | 'area' |
+  'areaUnit' | 'dimensions' | 'bathrooms' | 'possessionStatus' | 'propertyAge' | 'ageOfProperty',
+  unknown
+>>;
+
 export function generateCustomerPropertyMessage(
   property: Property,
   profile?: UserProfile,
   customCustomerName?: string,
-  galleryUrl?: string
+  _galleryUrl?: string
 ): string {
-  const isRent = property.transactionType === 'rent' || property.transactionType === 'lease';
-  const typeLabel = PROPERTY_TYPE_LABELS[property.propertyType] || 'Property';
-  const priceFormatted = `${formatIndianCurrency(property.price)}${isRent ? ' / month' : ''}${
-    property.priceNegotiable ? ' (Negotiable)' : ''
-  }`;
+  const p = property as Property & LegacyPublicPropertyFields;
+  const filled = (value: unknown): boolean =>
+    typeof value === 'boolean' ||
+    (typeof value === 'number' && Number.isFinite(value) && value !== 0) ||
+    (typeof value === 'string' && value.trim() !== '' && !/^0(?:\.0+)?$/.test(value.trim()));
+  const first = (...values: unknown[]): unknown => values.find(filled);
+  const text = (value: unknown): string => {
+    if (!filled(value)) return '';
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    return String(value).trim();
+  };
+  const label = (value: unknown): string => text(value).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const specs: string[] = [];
+  const add = (name: string, value: unknown) => {
+    const rendered = text(value);
+    if (rendered) specs.push(`• ${name}: ${rendered}`);
+  };
+  const area = (name: string, canonical: unknown, ...legacy: unknown[]) => {
+    const value = first(canonical, ...legacy);
+    if (filled(value)) add(name, `${text(value)} sq.ft`);
+  };
+  const feet = (value: unknown): string => {
+    const rendered = text(value);
+    return rendered && /^\d+(?:\.\d+)?$/.test(rendered) ? `${rendered} ft` : rendered;
+  };
 
-  const greeting = customCustomerName ? `Hello ${customCustomerName},\n\n` : `Hello,\n\n`;
-
-  const isPlotOrLand = property.propertyType === 'plot' || property.propertyType === 'land';
-  const statusText = property.status === 'available'
-    ? (isPlotOrLand ? 'Available' : 'Ready to Move / Available')
-    : property.status === 'negotiation'
-    ? 'Under Discussion'
-    : 'Active';
-
-  let details = `${greeting}*NEW PROPERTY RECOMMENDATION*\n\n`;
-  details += `*Property:* ${property.title}\n`;
-  details += `*Location:* ${property.locality}, ${property.city}\n\n`;
-
-  details += `*Property Highlights:*\n`;
-  details += `• Type: ${typeLabel}\n`;
-  details += `• Price: ${priceFormatted}\n`;
-  if (property.facing) {
-    details += `• Facing: ${property.facing} Facing\n`;
+  const type = first(p.propertyType, p.type);
+  add('Type', PROPERTY_TYPE_LABELS[text(type) as Property['propertyType']] || label(type));
+  add('Purpose', p.forSale === true ? 'For Sale' : label(p.transactionType));
+  const negotiable = p.priceNegotiable ?? p.isNegotiable;
+  if (filled(p.price)) {
+    const rent = p.transactionType === 'rent' || p.transactionType === 'lease';
+    add('Price', `${formatIndianCurrency(p.price)}${rent ? ' / month' : ''}${negotiable === true ? ' (Negotiable)' : ''}`);
   }
-  details += `• Status: ${statusText}\n\n`;
+  add('Negotiable', negotiable);
+  add('Configuration', first(p.bhk, p.configuration));
+  area('Carpet Area', p.carpetAreaSqFt, p.carpetArea);
+  area('Super Built-Up Area', p.superBuiltUpAreaSqFt, p.superBuiltUpArea);
+  area('Built-Up Area', p.builtUpAreaSqFt, p.builtUpArea);
+  if (filled(p.plotAreaSqFt)) area('Plot Area', p.plotAreaSqFt);
+  else {
+    const plot = first(p.plotArea, p.area);
+    if (filled(plot)) add('Plot Area', `${text(plot)} ${text(p.areaUnit) || 'sq.yd'}`);
+  }
+  area('Land Area', p.landAreaSqFt);
+  area('Terrace Area', p.terraceAreaSqFt);
+  add('Dimensions', first(p.plotDimension, p.dimensions));
+  if (filled(p.floor)) add('Floor', `${text(p.floor)}${filled(p.totalFloors) ? ` of ${text(p.totalFloors)}` : ''}`);
+  else add('Total Floors', p.totalFloors);
+  add('Facing', p.facing);
+  add('Furnishing', label(p.furnishing));
+  add('Balconies', first(p.balconyCount, p.balconies));
+  add('Bedrooms / Rooms', p.bedrooms);
+  add('Bathrooms / Washrooms', first(p.washrooms, p.bathrooms));
+  add('Washroom Available', p.washroom);
+  add('Parking', p.parking);
+  add('Road Width', feet(first(p.roadWidth, p.roadWidthFt)));
+  add('Frontage', feet(first(p.frontage, p.frontageFt)));
+  add('Status', label(first(p.status, p.possessionStatus)));
+  add('Age of Property', first(p.propertyAge, p.ageOfProperty));
+  add('Commercial Type', label(p.commercialType));
+  add('Suitable For', label(p.suitableFor));
+  add('Approval Type', label(p.approvalType));
+  add('Road Type', label(p.roadType));
+  add('Road Access', p.roadAccess);
+  add('Nearby Village / City', p.nearbyVillageOrCity);
+  add('Water Source', label(p.waterSource));
+  add('Water Supply', p.waterSupply);
+  add('Electricity Supply', p.electricitySupply);
+  add('Trees / Garden', p.treesOrGarden);
+  add('Corner Plot', p.cornerPlot ?? p.isCornerPlot);
+  add('Boundary Wall', p.boundaryWall);
+  add('Water Available', p.waterAvailability);
+  add('Electricity Available', p.electricityAvailability);
+  add('Drainage Available', p.drainageAvailability);
+  add('Lift', p.lift);
+  add('Private Terrace', p.privateTerrace);
+  add('Terrace', p.terrace);
+  add('Garden', p.garden);
+  add('Fencing', p.fencing);
+  add('Farm / Garden Area', p.farmGarden);
+  add('Property Reference', p.id);
+  add('Listed On', p.createdAt);
+  add('Last Updated', p.updatedAt);
 
+  const lines = [
+    customCustomerName?.trim() ? `Hello ${customCustomerName.trim()},` : 'Hello,',
+    '',
+    '🏡 NEW PROPERTY RECOMMENDATION',
+    '',
+  ];
+  if (text(p.title)) lines.push(`📍 Property: ${text(p.title)}`);
+  const location = [...new Set([p.locality, p.location, p.city].map(text).filter(Boolean))].join(', ');
+  if (location) lines.push(`📌 Location: ${location}`);
+  const landmark = first(p.nearbyLandmark, p.landmark);
+  if (filled(landmark)) lines.push(`🗺️ Landmark: ${text(landmark)}`);
+  lines.push('', '📋 Property Details & Specs:', ...specs);
+  const amenities = Array.isArray(p.amenities) ? p.amenities.map(text).filter(Boolean) : [];
+  if (amenities.length) lines.push('', '✨ Amenities & Key Features:', ...amenities.map((item) => `• ${item}`));
   // CRITICAL: Do NOT list individual image URLs here. Always keep as single public gallery URL.
-  const publicGalleryUrl = getPublicGalleryUrl(property.id);
-  details += `📸 *Photos & View:*\n👉 ${publicGalleryUrl}\n\n`;
-
-  details += `--------------------------------\n`;
-  details += `*Presented by:* ${profile?.name || 'Property Advisor'}\n\n`;
-  details += `Reply to this message to schedule a private site visit.`;
-
-  return details;
+  lines.push('', '📸 Photos & Full Gallery:', `👉 ${getPublicGalleryUrl(p.id)}`, '',
+    '--------------------------------', `Presented by: ${profile?.name?.trim() || 'Property Advisor'}`);
+  if (profile?.phone?.trim()) lines.push(`📞 Contact: ${profile.phone.trim()}`);
+  lines.push('', 'Reply to this message to schedule a private site visit.');
+  return lines.join('\n');
 }
 
 /**
@@ -74,7 +152,8 @@ export async function openWhatsAppPropertyShare(
   property: Property,
   customerPhone?: string,
   profile?: UserProfile,
-  customerName?: string
+  customerName?: string,
+  messageText?: string
 ): Promise<void> {
   const galleryUrl = getPublicGalleryUrl(property.id);
   if (property.photos && property.photos.length > 0) {
@@ -88,7 +167,7 @@ export async function openWhatsAppPropertyShare(
     }
   }
 
-  const message = generateCustomerPropertyMessage(property, profile, customerName, galleryUrl);
+  const message = messageText?.trim() || generateCustomerPropertyMessage(property, profile, customerName, galleryUrl);
   openWhatsApp(customerPhone || '', message);
 }
 
