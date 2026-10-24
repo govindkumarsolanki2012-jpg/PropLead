@@ -17,6 +17,10 @@ export const NOTIFICATION_GROUP_KEY = 'proplead_reminders_group';
 export const NOTIFICATION_SMALL_ICON = 'ic_stat_proplead';
 export const NOTIFICATION_ICON_COLOR = '#059669';
 export const DAILY_SUMMARY_NOTIFICATION_ID = 888123456;
+const MORNING_BRIEFING_DAYS = 30;
+const RETENTION_IDS = [888123490, 888123491];
+let initializationPromise: Promise<void> | null = null;
+let engagementQueue: Promise<void> = Promise.resolve();
 
 function resolveAuthUid(passedUid?: string | null): string | null {
   if (passedUid && typeof passedUid === 'string' && passedUid.trim().length > 0) {
@@ -366,6 +370,18 @@ export async function initLocalNotifications(onAction?: NotificationActionListen
     return;
   }
 
+  if (initializationPromise) return initializationPromise;
+  initializationPromise = initializeNativeNotifications();
+  try {
+    await initializationPromise;
+  } catch (error) {
+    initializationPromise = null;
+    throw error;
+  }
+}
+
+async function initializeNativeNotifications(): Promise<void> {
+
   try {
     if (!isChannelInitialized) {
       // 1. Follow-ups Channel (HIGH importance)
@@ -400,8 +416,7 @@ export async function initLocalNotifications(onAction?: NotificationActionListen
     }
 
     // Set up click action listener
-    LocalNotifications.removeAllListeners();
-    LocalNotifications.addListener('localNotificationActionPerformed', (notification: ActionPerformed) => {
+    await LocalNotifications.addListener('localNotificationActionPerformed', (notification: ActionPerformed) => {
       const extra = (notification?.notification?.extra || {}) as NotificationPayloadExtra;
       if (globalActionListener) {
         globalActionListener(extra);
@@ -409,6 +424,7 @@ export async function initLocalNotifications(onAction?: NotificationActionListen
     });
   } catch (err) {
     console.warn('Failed to initialize local notification channels:', err);
+    throw err;
   }
 }
 
@@ -543,7 +559,7 @@ export async function cancelDailySummaryNotification(): Promise<void> {
   try {
     if (Capacitor.isNativePlatform()) {
       await LocalNotifications.cancel({
-        notifications: [{ id: DAILY_SUMMARY_NOTIFICATION_ID }],
+        notifications: Array.from({ length: MORNING_BRIEFING_DAYS }, (_, i) => ({ id: DAILY_SUMMARY_NOTIFICATION_ID + i })),
       });
     }
   } catch (err) {
@@ -556,6 +572,8 @@ export async function cancelDailySummaryNotification(): Promise<void> {
  */
 export async function cancelAllUserNotifications(leads?: Lead[], uid?: string | null): Promise<void> {
   try {
+    // Drain a foreground retention refresh before clearing OS alarms on logout.
+    await engagementQueue.catch(() => {});
     if (Capacitor.isNativePlatform()) {
       try {
         const pending = await LocalNotifications.getPending();
@@ -586,6 +604,9 @@ export async function cancelAllUserNotifications(leads?: Lead[], uid?: string | 
 
     // Cancel daily summary notification
     await cancelDailySummaryNotification();
+    if (Capacitor.isNativePlatform()) {
+      await LocalNotifications.cancel({ notifications: RETENTION_IDS.map((id) => ({ id })) });
+    }
 
     // Clear registry cache for this UID
     saveActiveScheduledRegistry({}, uid);
@@ -602,6 +623,9 @@ export async function scheduleFollowUpNotifications(
   activityTypeOrIsVisit?: FollowUpType | boolean,
   uid?: string | null
 ): Promise<void> {
+  if (!await ensureNotificationSchedulingReady()) return;
+  const activeUid = resolveAuthUid(uid);
+  if (!activeUid || auth.currentUser?.uid !== activeUid) return;
   if (!lead || !lead.id) return;
 
   // Always cancel any previously scheduled notifications first to prevent duplicates or stale times
@@ -727,6 +751,7 @@ export async function scheduleFollowUpNotifications(
   if (notificationsToSchedule.length > 0) {
     try {
       if (Capacitor.isNativePlatform()) {
+        if (auth.currentUser?.uid !== activeUid) return;
         await LocalNotifications.schedule({
           notifications: notificationsToSchedule,
         });
@@ -744,78 +769,101 @@ export async function scheduleFollowUpNotifications(
  * Schedule or update the morning Daily Summary notification at 9:00 AM.
  */
 export async function scheduleDailySummaryNotification(leads: Lead[], uid?: string | null): Promise<void> {
-  const settings = getStoredNotificationSettings(uid);
-  if (!settings.dailySummary) {
-    await cancelDailySummaryNotification();
-    return;
-  }
+  if (!await ensureNotificationSchedulingReady()) return;
+  const activeUid = resolveAuthUid(uid);
+  if (!activeUid || auth.currentUser?.uid !== activeUid) return;
+  await cancelDailySummaryNotification();
+  if (!getStoredNotificationSettings(activeUid).dailySummary || !Capacitor.isNativePlatform()) return;
 
-  const now = new Date();
-  const targetDate = new Date();
-  targetDate.setHours(9, 0, 0, 0);
-
-  if (now.getTime() >= targetDate.getTime()) {
-    targetDate.setDate(targetDate.getDate() + 1);
-  }
-
-  const year = targetDate.getFullYear();
-  const month = String(targetDate.getMonth() + 1).padStart(2, '0');
-  const day = String(targetDate.getDate()).padStart(2, '0');
-  const targetDayStr = `${year}-${month}-${day}`;
-
-  const matchingLeads = leads.filter(
-    (l) => l.nextFollowUpDate === targetDayStr && l.status !== 'closed' && l.status !== 'lost'
-  );
-  const count = matchingLeads.length;
-
-  if (count === 0) {
-    await cancelDailySummaryNotification();
-    return;
-  }
-
-  const title = 'PropLead Daily Follow-ups';
-  const body = count === 1 ? 'You have 1 follow-up today' : `You have ${count} follow-ups today`;
-
+  // A rolling 30-day horizon; refresh on foreground use and lead changes.
+  // Messages are snapshots of locally known data, not live background cloud queries.
+  const first = new Date();
+  first.setHours(9, 0, 0, 0);
+  if (first.getTime() <= Date.now()) first.setDate(first.getDate() + 1);
+  const notifications = Array.from({ length: MORNING_BRIEFING_DAYS }, (_, i) => {
+    const at = new Date(first);
+    at.setDate(first.getDate() + i);
+    const date = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
+    const today = leads.filter((lead) => lead.nextFollowUpDate === date && lead.status !== 'closed' && lead.status !== 'lost');
+    const visits = today.filter((lead) => resolveActivityType(lead) === 'site_visit').length;
+    const calls = today.length - visits;
+    return {
+      id: DAILY_SUMMARY_NOTIFICATION_ID + i,
+      title: 'PropLead Morning Briefing',
+      isExactNotification: false,
+      body: today.length ? `Today: ${visits} site visit(s) and ${calls} other follow-up(s). Open PropLead to review your schedule.` : 'No follow-ups scheduled today. Plan your next calls and visits in PropLead.',
+      schedule: { at, allowWhileIdle: true },
+      channelId: FOLLOWUP_CHANNEL_ID,
+      smallIcon: NOTIFICATION_SMALL_ICON,
+      iconColor: NOTIFICATION_ICON_COLOR,
+      extra: { type: 'daily_summary', reminderKind: 'daily_summary' },
+    };
+  });
+  if (auth.currentUser?.uid !== activeUid) return;
   try {
-    if (Capacitor.isNativePlatform()) {
-      await LocalNotifications.cancel({
-        notifications: [{ id: DAILY_SUMMARY_NOTIFICATION_ID }],
-      });
-
-      await LocalNotifications.schedule({
-        notifications: [
-          {
-            id: DAILY_SUMMARY_NOTIFICATION_ID,
-            title,
-            body,
-            schedule: {
-              at: targetDate,
-              allowWhileIdle: true,
-            },
-            channelId: FOLLOWUP_CHANNEL_ID,
-            smallIcon: NOTIFICATION_SMALL_ICON,
-            iconColor: NOTIFICATION_ICON_COLOR,
-            group: NOTIFICATION_GROUP_KEY,
-            extra: {
-              type: 'daily_summary',
-              reminderKind: 'daily_summary',
-            },
-          },
-        ],
-      });
-    }
-  } catch (err) {
-    console.warn('Failed to schedule daily summary notification:', err);
+    await LocalNotifications.schedule({ notifications });
+  } catch (error) {
+    console.warn('Failed to schedule morning briefings:', error);
   }
+}
+
+/** Permission denial never unlocks access or interrupts app functionality. */
+async function ensureNotificationSchedulingReady(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform()) return false;
+  try {
+    await initLocalNotifications();
+    const permission = await LocalNotifications.checkPermissions();
+    if (permission.display !== 'granted') return false;
+    return true;
+  } catch (error) {
+    console.warn('Notification setup unavailable:', error);
+    return false;
+  }
+}
+
+/** Ask once per account; Android retains the grant, but it can be revoked. */
+export async function requestExactAlarmAccess(uid: string): Promise<void> {
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') return;
+  try {
+    const permission = await LocalNotifications.checkExactNotificationSetting();
+    const key = `proplead_exact_alarm_prompted_v1_${uid}`;
+    if (permission.exact_alarm !== 'granted' && !localStorage.getItem(key)) {
+      localStorage.setItem(key, 'true');
+      await LocalNotifications.changeExactNotificationSetting();
+    }
+  } catch (error) {
+    console.warn('Could not check exact alarm access:', error);
+  }
+}
+
+/** Reset inactivity reminders on real foreground usage, never on background sync. */
+export async function recordNotificationActivity(uid: string): Promise<void> {
+  engagementQueue = engagementQueue.catch(() => {}).then(async () => {
+    if (auth.currentUser?.uid !== uid || !await ensureNotificationSchedulingReady()) return;
+    const now = Date.now();
+    localStorage.setItem(`proplead_last_active_v1_${uid}`, String(now));
+    await LocalNotifications.cancel({ notifications: RETENTION_IDS.map((id) => ({ id })) });
+    if (auth.currentUser?.uid !== uid || !getStoredNotificationSettings(uid).dailySummary) return;
+    await LocalNotifications.schedule({
+      notifications: [
+        { isExactNotification: false, id: RETENTION_IDS[0], title: 'Your next opportunity awaits', body: 'Open PropLead to review your leads and plan your next follow-up.', schedule: { at: new Date(now + 48 * 60 * 60 * 1000), allowWhileIdle: true }, channelId: FOLLOWUP_CHANNEL_ID, smallIcon: NOTIFICATION_SMALL_ICON, extra: { type: 'daily_summary' } },
+        { isExactNotification: false, id: RETENTION_IDS[1], title: 'Reconnect with your leads', body: 'It has been a week. Review your pipeline and plan your next calls in PropLead.', schedule: { at: new Date(now + 7 * 24 * 60 * 60 * 1000), allowWhileIdle: true }, channelId: FOLLOWUP_CHANNEL_ID, smallIcon: NOTIFICATION_SMALL_ICON, extra: { type: 'daily_summary' } },
+      ],
+    });
+  });
+  await engagementQueue.catch((error) => console.warn('Engagement scheduling failed:', error));
 }
 
 /**
  * Synchronize notifications for all leads.
  */
 export async function syncAllLeadNotifications(leads: Lead[], uid?: string | null): Promise<void> {
+  const activeUid = resolveAuthUid(uid);
+  if (!activeUid || auth.currentUser?.uid !== activeUid) return;
   const settings = getStoredNotificationSettings(uid);
 
   for (const lead of leads) {
+    if (auth.currentUser?.uid !== activeUid) return;
     if (lead.nextFollowUpDate && lead.nextFollowUpTime && lead.status !== 'closed' && lead.status !== 'lost') {
       await scheduleFollowUpNotifications(lead, undefined, uid);
     } else {
@@ -823,9 +871,11 @@ export async function syncAllLeadNotifications(leads: Lead[], uid?: string | nul
     }
   }
 
+  if (auth.currentUser?.uid !== activeUid) return;
   if (settings.dailySummary) {
     await scheduleDailySummaryNotification(leads, uid);
   } else {
     await cancelDailySummaryNotification();
   }
 }
+
