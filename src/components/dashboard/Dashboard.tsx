@@ -27,6 +27,7 @@ import {
   formatBudgetRange,
   formatDisplayPhone,
   formatIndianCurrency,
+  getPropertyPhotoUrl,
   STATUS_CONFIG,
   PRIORITY_CONFIG,
   PROPERTY_STATUS_CONFIG,
@@ -293,9 +294,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           <div className="flex flex-col sm:flex-row">
                             {/* Photo / Thumbnail */}
                             <div className="relative sm:w-40 aspect-16/9 sm:aspect-auto bg-slate-900 overflow-hidden flex-shrink-0">
-                              {property.photos && property.photos.length > 0 ? (
+                              {getPropertyPhotoUrl(property.photos?.[0]) ? (
                                 <img
-                                  src={property.photos[0]}
+                                  src={getPropertyPhotoUrl(property.photos?.[0])}
                                   alt={property.title}
                                   referrerPolicy="no-referrer"
                                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
