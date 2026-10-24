@@ -107,7 +107,7 @@ export const SharePropertyModal: React.FC<SharePropertyModalProps> = ({
 
   const handleSendWhatsApp = async () => {
     const phoneToUse = customPhone.trim() || '';
-    await openWhatsAppPropertyShare(property, phoneToUse, profile, customName);
+    await openWhatsAppPropertyShare(property, phoneToUse, profile, customName, editedMessage);
     onClose();
   };
 
