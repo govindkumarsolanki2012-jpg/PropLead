@@ -331,10 +331,22 @@ export const TRANSACTION_TYPE_LABELS: Record<PropertyTransactionType, { label: s
 
 import { PropertyPhoto } from '../types';
 
-export function getPropertyPhotoUrl(photo: string | PropertyPhoto | undefined | null): string {
+export interface PropertyPhotoMetadata {
+  id?: string;
+  downloadURL?: string;
+  downloadUrl?: string;
+  url?: string;
+  storagePath?: string;
+  fileName?: string;
+}
+
+export function getPropertyPhotoUrl(photo: unknown): string {
   if (!photo) return '';
   if (typeof photo === 'string') return photo;
-  return photo.downloadURL || photo.downloadUrl || photo.url || '';
+  if (typeof photo !== 'object') return '';
+  const metadata = photo as PropertyPhotoMetadata;
+  return [metadata.downloadURL, metadata.downloadUrl, metadata.url]
+    .find((url): url is string => typeof url === 'string' && url.length > 0) || '';
 }
 
 export function normalizePropertyPhotos(photos: (string | PropertyPhoto)[] | undefined | null): string[] {
