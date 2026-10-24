@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { Property, Lead, UserProfile } from '../../types';
 import { generateCustomerPropertyMessage, openWhatsAppPropertyShare, getPublicGalleryUrl } from '../../utils/propertySharing';
-import { formatIndianCurrency, PROPERTY_TYPE_LABELS, normalizePropertyPhotos } from '../../utils/formatters';
+import { formatIndianCurrency, PROPERTY_TYPE_LABELS, normalizePropertyPhotos, getPropertyPhotoUrl } from '../../utils/formatters';
 import { openWhatsApp, copyUnicodeTextToClipboard } from '../../utils/whatsapp';
 import { savePublicPhotoShare } from '../../services/firebaseService';
 
@@ -207,9 +207,9 @@ export const SharePropertyModal: React.FC<SharePropertyModalProps> = ({
 
           {/* Property Summary Thumbnail */}
           <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 flex items-center gap-3">
-            {property.photos && property.photos.length > 0 ? (
+            {getPropertyPhotoUrl(property.photos?.[0]) ? (
               <img
-                src={property.photos[0]}
+                src={getPropertyPhotoUrl(property.photos?.[0])}
                 alt={property.title}
                 referrerPolicy="no-referrer"
                 className="w-16 h-16 rounded-xl object-cover border border-slate-200 dark:border-slate-700 flex-shrink-0"
