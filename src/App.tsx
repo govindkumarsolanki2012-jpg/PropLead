@@ -76,6 +76,9 @@ import { syncLocalDataToFirestore } from './utils/migration';
 import { FirebaseUser, auth } from './lib/firebase';
 import {
   initLocalNotifications,
+  recordNotificationActivity,
+  requestExactAlarmAccess,
+  checkNotificationPermission,
   scheduleFollowUpNotifications,
   cancelNotificationsForLead,
   cancelAllUserNotifications,
@@ -763,6 +766,14 @@ export function App() {
   });
 
   // Local Notifications initialization and tap deep-linking
+  const notificationSyncQueueRef = useRef<Promise<void>>(Promise.resolve());
+  useEffect(() => {
+    // Clear the previous account's OS alarms before the new account schedules.
+    notificationSyncQueueRef.current = notificationSyncQueueRef.current.catch(() => {}).then(() =>
+      cancelAllUserNotifications()
+    );
+  }, [currentUser?.uid]);
+
   useEffect(() => {
     initLocalNotifications((extra) => {
       const targetId = extra.leadId || extra.visitId;
@@ -808,15 +819,7 @@ export function App() {
       } else if (extra.type === 'daily_summary') {
         setCurrentTab('leads');
       }
-    });
-
-    if (Capacitor.isNativePlatform() && !wasNotificationPermissionPrompted(currentUser?.uid)) {
-      requestNotificationPermission(currentUser?.uid).then((res) => {
-        if (res) {
-          syncAllLeadNotifications(leadsRef.current || [], currentUser?.uid);
-        }
-      });
-    }
+    }).catch((error) => console.warn('Notification initialization failed:', error));
   }, [currentUser?.uid]);
 
   // Deep-link: If cold-start was waiting for Firestore/state sync, open lead when leads update
@@ -837,13 +840,76 @@ export function App() {
   }, [leads, pendingNotificationLeadId]);
 
   // Initial synchronization for notifications once leads are ready
-  const hasInitialNotificationSyncRef = useRef(false);
   useEffect(() => {
-    if (!hasInitialNotificationSyncRef.current && leads.length > 0 && currentUser?.uid) {
-      hasInitialNotificationSyncRef.current = true;
-      syncAllLeadNotifications(leads, currentUser.uid);
-    }
-  }, [leads, currentUser?.uid]);
+    const uid = currentUser?.uid;
+    if (!uid || !isAuthResolved) return;
+    let canceled = false;
+    const timer = setTimeout(() => {
+      notificationSyncQueueRef.current = notificationSyncQueueRef.current.catch(() => {}).then(async () => {
+        if (canceled || auth.currentUser?.uid !== uid) return;
+        await initLocalNotifications();
+        if (canceled || auth.currentUser?.uid !== uid) return;
+        await syncAllLeadNotifications(leads, uid);
+      }).catch((error) => console.warn('Notification synchronization failed:', error));
+    }, 500);
+    return () => { canceled = true; clearTimeout(timer); };
+  }, [leads, currentUser?.uid, isAuthResolved]);
+
+  // Foreground/login is activity; cloud snapshots do not reset inactivity timers.
+  useEffect(() => {
+    const uid = currentUser?.uid;
+    if (!uid || !Capacitor.isNativePlatform()) return;
+    let canceled = false;
+    let listener: { remove: () => Promise<void> } | undefined;
+    let refreshInProgress = false;
+    let lastInteractionRefresh = 0;
+    const onUsage = async () => {
+      if (refreshInProgress) return;
+      refreshInProgress = true;
+      try {
+        await notificationSyncQueueRef.current;
+        await initLocalNotifications();
+        if (canceled || auth.currentUser?.uid !== uid) return;
+        let permission = await checkNotificationPermission();
+        if (!permission.granted && !wasNotificationPermissionPrompted(uid)) {
+          await requestNotificationPermission(uid);
+          permission = await checkNotificationPermission();
+        }
+        if (!permission.granted || canceled || auth.currentUser?.uid !== uid) return;
+        await requestExactAlarmAccess(uid);
+        if (canceled || auth.currentUser?.uid !== uid) return;
+        await recordNotificationActivity(uid);
+        await syncAllLeadNotifications(leadsRef.current || [], uid);
+      } catch (error) {
+        console.warn('Foreground notification refresh failed:', error);
+      } finally {
+        refreshInProgress = false;
+      }
+    };
+    const onInteraction = () => {
+      if (canceled || auth.currentUser?.uid !== uid || document.visibilityState === 'hidden') return;
+      if (Date.now() - lastInteractionRefresh < 60_000) return;
+      lastInteractionRefresh = Date.now();
+      void notificationSyncQueueRef.current.then(() => {
+        if (!canceled && auth.currentUser?.uid === uid) return recordNotificationActivity(uid);
+      }).catch((error) => console.warn('Activity notification refresh failed:', error));
+    };
+    window.addEventListener('pointerdown', onInteraction, { passive: true });
+    window.addEventListener('keydown', onInteraction);
+    void onUsage();
+    CapApp.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) void onUsage();
+    }).then((handle) => {
+      if (canceled) void handle.remove();
+      else listener = handle;
+    }).catch((error) => console.warn('Notification lifecycle listener failed:', error));
+    return () => {
+      canceled = true;
+      window.removeEventListener('pointerdown', onInteraction);
+      window.removeEventListener('keydown', onInteraction);
+      void listener?.remove();
+    };
+  }, [currentUser?.uid]);
 
   const openSubscriptionModalWithMessage = useCallback((msg?: string) => {
     setSubscriptionModalMessage(msg || 'Your trial has expired. Please subscribe to continue.');
