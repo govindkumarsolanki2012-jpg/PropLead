@@ -1,10 +1,10 @@
 import { cleanIndianPhone, formatIndianCurrency } from './formatters';
-import { Lead } from '../types';
+import { Lead, WhatsAppTemplateCategory } from '../types';
 
 export interface WhatsAppTemplate {
   id: string;
   title: string;
-  category: 'Greeting' | 'Property Details' | 'Site Visit' | 'Follow-up' | 'Closing';
+  category: WhatsAppTemplateCategory;
   getMessage: (lead?: Partial<Lead>, agentName?: string, agencyName?: string) => string;
 }
 
@@ -60,7 +60,7 @@ ${agencyName}`;
   {
     id: 'requirement_confirmation',
     title: 'Requirement Confirmation',
-    category: 'Greeting',
+    category: 'Requirement Confirmation',
     getMessage: (lead, agentName = 'your property consultant', agencyName = 'our agency') => {
       const name = lead?.name || 'Customer';
       const loc = (lead?.preferredLocations && lead.preferredLocations.length > 0 ? lead.preferredLocations.join(', ') : '') || lead?.preferredCity || 'Preferred Area';
