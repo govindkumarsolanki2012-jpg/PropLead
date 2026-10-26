@@ -374,7 +374,7 @@ export interface LeadMatchResult {
   isSameCity?: boolean;
 }
 
-export type WhatsAppTemplateCategory = 'Greeting' | 'Property Details' | 'Site Visit' | 'Follow-up' | 'Closing';
+export type WhatsAppTemplateCategory = 'Greeting' | 'Requirement Confirmation' | 'Property Details' | 'Follow-up' | 'Site Visit' | 'Closing';
 
 export interface WhatsAppTemplate {
   id: string;
