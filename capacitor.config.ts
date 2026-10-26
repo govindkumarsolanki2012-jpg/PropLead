@@ -4,18 +4,26 @@ const config: CapacitorConfig = {
   appId: 'com.proplead.tracker',
   appName: 'PropLead for Agents',
   webDir: 'dist',
-  backgroundColor: '#ffffff',
+  backgroundColor: '#047857',
   server: {
     androidScheme: 'https',
     cleartext: false,
   },
   android: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '#047857',
     allowMixedContent: true,
     captureInput: true,
     webContentsDebuggingEnabled: false,
   },
   plugins: {
+    SplashScreen: {
+      launchShowDuration: 0,
+      launchAutoHide: true,
+      launchFadeOutDuration: 0,
+      backgroundColor: '#047857',
+      androidScaleType: 'CENTER_CROP',
+      showSpinner: false,
+    },
     SocialLogin: {
       providers: {
         google: true,
