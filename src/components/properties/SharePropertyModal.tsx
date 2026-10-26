@@ -112,10 +112,16 @@ export const SharePropertyModal: React.FC<SharePropertyModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-xs flex flex-col justify-end sm:justify-center items-center p-0 sm:p-4 overflow-hidden">
-      <div className="relative w-full sm:max-w-lg bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[100dvh] sm:max-h-[min(90dvh,800px)] h-full sm:h-auto overflow-hidden border border-slate-200 dark:border-slate-800 box-border animate-in fade-in slide-in-from-bottom duration-200">
+    <div
+      className="fixed inset-0 z-[70] h-[100dvh] max-h-[100dvh] box-border bg-black/70 backdrop-blur-xs flex flex-col justify-center items-center px-0 sm:px-4 overflow-hidden"
+      style={{
+        paddingTop: 'max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px), 16px)',
+        paddingBottom: 'max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px), 20px)',
+      }}
+    >
+      <div className="relative w-full sm:max-w-lg bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-2xl shadow-2xl flex flex-col min-h-0 h-[90dvh] max-h-full sm:max-h-[min(90dvh,800px)] sm:h-auto overflow-hidden border border-slate-200 dark:border-slate-800 box-border animate-in fade-in slide-in-from-bottom duration-200">
         {/* Header - Sticky Top */}
-        <div className="shrink-0 px-4 py-3 sm:px-5 sm:py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-xs z-10">
+        <div className="relative z-50 shrink-0 px-4 py-3 sm:px-5 sm:py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur-xs">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-9 h-9 rounded-2xl bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
               <Share2 className="w-5 h-5" />
@@ -139,7 +145,7 @@ export const SharePropertyModal: React.FC<SharePropertyModalProps> = ({
         </div>
 
         {/* Content Body - Scrollable */}
-        <div className="p-4 overflow-y-auto overscroll-contain space-y-4 flex-1 min-h-0 pb-10 sm:pb-8">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-2 space-y-4 pb-6">
           {/* STRICT PRIVACY BANNER */}
           <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800/80 rounded-2xl flex items-start gap-2.5">
             <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
