@@ -9,6 +9,7 @@ import {
   PropertyTransactionType,
 } from '../types';
 import { formatIndianCurrency } from './formatters';
+import { INDIAN_CITY_ALIAS_CLUSTERS } from './cityAliases';
 
 // ============================================================================
 // STEP 1: STRING NORMALIZATION & TOKEN CLEANING LAYER
@@ -906,6 +907,38 @@ export function isTransactionCompatible(
  * - Preferred Locality
  * - Current City (kept distinct)
  */
+// Matching requires agent-assigned targets, never currentCity or contact metadata.
+export function isAssignedTargetLocation(value?: string): boolean {
+  const normalized = cleanString(value);
+  return Boolean(normalized && ![
+    'any', 'all', 'anywhere', 'any city', 'all cities', 'any locality', 'all localities',
+    'any area', 'all areas', 'not specified', 'unspecified', 'not set', 'none', 'n a', 'na',
+    'select city', 'select locality', 'no preference',
+  ].includes(normalized));
+}
+
+export function hasExplicitLeadTargetLocation(lead: Lead): boolean {
+  return isAssignedTargetLocation(lead.preferredCity) && isAssignedTargetLocation(lead.preferredLocality);
+}
+
+// Exact normalized city or a known full-name alias only. No fuzzy/substring expansion.
+export function isStrictTargetCityMatch(city?: string, target?: string): boolean {
+  if (!isAssignedTargetLocation(city) || !isAssignedTargetLocation(target)) return false;
+  const left = cleanString(city);
+  const right = cleanString(target);
+  return left === right || INDIAN_CITY_ALIAS_CLUSTERS.some((cluster) =>
+    cluster.some((name) => cleanString(name) === left) &&
+    cluster.some((name) => cleanString(name) === right)
+  );
+}
+
+export function propertyMatchesLeadTargetLocation(property: Property, lead: Lead): boolean {
+  if (!hasExplicitLeadTargetLocation(lead) || !isAssignedTargetLocation(property.locality)) return false;
+  return isStrictTargetCityMatch(property.city, lead.preferredCity) &&
+    normalizeLocationTokens(property.locality).replace(/\s+/g, '') ===
+    normalizeLocationTokens(lead.preferredLocality).replace(/\s+/g, '');
+}
+
 export function getLeadTargetLocation(lead: Lead): {
   preferredCity: string;
   preferredLocality: string;
@@ -979,8 +1012,10 @@ export interface GroupedPropertyMatches {
 export function scorePropertyForLead(
   property: Property,
   lead: Lead,
-  targetLocation?: { preferredCity: string; preferredLocality: string; allLocalities: string[] }
+  _targetLocation?: { preferredCity: string; preferredLocality: string; allLocalities: string[] }
 ): PropertyMatchResult | null {
+  if (!propertyMatchesLeadTargetLocation(property, lead)) return null;
+
   // 1. Availability Status Check (STEP 11)
   if (
     property.status === 'sold_rented' ||
@@ -998,10 +1033,10 @@ export function scorePropertyForLead(
   }
 
   const { preferredCity, preferredLocality, allLocalities } =
-    targetLocation || getLeadTargetLocation(lead);
+    { preferredCity: lead.preferredCity!.trim(), preferredLocality: lead.preferredLocality!.trim(), allLocalities: [lead.preferredLocality!.trim()] };
 
   const targetCityNorm = normalizeCityName(preferredCity);
-  const sameCity = targetCityNorm ? isSameCity(property.city, preferredCity) : true;
+  const sameCity = true; // Already passed both strict location filters.
 
   // 3. Location Relevance (STEP 12 & 13: Max 40 pts)
   const propCoords = (property as unknown as { coordinates?: { lat?: number; lng?: number } }).coordinates;
@@ -1062,28 +1097,15 @@ export function scorePropertyForLead(
   const totalScore = locationScore + typeResult.score + budgetResult.score + bhkResult.score + txnScore;
   const finalScore = Math.min(100, Math.max(0, totalScore));
 
-  // Match Category Classification
-  let matchCategory: MatchCategory;
-  if (sameCity) {
-    if (
-      (bestLocResult.isExactOrFuzzy || bestLocResult.matchType === 'adjacent_sector') &&
-      finalScore >= 75
-    ) {
-      matchCategory = 'best_match';
-    } else {
-      matchCategory = 'nearby_match';
-    }
-  } else {
-    matchCategory = 'expanded_match';
-  }
+  const matchCategory: MatchCategory = 'best_match';
 
   return {
     property,
     score: finalScore,
     matchReasons: reasons,
     matchCategory,
-    isExactLocality: bestLocResult.isExactOrFuzzy,
-    isNearbyLocality: sameCity && !bestLocResult.isExactOrFuzzy,
+    isExactLocality: true,
+    isNearbyLocality: false,
     isSameCity: sameCity,
     budgetDiffPercentage: budgetResult.budgetDiffPct,
   };
@@ -1101,6 +1123,14 @@ export function getGroupedPropertyMatches(
   _options?: { allowExpandedSearch?: boolean }
 ): GroupedPropertyMatches {
   const targetLoc = getLeadTargetLocation(lead);
+  if (!hasExplicitLeadTargetLocation(lead)) {
+    return {
+      bestMatches: [], nearbyMatches: [], allPrimaryMatches: [], expandedMatches: [],
+      preferredCity: lead.preferredCity?.trim() || '',
+      preferredLocality: lead.preferredLocality?.trim() || '',
+      hasCityMatch: false, totalInventoryInCity: 0,
+    };
+  }
   const targetCityNorm = normalizeCityName(targetLoc.preferredCity);
 
   const bestMatches: PropertyMatchResult[] = [];
@@ -1110,7 +1140,7 @@ export function getGroupedPropertyMatches(
   let totalInventoryInCity = 0;
 
   for (const property of properties) {
-    const isSameCityProp = targetCityNorm ? isSameCity(property.city, targetLoc.preferredCity) : true;
+    const isSameCityProp = isStrictTargetCityMatch(property.city, targetLoc.preferredCity);
     if (
       isSameCityProp &&
       targetCityNorm &&

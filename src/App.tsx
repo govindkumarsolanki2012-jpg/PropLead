@@ -202,6 +202,7 @@ export function App() {
   // Modal states for Leads
   const [isQuickAddOpen, setIsQuickAddOpen] = useState<boolean>(false);
   const [detailLead, setDetailLead] = useState<Lead | null>(null);
+  const [importedMatchLeadId, setImportedMatchLeadId] = useState<string | null>(null);
   const [whatsAppLead, setWhatsAppLead] = useState<Lead | null>(null);
   const [scheduleLead, setScheduleLead] = useState<Lead | null>(null);
   const [editLead, setEditLead] = useState<Lead | null>(null);
@@ -1031,7 +1032,7 @@ export function App() {
     showToast(`${leadIds.length} lead${leadIds.length === 1 ? '' : 's'} deleted.`);
   };
 
-  const handleImportBulkLeads = (newLeads: Lead[]) => {
+  const handleImportBulkLeads = (newLeads: Lead[], matchLeadId?: string) => {
     const check = canUseProFeatures(profile, !isAuthResolved);
     if (!check.allowed) {
       if (check.reason === 'EXPIRED') {
@@ -1042,7 +1043,7 @@ export function App() {
       } else {
         showToast(check.message || 'Checking subscription status...');
       }
-      return;
+      return false;
     }
 
     const existingPhones = new Set(
@@ -1065,7 +1066,7 @@ export function App() {
 
     if (nonDuplicates.length === 0) {
       showToast('All selected contacts are already in your leads list.');
-      return;
+      return false;
     }
 
     const updated = [...nonDuplicates, ...leads];
@@ -1080,6 +1081,13 @@ export function App() {
     } else {
       showToast(`Imported ${nonDuplicates.length} leads successfully! 👏`);
     }
+    const matchLead = nonDuplicates.find((lead) => lead.id === matchLeadId);
+    if (matchLead) {
+      setImportedMatchLeadId(matchLead.id);
+      setDetailLead(matchLead);
+      setCurrentTab('leads');
+    }
+    return true;
   };
 
   // Property CRUD handlers
@@ -1732,7 +1740,8 @@ export function App() {
       {detailLead && (
         <LeadDetailModal
           isOpen={Boolean(detailLead)}
-          onClose={() => setDetailLead(null)}
+          onClose={() => { setDetailLead(null); setImportedMatchLeadId(null); }}
+          initialTab={detailLead.id === importedMatchLeadId ? 'matching_properties' : 'timeline'}
           lead={detailLead}
           profile={profile}
           properties={properties}
@@ -1794,6 +1803,8 @@ export function App() {
           isOpen={isImportContactsOpen}
           onClose={() => setIsImportContactsOpen(false)}
           onImportLeads={handleImportBulkLeads}
+          existingLeads={leads}
+          properties={properties}
         />
       )}
 
