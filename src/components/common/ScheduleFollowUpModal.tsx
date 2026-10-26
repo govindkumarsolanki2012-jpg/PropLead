@@ -3,6 +3,9 @@ import { X, Calendar, Clock, Check, Phone, MessageSquare, Car, Users, FileText }
 import { Lead, FollowUpType, UserProfile } from '../../types';
 import { hasProAccess } from '../../utils/billing';
 
+const toLocalDateString = (date: Date): string =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
 interface ScheduleFollowUpModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -35,17 +38,17 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
   onSchedule,
 }) => {
   const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
+  const todayStr = toLocalDateString(today);
 
   const tmrw = new Date(today);
   tmrw.setDate(tmrw.getDate() + 1);
-  const tmrwStr = tmrw.toISOString().split('T')[0];
+  const tmrwStr = toLocalDateString(tmrw);
 
   const in3Days = new Date(today);
   in3Days.setDate(in3Days.getDate() + 3);
-  const in3DaysStr = in3Days.toISOString().split('T')[0];
+  const in3DaysStr = toLocalDateString(in3Days);
 
-  const [selectedDate, setSelectedDate] = useState<string>(lead.nextFollowUpDate || tmrwStr);
+  const [selectedDate, setSelectedDate] = useState<string>(lead.nextFollowUpDate ? (lead.nextFollowUpDate < todayStr ? todayStr : lead.nextFollowUpDate) : tmrwStr);
   const [selectedTime, setSelectedTime] = useState<string>(lead.nextFollowUpTime || '11:00');
   const [followUpType, setFollowUpType] = useState<FollowUpType>(lead.nextFollowUpType || 'call');
   const [note, setNote] = useState<string>(lead.nextFollowUpNote || '');
@@ -61,12 +64,12 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
   // Sync state whenever modal opens or lead updates (handles rescheduling existing follow-up)
   useEffect(() => {
     if (isOpen && lead) {
-      setSelectedDate(lead.nextFollowUpDate || tmrwStr);
+      setSelectedDate(lead.nextFollowUpDate ? (lead.nextFollowUpDate < todayStr ? todayStr : lead.nextFollowUpDate) : tmrwStr);
       setSelectedTime(lead.nextFollowUpTime || '11:00');
       setFollowUpType(lead.nextFollowUpType || 'call');
       setNote(lead.nextFollowUpNote || '');
     }
-  }, [isOpen, lead, tmrwStr]);
+  }, [isOpen, lead, tmrwStr, todayStr]);
 
   if (!isOpen) return null;
 
@@ -79,6 +82,10 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
     }
     if (!selectedDate) {
       alert('Please select a date');
+      return;
+    }
+    if (selectedDate < toLocalDateString(new Date())) {
+      alert('Please select today or a future date');
       return;
     }
     const scheduleFn = onSaveFollowUp || onSchedule;
@@ -173,8 +180,14 @@ export const ScheduleFollowUpModal: React.FC<ScheduleFollowUpModalProps> = ({
             </div>
             <input
               type="date"
+              min={todayStr}
+              required
               value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              onFocus={(e) => { e.currentTarget.min = toLocalDateString(new Date()); }}
+              onChange={(e) => {
+                const date = e.target.value;
+                if (!date || date >= toLocalDateString(new Date())) setSelectedDate(date);
+              }}
               className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs outline-hidden focus:ring-2 focus:ring-emerald-500 font-medium cursor-pointer"
             />
           </div>
