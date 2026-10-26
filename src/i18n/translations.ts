@@ -169,6 +169,7 @@ export interface TranslationDictionary {
   wa_filter_all: string;
   wa_filter_property: string;
   wa_filter_greeting: string;
+  wa_filter_requirement: string;
   wa_filter_sitevisit: string;
   wa_filter_followup: string;
   wa_filter_closing: string;
@@ -427,6 +428,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     wa_filter_all: 'All',
     wa_filter_property: 'Property Details',
     wa_filter_greeting: 'Greeting',
+    wa_filter_requirement: 'Requirement Confirmation',
     wa_filter_sitevisit: 'Site Visit',
     wa_filter_followup: 'Follow-up',
     wa_filter_closing: 'Deal Closing',
@@ -682,6 +684,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     wa_filter_all: 'सभी',
     wa_filter_property: 'प्रॉपर्टी डिटेल्स',
     wa_filter_greeting: 'अभिवादन',
+    wa_filter_requirement: 'आवश्यकता की पुष्टि',
     wa_filter_sitevisit: 'साइट विज़िट',
     wa_filter_followup: 'फॉलो-अप',
     wa_filter_closing: 'डील क्लोजिंग',
@@ -937,6 +940,7 @@ export const translations: Record<Language, TranslationDictionary> = {
     wa_filter_all: 'Sabhi',
     wa_filter_property: 'Property Details',
     wa_filter_greeting: 'Greeting',
+    wa_filter_requirement: 'Requirement Confirmation',
     wa_filter_sitevisit: 'Site Visit',
     wa_filter_followup: 'Follow-up',
     wa_filter_closing: 'Deal Closing',
