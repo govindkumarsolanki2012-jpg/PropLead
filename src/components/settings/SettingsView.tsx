@@ -4,7 +4,6 @@ import {
   Shield,
   CreditCard,
   Download,
-  MessageSquare,
   Sparkles,
   Phone,
   HelpCircle,
@@ -29,7 +28,6 @@ import {
 } from 'lucide-react';
 import { UserProfile, Lead, WhatsAppTemplate, NotificationSettings } from '../../types';
 import { exportLeadsToCSV } from '../../utils/storage';
-import { openWhatsAppDirect } from '../../utils/whatsapp';
 import {
   getEffectiveSubscriptionStatus,
   openGooglePlayManageSubscriptions,
@@ -176,11 +174,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     });
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 2500);
-  };
-
-  const handleSupportWhatsApp = () => {
-    const text = `Hi PropLead Support, I am ${profile.name} (${profile.agencyName}, ${profile.city}). I need assistance with the app.`;
-    openWhatsAppDirect('919876543210', text);
   };
 
   if (showNotificationsPage) {
@@ -617,24 +610,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </button>
       </div>
 
-      {/* Direct Agent Help & WhatsApp Support */}
+      {/* Email Support & Help */}
       <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 rounded-2xl border border-emerald-200 dark:border-emerald-800 space-y-2">
         <div className="flex items-center gap-2">
-          <MessageSquare className="w-4 h-4 text-emerald-600" />
+          <Mail className="w-4 h-4 text-emerald-600" />
           <h3 className="text-xs font-bold text-slate-900 dark:text-white">
             {t('settings_support')}
           </h3>
         </div>
         <p className="text-[11px] text-slate-600 dark:text-slate-300">
-          Our team is available on WhatsApp to support Indian real estate brokers and agents anytime.
+          Need help with PropLead? Email us at brightcore733@gmail.com.
         </p>
-        <button
-          onClick={handleSupportWhatsApp}
+        <a
+          href="mailto:brightcore733@gmail.com?subject=PropLead%20Support%20Inquiry"
           className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all"
         >
-          <MessageSquare className="w-3.5 h-3.5" />
-          <span>{t('settings_contact_whatsapp')}</span>
-        </button>
+          <Mail className="w-3.5 h-3.5" />
+          <span>Email Support</span>
+        </a>
       </div>
 
       {/* Modals */}
