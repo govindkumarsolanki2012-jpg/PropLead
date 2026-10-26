@@ -65,8 +65,9 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
 
   const categories: { key: ModalCategoryFilter; label: string }[] = [
     { key: 'All', label: `${t('wa_filter_all')} (${WHATSAPP_TEMPLATES.length})` },
-    { key: 'Property Details', label: t('wa_filter_property') },
     { key: 'Greeting', label: t('wa_filter_greeting') },
+    { key: 'Requirement Confirmation', label: t('wa_filter_requirement') },
+    { key: 'Property Details', label: t('wa_filter_property') },
     { key: 'Follow-up', label: t('wa_filter_followup') },
     { key: 'Site Visit', label: t('wa_filter_sitevisit') },
     { key: 'Closing', label: t('wa_filter_closing') },
