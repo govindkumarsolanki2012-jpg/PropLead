@@ -25,6 +25,7 @@ interface LeadsListProps {
   leads: Lead[];
   profile: UserProfile;
   initialFilter?: string;
+  filterRefresh?: number;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   onOpenQuickAdd: () => void;
@@ -38,6 +39,7 @@ export const LeadsList: React.FC<LeadsListProps> = ({
   leads,
   profile,
   initialFilter = 'all',
+  filterRefresh = 0,
   searchQuery = '',
   onSearchChange,
   onOpenQuickAdd,
@@ -57,12 +59,12 @@ export const LeadsList: React.FC<LeadsListProps> = ({
   const [isDeletingBulk, setIsDeletingBulk] = useState<boolean>(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // Sync initialFilter prop if it updates from parent navigation
+  // Reapply navigation filters even when a repeated notification requests the same filter.
   useEffect(() => {
     if (initialFilter) {
       setActiveFilter(initialFilter);
     }
-  }, [initialFilter]);
+  }, [initialFilter, filterRefresh]);
 
   // Filter definitions
   const filters = [
