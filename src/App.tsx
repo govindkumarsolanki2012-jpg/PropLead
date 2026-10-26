@@ -166,6 +166,7 @@ export function App() {
   const [currentTab, setCurrentTab] = useState<TabType>('home');
   const [tabHistory, setTabHistory] = useState<TabType[]>(['home']);
   const [leadsFilter, setLeadsFilter] = useState<string>('all');
+  const [leadsFilterRefresh, setLeadsFilterRefresh] = useState(0);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [propertySearchQuery, setPropertySearchQuery] = useState<string>('');
   const [dashboardSearchQuery, setDashboardSearchQuery] = useState<string>('');
@@ -778,6 +779,7 @@ export function App() {
     initLocalNotifications((extra) => {
       if (extra.type === 'daily_summary' || extra.reminderKind === 'daily_summary') {
         setLeadsFilter('today');
+        setLeadsFilterRefresh((revision) => revision + 1);
         setSearchQuery('');
         setCurrentTab('leads');
         return;
@@ -1622,6 +1624,7 @@ export function App() {
                 leads={leads}
                 profile={profile}
                 initialFilter={leadsFilter}
+                filterRefresh={leadsFilterRefresh}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
                 onOpenQuickAdd={() => guardLockedFeature('Add Lead', () => setIsQuickAddOpen(true))}
