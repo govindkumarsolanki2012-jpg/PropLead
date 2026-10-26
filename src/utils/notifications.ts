@@ -306,15 +306,15 @@ export function formatFollowUpNotificationBody(
  */
 export function get30mNotificationTitle(activityType?: FollowUpType): string {
   if (activityType === 'site_visit') {
-    return 'Property visit in 30 minutes';
+    return 'Upcoming Site Visit in 30 Mins';
   }
   if (activityType === 'meeting') {
-    return 'Meeting in 30 minutes';
+    return 'Upcoming Meeting in 30 Mins';
   }
   if (activityType === 'whatsapp') {
-    return 'WhatsApp follow-up in 30 minutes';
+    return 'Upcoming WhatsApp Reminder';
   }
-  return 'Follow-up in 30 minutes';
+  return 'Upcoming Follow-up';
 }
 
 /**
@@ -322,15 +322,15 @@ export function get30mNotificationTitle(activityType?: FollowUpType): string {
  */
 export function getExactNotificationTitle(activityType?: FollowUpType): string {
   if (activityType === 'site_visit') {
-    return 'Property visit now';
+    return 'Site Visit Due';
   }
   if (activityType === 'meeting') {
-    return 'Client meeting now';
+    return 'Client Meeting Due';
   }
   if (activityType === 'whatsapp') {
-    return 'Send WhatsApp follow-up';
+    return 'WhatsApp Follow-up Due';
   }
-  return 'Follow-up due now';
+  return 'Follow-up Due';
 }
 
 /**
@@ -724,8 +724,8 @@ export async function scheduleFollowUpNotifications(
     const overdueId = getFollowUpOverdueId(lead.id);
     notificationsToSchedule.push({
       id: overdueId,
-      title: 'Follow-up overdue',
-      body: formatNotificationBody(leadDisplayName, 'Follow-up overdue'),
+      title: 'Follow-up Overdue',
+      body: formatNotificationBody(leadDisplayName, 'Follow-up Overdue'),
       schedule: {
         at: new Date(overdueTime),
         allowWhileIdle: true,
