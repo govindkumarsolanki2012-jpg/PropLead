@@ -776,6 +776,12 @@ export function App() {
 
   useEffect(() => {
     initLocalNotifications((extra) => {
+      if (extra.type === 'daily_summary' || extra.reminderKind === 'daily_summary') {
+        setLeadsFilter('today');
+        setSearchQuery('');
+        setCurrentTab('leads');
+        return;
+      }
       const targetId = extra.leadId || extra.visitId;
       if (targetId) {
         // 1. Try currently loaded in-memory leads
@@ -816,8 +822,6 @@ export function App() {
         setCurrentTab('leads');
       } else if (extra.type === 'visit') {
         setCurrentTab('calendar');
-      } else if (extra.type === 'daily_summary') {
-        setCurrentTab('leads');
       }
     }).catch((error) => console.warn('Notification initialization failed:', error));
   }, [currentUser?.uid]);
