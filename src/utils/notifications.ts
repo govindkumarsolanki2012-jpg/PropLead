@@ -388,7 +388,7 @@ async function initializeNativeNotifications(): Promise<void> {
       const followUpChannel: Channel = {
         id: FOLLOWUP_CHANNEL_ID,
         name: FOLLOWUP_CHANNEL_NAME,
-        description: 'Time-critical reminders for lead follow-ups and calls',
+        description: 'Time-critical reminders for calls, meetings, and WhatsApp follow-ups',
         importance: 4, // HIGH: makes sound and appears as heads-up
         visibility: 1, // PUBLIC: show on lockscreen
         sound: 'default',
@@ -401,7 +401,7 @@ async function initializeNativeNotifications(): Promise<void> {
       const visitsChannel: Channel = {
         id: VISITS_CHANNEL_ID,
         name: VISITS_CHANNEL_NAME,
-        description: 'Scheduled property visits and client meetings',
+        description: 'Scheduled property site visits',
         importance: 4, // HIGH
         visibility: 1,
         sound: 'default',
@@ -656,11 +656,6 @@ export async function scheduleFollowUpNotifications(
   const overdueTime = exactTime + 30 * 60 * 1000;
   const now = Date.now();
 
-  // If the exact time is already in the past, do not schedule
-  if (exactTime <= now) {
-    return;
-  }
-
   const notificationsToSchedule: any[] = [];
   const scheduledIds: number[] = [];
   const leadDisplayName = sanitizeNotificationText(lead.name) || 'Client';
@@ -691,7 +686,6 @@ export async function scheduleFollowUpNotifications(
       group: NOTIFICATION_GROUP_KEY,
       extra: {
         leadId: lead.id,
-        visitId: isVisit ? lead.id : undefined,
         type: isVisit ? 'visit' : 'followup',
         reminderKind: '30m',
       },
@@ -703,29 +697,30 @@ export async function scheduleFollowUpNotifications(
   const exactId = isVisit ? getVisitExactId(lead.id) : getFollowUpExactId(lead.id);
   const exactTitle = getExactNotificationTitle(activityType);
 
-  notificationsToSchedule.push({
-    id: exactId,
-    title: exactTitle,
-    body: notificationBody,
-    schedule: {
-      at: new Date(exactTime),
-      allowWhileIdle: true,
-    },
-    channelId: targetChannelId,
-    smallIcon: NOTIFICATION_SMALL_ICON,
-    iconColor: NOTIFICATION_ICON_COLOR,
-    group: NOTIFICATION_GROUP_KEY,
-    extra: {
-      leadId: lead.id,
-      visitId: isVisit ? lead.id : undefined,
-      type: isVisit ? 'visit' : 'followup',
-      reminderKind: 'exact',
-    },
-  });
-  scheduledIds.push(exactId);
+  if (exactTime > now) {
+    notificationsToSchedule.push({
+      id: exactId,
+      title: exactTitle,
+      body: notificationBody,
+      schedule: {
+        at: new Date(exactTime),
+        allowWhileIdle: true,
+      },
+      channelId: targetChannelId,
+      smallIcon: NOTIFICATION_SMALL_ICON,
+      iconColor: NOTIFICATION_ICON_COLOR,
+      group: NOTIFICATION_GROUP_KEY,
+      extra: {
+        leadId: lead.id,
+        type: isVisit ? 'visit' : 'followup',
+        reminderKind: 'exact',
+      },
+    });
+    scheduledIds.push(exactId);
+  }
 
   // 3. Overdue follow-up reminder
-  if (!isVisit) {
+  if (!isVisit && overdueTime > now) {
     const overdueId = getFollowUpOverdueId(lead.id);
     notificationsToSchedule.push({
       id: overdueId,
