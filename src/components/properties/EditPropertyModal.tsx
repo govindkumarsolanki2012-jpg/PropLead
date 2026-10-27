@@ -60,6 +60,11 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
   onOpenSubscription,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
+  const replaceTargetRef = useRef<{ index: number; photo: string | PropertyPhoto } | null>(null);
+  const failedReplaceTargetRef = useRef<{ index: number; photo: string | PropertyPhoto } | null>(null);
+  const photoUploadGenerationRef = useRef(0);
+  const photoUploadBusyRef = useRef(false);
 
   const [title, setTitle] = useState<string>(property?.title || '');
   const [transactionType, setTransactionType] = useState<PropertyTransactionType>(property?.transactionType || 'sale');
@@ -94,6 +99,13 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
 
   // Sync state whenever property changes or modal opens
   useEffect(() => {
+    photoUploadGenerationRef.current += 1;
+    photoUploadBusyRef.current = false;
+    replaceTargetRef.current = null;
+    failedReplaceTargetRef.current = null;
+    setFailedPhotoFiles([]);
+    setIsUploadingPhotos(false);
+    setPhotoUploadProgress(null);
     if (property) {
       setTitle(property.title || '');
       setTransactionType(property.transactionType || 'sale');
@@ -120,6 +132,10 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
       setErrorMessage(null);
       setIsSubmitting(false);
     }
+    return () => {
+      photoUploadGenerationRef.current += 1;
+      photoUploadBusyRef.current = false;
+    };
   }, [property, isOpen]);
 
   if (!isOpen) return null;
@@ -133,8 +149,15 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
   };
 
 
-  const uploadFileList = async (fileList: File[]) => {
-    if (fileList.length === 0) return;
+  const uploadFileList = async (
+    fileList: File[],
+    replacement?: { index: number; photo: string | PropertyPhoto }
+  ) => {
+    if (fileList.length === 0 || photoUploadBusyRef.current || isSubmitting) return;
+    if (replacement && (fileList.length !== 1 || photos[replacement.index] !== replacement.photo)) {
+      setErrorMessage('The selected photo has changed. Please choose Replace again.');
+      return;
+    }
 
     if (profile && !hasProAccess(profile)) {
       if (onOpenSubscription) onOpenSubscription();
@@ -148,7 +171,11 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
       return;
     }
 
+    const generation = photoUploadGenerationRef.current;
+    photoUploadBusyRef.current = true;
     setIsUploadingPhotos(true);
+    setFailedPhotoFiles([]);
+    failedReplaceTargetRef.current = null;
     setErrorMessage(null);
     setPhotoUploadProgress({ percent: 0, statusText: 'Uploading...' });
 
@@ -160,6 +187,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
         const file = fileList[i];
         const validation = validateAttachmentFile(file);
         if (!validation.valid) {
+          newlyFailed.push(file);
           setErrorMessage(validation.error || 'File is too large. Maximum size is 10 MB.');
           continue;
         }
@@ -170,6 +198,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
             propertyId: propId,
             file,
             onProgress: (progress) => {
+              if (generation !== photoUploadGenerationRef.current) return;
               const prefix = fileList.length > 1 ? `Photo ${i + 1}/${fileList.length}: ` : '';
               setPhotoUploadProgress({
                 percent: progress.percent,
@@ -177,27 +206,35 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
               });
             },
           });
-          setPhotos((prev) => [...prev, photoMeta]);
+          if (generation !== photoUploadGenerationRef.current) return;
+          // Replace in place: never splice/remove then append, especially for cover index 0.
+          setPhotos((prev) => replacement
+            ? prev.map((photo, index) => index === replacement.index ? photoMeta : photo)
+            : [...prev, photoMeta]);
         } catch (storageErr: any) {
           console.error('[EditPropertyModal] Photo upload failed:', storageErr);
           newlyFailed.push(file);
         }
       }
 
+      if (generation !== photoUploadGenerationRef.current) return;
       if (newlyFailed.length > 0) {
         setFailedPhotoFiles(newlyFailed);
-        setErrorMessage('Upload did not complete. Please retry.');
+        failedReplaceTargetRef.current = replacement || null;
+        setErrorMessage(replacement ? 'Replacement upload failed. The original photo is unchanged. Please retry.' : 'Upload did not complete. Please retry.');
       } else {
         setFailedPhotoFiles([]);
         setPhotoUploadProgress({ percent: 100, statusText: 'Upload complete' });
         setTimeout(() => {
-          setPhotoUploadProgress(null);
+          if (generation === photoUploadGenerationRef.current && !photoUploadBusyRef.current) setPhotoUploadProgress(null);
         }, 3000);
       }
     } finally {
-      setIsUploadingPhotos(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      if (generation === photoUploadGenerationRef.current) {
+        photoUploadBusyRef.current = false;
+        setIsUploadingPhotos(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        if (replaceInputRef.current) replaceInputRef.current.value = '';
       }
     }
   };
@@ -213,11 +250,28 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
   const handleRetryFailedPhotos = async () => {
     if (isUploadingPhotos || failedPhotoFiles.length === 0) return;
     const toRetry = [...failedPhotoFiles];
-    await uploadFileList(toRetry);
+    await uploadFileList(toRetry, failedReplaceTargetRef.current || undefined);
+  };
+
+  const handleReplacePhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const target = replaceTargetRef.current;
+    replaceTargetRef.current = null;
+    const file = e.target.files?.[0];
+    if (!file || !target) return;
+    await uploadFileList([file], target);
+  };
+
+  const handleRemovePhoto = (index: number) => {
+    if (photoUploadBusyRef.current || isSubmitting) return;
+    replaceTargetRef.current = null;
+    failedReplaceTargetRef.current = null;
+    setFailedPhotoFiles([]);
+    setPhotos((prev) => prev.filter((_, photoIndex) => photoIndex !== index));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (photoUploadBusyRef.current || isSubmitting) return;
     setErrorMessage(null);
 
     if (profile && !hasProAccess(profile)) {
@@ -631,10 +685,30 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                   />
                   <button
                     type="button"
-                    onClick={() => setPhotos(photos.filter((_, i) => i !== idx))}
-                    className="absolute top-1 right-1 w-6 h-6 bg-black/70 hover:bg-rose-600 text-white rounded-full flex items-center justify-center transition-colors"
+                    onClick={() => handleRemovePhoto(idx)}
+                    disabled={isUploadingPhotos || isSubmitting}
+                    aria-label={`Delete photo ${idx + 1}`}
+                    title="Delete photo"
+                    className="absolute top-1 right-1 w-6 h-6 bg-black/70 hover:bg-rose-600 text-white rounded-full flex items-center justify-center transition-colors disabled:opacity-50"
                   >
                     <X className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isUploadingPhotos || isSubmitting}
+                    onClick={() => {
+                      if (photoUploadBusyRef.current) return;
+                      replaceTargetRef.current = { index: idx, photo: url };
+                      if (replaceInputRef.current) {
+                        replaceInputRef.current.value = '';
+                        replaceInputRef.current.click();
+                      }
+                    }}
+                    aria-label={`Replace photo ${idx + 1}`}
+                    className="absolute bottom-1 right-1 px-1.5 py-1 bg-black/75 hover:bg-emerald-700 text-white rounded text-[9px] font-semibold inline-flex items-center gap-1 disabled:opacity-50"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    Replace
                   </button>
                   {idx === 0 && (
                     <span className="absolute bottom-1 left-1 px-1.5 py-0.2 bg-emerald-600 text-white text-[9px] font-bold rounded">
@@ -646,7 +720,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
 
               <button
                 type="button"
-                disabled={isUploadingPhotos}
+                disabled={isUploadingPhotos || isSubmitting}
                 onClick={() => fileInputRef.current?.click()}
                 className="rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500 flex flex-col items-center justify-center p-3 text-slate-400 hover:text-emerald-600 transition-colors aspect-4/3 disabled:opacity-50"
               >
@@ -689,6 +763,13 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
               </div>
             )}
 
+            <input
+              ref={replaceInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleReplacePhoto}
+            />
             <input
               ref={fileInputRef}
               type="file"
