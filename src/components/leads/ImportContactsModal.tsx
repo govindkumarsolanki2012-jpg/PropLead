@@ -18,7 +18,8 @@ import {
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Contacts } from '@capacitor-community/contacts';
-import { Lead, RequirementType } from '../../types';
+import { Lead, Property, RequirementType } from '../../types';
+import { ImportedContactSetupModal } from './ImportedContactSetupModal';
 import { normalizePhoneForMatch } from '../../utils/formatters';
 import {
   checkContactsPermission,
@@ -123,7 +124,8 @@ export interface ContactItem {
 interface ImportContactsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onImportLeads: (newLeads: Lead[]) => void;
+  onImportLeads: (newLeads: Lead[], matchLeadId?: string) => boolean | void;
+  properties?: Property[];
   existingLeads?: Lead[];
 }
 
@@ -132,8 +134,10 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
   onClose,
   onImportLeads,
   existingLeads = [],
+  properties = [],
 }) => {
   const [contacts, setContacts] = useState<ContactItem[]>([]);
+  const [setupLeads, setSetupLeads] = useState<Lead[]>([]);
   const [search, setSearch] = useState<string>('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [defaultRequirement, setDefaultRequirement] = useState<RequirementType>('buy');
@@ -549,7 +553,9 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
       bhk: undefined,
       budgetMin: undefined,
       budgetMax: undefined,
-      preferredLocations: c.suggestedLocality ? [c.suggestedLocality] : [],
+      preferredCity: '',
+      preferredLocality: '',
+      preferredLocations: [], // Contact/provider locality is not a customer target.
       status: 'new', // Inactive lead initial pipeline stage
       priority: 'warm',
       source: 'Phone Contacts',
@@ -577,15 +583,26 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
       ],
     }));
 
-    onImportLeads(newLeads);
+    setSetupLeads(newLeads);
     setIsImporting(false);
-    onClose();
   };
 
   const duplicateCount = contacts.filter((c) => c.isExistingLead).length;
   const newContactsCount = contacts.filter((c) => !c.isExistingLead).length;
 
   if (!isOpen) return null;
+  if (setupLeads.length > 0) {
+    return <ImportedContactSetupModal
+      leads={setupLeads}
+      properties={properties}
+      onBack={() => setSetupLeads([])}
+      onComplete={(prepared, matchLeadId) => {
+        if (onImportLeads(prepared, matchLeadId) === false) return;
+        setSetupLeads([]);
+        onClose();
+      }}
+    />;
+  }
 
   return (
     <div
