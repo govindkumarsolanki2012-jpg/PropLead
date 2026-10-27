@@ -6,43 +6,32 @@ interface SplashScreenProps {
   className?: string;
 }
 
-export const SplashScreen: React.FC<SplashScreenProps> = ({ className = '' }) => {
-  return (
-    <motion.div
-      id="app-splash-screen"
-      initial={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-      className={`fixed inset-0 z-50 flex flex-col items-center justify-center bg-white dark:bg-slate-900 select-none overflow-hidden ${className}`}
-      style={{
-        paddingTop: 'max(env(safe-area-inset-top, 0px), 1.5rem)',
-        paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 1.5rem)',
-      }}
-    >
-      {/* Stable final-size logo and brand. No entrance motion or responsive resizing. */}
-      <div className="flex flex-col items-center justify-center text-center px-4">
-        <div className="flex items-center justify-center">
-          <PropLeadLogo className="w-24 h-24" showShadow={false} />
-        </div>
-
-        <div className="mt-5 flex flex-col items-center">
-          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white leading-none">
-            Prop<span className="text-emerald-600 dark:text-emerald-400">Lead</span> for Agents
-          </h1>
-          <p className="text-xs font-semibold text-slate-400 dark:text-slate-500 tracking-wide uppercase mt-1.5">
-            Property Agent CRM
-          </p>
-        </div>
-      </div>
-
-      <div
-        className="absolute left-0 right-0 text-center px-4"
-        style={{ bottom: 'max(env(safe-area-inset-bottom, 0px), 1.5rem)' }}
+export const SplashScreen: React.FC<SplashScreenProps> = ({ className = '' }) => (
+  <motion.div
+    id="app-splash-screen"
+    initial={{ opacity: 1 }}
+    exit={{ opacity: 0 }}
+    transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+    className={`fixed inset-0 z-[100] bg-[#ECE5DD] dark:bg-[#111B21] select-none overflow-hidden ${className}`}
+    role="status"
+    aria-label="Preparing PropLead"
+  >
+    {/* Absolute centering keeps the emblem stationary when the text appears. */}
+    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+      <PropLeadLogo className="w-24 h-24" showShadow={false} />
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.4, duration: 0.25 }}
+        className="absolute top-full left-1/2 -translate-x-1/2 mt-5 w-72 px-3 text-center"
       >
-        <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 tracking-widest uppercase">
-          Real Estate Lead Engine
+        <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white leading-none">
+          Prop<span className="text-emerald-600 dark:text-emerald-400">Lead</span>
+        </h1>
+        <p className="text-xs font-semibold text-slate-600 dark:text-slate-300 tracking-wide mt-2">
+          Property Agent CRM
         </p>
-      </div>
-    </motion.div>
-  );
-};
+      </motion.div>
+    </div>
+  </motion.div>
+);

@@ -12,6 +12,7 @@ import { CalendarView } from './components/calendar/CalendarView';
 import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { SettingsView } from './components/settings/SettingsView';
 import { SplashScreen } from './components/common/SplashScreen';
+import { AnimatePresence } from 'motion/react';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 // Modals
@@ -87,9 +88,23 @@ import {
   wasNotificationPermissionPrompted,
 } from './utils/notifications';
 
-// WebView-session boot flag: never reset by appStateChange, focus, or auth refresh.
-// A destroyed/recreated WebView is a real new boot and gets a fresh module instance.
-let isColdBoot = true;
+const SPLASH_IDLE_MS = 3 * 60 * 1000;
+const SPLASH_SEQUENCE_MS = 1200;
+const LAST_ACTIVE_KEY = 'proplead_last_active_at_v1';
+function readLastActive(): number {
+  try {
+    const value = Number(localStorage.getItem(LAST_ACTIVE_KEY));
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+function saveLastActive(): void {
+  try { localStorage.setItem(LAST_ACTIVE_KEY, String(Date.now())); } catch {}
+}
+// Capture boot eligibility once; React StrictMode must not restart the sequence.
+const lastActiveAtBoot = readLastActive();
+const showSplashAtBoot = !lastActiveAtBoot || Date.now() - lastActiveAtBoot > SPLASH_IDLE_MS;
 
 export function App() {
   const [shareGalleryId] = useState<string | null>(() => {
@@ -100,8 +115,11 @@ export function App() {
   if (shareGalleryId) {
     return <PublicPhotoGalleryView shareId={shareGalleryId} />;
   }
-  const [isSplashActive, setIsSplashActive] = useState<boolean>(() => isColdBoot);
-  const [isAppContentVisible, setIsAppContentVisible] = useState<boolean>(() => !isColdBoot);
+  const [isSplashActive, setIsSplashActive] = useState(showSplashAtBoot);
+  const [isSplashCovering, setIsSplashCovering] = useState(showSplashAtBoot);
+  const [isAppContentVisible, setIsAppContentVisible] = useState(!showSplashAtBoot);
+  const [splashTimerComplete, setSplashTimerComplete] = useState(!showSplashAtBoot);
+  const [splashSequence, setSplashSequence] = useState(0);
 
   // Firebase Authentication coordination
   const [isAuthResolved, setIsAuthResolved] = useState<boolean>(false);
@@ -109,14 +127,76 @@ export function App() {
   const firestoreCleanupRef = useRef<(() => void) | null>(null);
   const activeAuthUidRef = useRef<string | null>(null);
 
-  // Auth initialization still runs in the background. No fixed splash delay or
-  // startup animation; a normal foreground resume never re-enters this gate.
+  // Auth restoration runs independently; only the visible UI waits for the sequence.
   useEffect(() => {
-    if (!isAuthResolved) return;
-    isColdBoot = false;
-    setIsSplashActive(false);
+    if (!isSplashActive) return;
+    const timer = window.setTimeout(() => setSplashTimerComplete(true), SPLASH_SEQUENCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [isSplashActive, splashSequence]);
+
+  useEffect(() => {
+    if (isAuthResolved && splashTimerComplete) setIsSplashActive(false);
+  }, [isAuthResolved, splashTimerComplete]);
+
+  const finishSplash = useCallback(() => {
+    setIsSplashCovering(false);
     setIsAppContentVisible(true);
-  }, [isAuthResolved]);
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let backgroundAt = 0;
+    let foreground = true;
+    const onActiveChange = (active: boolean) => {
+      if (disposed || active === foreground) return;
+      foreground = active;
+      if (!active) {
+        backgroundAt = Date.now();
+        saveLastActive();
+        return;
+      }
+      const inactiveFor = Date.now() - (backgroundAt || readLastActive() || Date.now());
+      backgroundAt = 0;
+      saveLastActive();
+      if (inactiveFor > SPLASH_IDLE_MS) {
+        setSplashTimerComplete(false);
+        setSplashSequence((sequence) => sequence + 1);
+        setIsSplashCovering(true);
+        setIsSplashActive(true);
+      } else {
+        // Quick app switches never wait for an entrance or exit animation.
+        setSplashTimerComplete(true);
+        setIsSplashActive(false);
+        setIsSplashCovering(false);
+        setIsAppContentVisible(true);
+      }
+    };
+    saveLastActive();
+    // A heartbeat also covers process termination without a background callback.
+    const heartbeat = window.setInterval(() => {
+      if (foreground) saveLastActive();
+    }, 15000);
+    const visibilityChanged = () => onActiveChange(document.visibilityState === 'visible');
+    const pageHidden = () => { if (foreground) saveLastActive(); };
+    let nativeHandle: { remove(): Promise<void> } | undefined;
+    if (Capacitor.isNativePlatform()) {
+      void CapApp.addListener('appStateChange', ({ isActive }) => onActiveChange(isActive))
+        .then((handle) => {
+          if (disposed) void handle.remove();
+          else nativeHandle = handle;
+        }).catch((error) => console.warn('Splash lifecycle listener unavailable:', error));
+    } else {
+      document.addEventListener('visibilitychange', visibilityChanged);
+    }
+    window.addEventListener('pagehide', pageHidden);
+    return () => {
+      disposed = true;
+      window.clearInterval(heartbeat);
+      document.removeEventListener('visibilitychange', visibilityChanged);
+      window.removeEventListener('pagehide', pageHidden);
+      void nativeHandle?.remove();
+    };
+  }, []);
 
   // Account deletion standalone success notice state
   const [accountDeletedNotice, setAccountDeletedNotice] = useState<{
@@ -1487,18 +1567,22 @@ export function App() {
   const todayCount = leads.filter((l) => formatRelativeDate(l.nextFollowUpDate).isToday).length;
 
   if (!isAuthResolved || !isAppContentVisible) {
-    // Android's native launch splash owns the logo. This is only a matching
-    // first-frame/auth-restoration surface, never a second branded animation.
-    if (Capacitor.isNativePlatform() || !isSplashActive) {
-      return (
-        <div className="fixed inset-0 bg-[#047857]" role="status" aria-label="Restoring your session" />
-      );
-    }
-    return <SplashScreen />;
+    return (
+      <div className="fixed inset-0 bg-[#ECE5DD] dark:bg-[#111B21]" role="status" aria-label="Preparing PropLead">
+        <AnimatePresence onExitComplete={finishSplash}>
+          {isSplashActive && <SplashScreen key={splashSequence} />}
+        </AnimatePresence>
+      </div>
+    );
   }
 
   return (
     <MobileFrame>
+      <AnimatePresence onExitComplete={finishSplash}>
+        {isSplashActive && <SplashScreen key={splashSequence} />}
+      </AnimatePresence>
+      {/* Keep the active view mounted on resume, but hide branding until fade completion. */}
+      <div className="contents" style={{ visibility: isSplashCovering ? 'hidden' : undefined }}>
       {/* Toast Notification */}
       {toastMessage && (
         <div
@@ -1908,6 +1992,7 @@ export function App() {
           onComplete={handleCompleteWelcomeOnboarding}
         />
       )}
+      </div>
     </MobileFrame>
   );
 }

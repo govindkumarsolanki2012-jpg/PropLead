@@ -21,7 +21,7 @@ function NativeSplashHandoff() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform() || nativeSplashHidden) return;
     let secondFrame = 0;
-    // Start after React commits and the emerald first frame can be painted.
+    // Start after React commits and the neutral first frame can be painted.
     const firstFrame = requestAnimationFrame(() => {
       secondFrame = requestAnimationFrame(() => {
         nativeSplashHidden = true;
