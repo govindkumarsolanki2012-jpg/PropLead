@@ -12,7 +12,6 @@ import { CalendarView } from './components/calendar/CalendarView';
 import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { SettingsView } from './components/settings/SettingsView';
 import { SplashScreen } from './components/common/SplashScreen';
-import { AnimatePresence } from 'motion/react';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 // Modals
@@ -88,6 +87,10 @@ import {
   wasNotificationPermissionPrompted,
 } from './utils/notifications';
 
+// WebView-session boot flag: never reset by appStateChange, focus, or auth refresh.
+// A destroyed/recreated WebView is a real new boot and gets a fresh module instance.
+let isColdBoot = true;
+
 export function App() {
   const [shareGalleryId] = useState<string | null>(() => {
     const match = window.location.pathname.match(/^\/share\/photos\/([a-zA-Z0-9_-]+)$/);
@@ -97,17 +100,8 @@ export function App() {
   if (shareGalleryId) {
     return <PublicPhotoGalleryView shareId={shareGalleryId} />;
   }
-  // Single fast branded splash shown once after the native Android splash
-  const [isSplashActive, setIsSplashActive] = useState<boolean>(true);
-  const [isAppContentVisible, setIsAppContentVisible] = useState<boolean>(false);
-  const [hasMinimumSplashElapsed, setHasMinimumSplashElapsed] = useState<boolean>(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setHasMinimumSplashElapsed(true);
-    }, 900);
-    return () => clearTimeout(timer);
-  }, []);
+  const [isSplashActive, setIsSplashActive] = useState<boolean>(() => isColdBoot);
+  const [isAppContentVisible, setIsAppContentVisible] = useState<boolean>(() => !isColdBoot);
 
   // Firebase Authentication coordination
   const [isAuthResolved, setIsAuthResolved] = useState<boolean>(false);
@@ -115,13 +109,14 @@ export function App() {
   const firestoreCleanupRef = useRef<(() => void) | null>(null);
   const activeAuthUidRef = useRef<string | null>(null);
 
-  // The branded splash can exit only after both its minimum display time and
-  // Firebase's first authoritative auth-state callback have completed.
+  // Auth initialization still runs in the background. No fixed splash delay or
+  // startup animation; a normal foreground resume never re-enters this gate.
   useEffect(() => {
-    if (hasMinimumSplashElapsed && isAuthResolved) {
-      setIsSplashActive(false);
-    }
-  }, [hasMinimumSplashElapsed, isAuthResolved]);
+    if (!isAuthResolved) return;
+    isColdBoot = false;
+    setIsSplashActive(false);
+    setIsAppContentVisible(true);
+  }, [isAuthResolved]);
 
   // Account deletion standalone success notice state
   const [accountDeletedNotice, setAccountDeletedNotice] = useState<{
@@ -1483,14 +1478,15 @@ export function App() {
   // Check today and overdue follow-up counts for bottom nav badge
   const todayCount = leads.filter((l) => formatRelativeDate(l.nextFollowUpDate).isToday).length;
 
-  if (!isAppContentVisible) {
-    return (
-      <MobileFrame>
-        <AnimatePresence onExitComplete={() => setIsAppContentVisible(true)}>
-          {isSplashActive && <SplashScreen key="app-launch-splash" />}
-        </AnimatePresence>
-      </MobileFrame>
-    );
+  if (!isAuthResolved || !isAppContentVisible) {
+    // Android's native launch splash owns the logo. This is only a matching
+    // first-frame/auth-restoration surface, never a second branded animation.
+    if (Capacitor.isNativePlatform() || !isSplashActive) {
+      return (
+        <div className="fixed inset-0 bg-[#047857]" role="status" aria-label="Restoring your session" />
+      );
+    }
+    return <SplashScreen />;
   }
 
   return (
