@@ -14,6 +14,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { Attachment } from '../../types';
+import { ToastNotification } from '../common/ToastNotification';
 import { openLeadDocument, isAudioAttachment } from '../../utils/documentOpener';
 import { auth } from '../../lib/firebase';
 import {
@@ -299,14 +300,7 @@ export const LeadAttachmentManager: React.FC<LeadAttachmentManagerProps> = ({
 
   return (
     <div className="space-y-4 relative">
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-90 max-w-xs w-full px-4 text-center pointer-events-none animate-fade-in">
-          <div className="bg-slate-900/95 dark:bg-slate-800/95 text-white text-xs font-semibold px-4 py-2.5 rounded-2xl shadow-xl border border-slate-700/60 backdrop-blur-xs">
-            {toastMessage}
-          </div>
-        </div>
-      )}
+      <ToastNotification message={toastMessage} />
 
       {/* Upload Zone */}
       <div className="p-4 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 text-center">
