@@ -12,6 +12,7 @@ import { CalendarView } from './components/calendar/CalendarView';
 import { AnalyticsView } from './components/analytics/AnalyticsView';
 import { SettingsView } from './components/settings/SettingsView';
 import { SplashScreen } from './components/common/SplashScreen';
+import { ToastNotification } from './components/common/ToastNotification';
 import { AnimatePresence } from 'motion/react';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 
@@ -1583,21 +1584,10 @@ export function App() {
       </AnimatePresence>
       {/* Keep the active view mounted on resume, but hide branding until fade completion. */}
       <div className="contents" style={{ visibility: isSplashCovering ? 'hidden' : undefined }}>
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div
-          className={`fixed left-1/2 -translate-x-1/2 z-50 px-4 py-2 text-white rounded-full text-xs font-bold shadow-xl border animate-bounce ${
-            toastMessage.isError
-              ? 'bg-rose-600 border-rose-700'
-              : 'bg-slate-900 border-slate-700'
-          }`}
-          style={{
-            top: 'calc(4.5rem + max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px)))',
-          }}
-        >
-          {toastMessage.text}
-        </div>
-      )}
+      <ToastNotification
+        message={isSplashCovering ? null : toastMessage?.text || null}
+        isError={toastMessage?.isError}
+      />
 
       {accountDeletedNotice ? (
         <div
