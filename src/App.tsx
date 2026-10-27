@@ -1569,7 +1569,7 @@ export function App() {
 
   if (!isAuthResolved || !isAppContentVisible) {
     return (
-      <div className="fixed inset-0 bg-[#ECE5DD] dark:bg-[#111B21]" role="status" aria-label="Preparing PropLead">
+      <div className="fixed inset-0 bg-white" role="status" aria-label="Preparing PropLead">
         <AnimatePresence onExitComplete={finishSplash}>
           {isSplashActive && <SplashScreen key={splashSequence} />}
         </AnimatePresence>

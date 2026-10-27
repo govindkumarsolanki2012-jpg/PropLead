@@ -1,0 +1,15 @@
+/* Pure white matches the opaque canvas in /logo.png in every app theme. */
+.proplead-splash {
+  background-color: #ffffff;
+  color-scheme: light;
+}
+
+/* CSS fallback applies before the JavaScript motion preference has resolved. */
+@media (prefers-reduced-motion: reduce) {
+  .proplead-splash [data-splash-reveal] {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+}
