@@ -1,5 +1,5 @@
 import { Property, UserProfile } from '../types';
-import { formatIndianCurrency, PROPERTY_TYPE_LABELS, normalizePropertyPhotos } from './formatters';
+import { PROPERTY_TYPE_LABELS, normalizePropertyPhotos } from './formatters';
 import { openWhatsApp } from './whatsapp';
 import { savePublicPhotoShare } from '../services/firebaseService';
 
@@ -49,6 +49,18 @@ export function generateCustomerPropertyMessage(
     return String(value).trim();
   };
   const label = (value: unknown): string => text(value).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  const locationText = (value: unknown): string =>
+    text(value).split(/(\s+)/).map((word) => {
+      // Preserve short locality acronyms such as MVP while normalizing names.
+      if (/^[A-Z]{2,4}$/.test(word)) return word;
+      return word.toLocaleLowerCase('en-IN').replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+    }).join('');
+  const sharePrice = (amount: number): string => {
+    const format = (value: number) => value.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    if (amount >= 10000000) return `₹${format(amount / 10000000)} Crores`;
+    if (amount >= 100000) return `₹${format(amount / 100000)} Lakhs`;
+    return `₹${format(amount)}`;
+  };
   const specs: string[] = [];
   const add = (name: string, value: unknown) => {
     const rendered = text(value);
@@ -69,7 +81,7 @@ export function generateCustomerPropertyMessage(
   const negotiable = p.priceNegotiable ?? p.isNegotiable;
   if (filled(p.price)) {
     const rent = p.transactionType === 'rent' || p.transactionType === 'lease';
-    add('Price', `${formatIndianCurrency(p.price)}${rent ? ' / month' : ''}${negotiable === true ? ' (Negotiable)' : ''}`);
+    add('Price', `${sharePrice(p.price)}${rent ? ' / month' : ''}${negotiable === true ? ' (Negotiable)' : ''}`);
   }
   add('Negotiable', negotiable);
   add('Configuration', first(p.bhk, p.configuration));
@@ -102,7 +114,7 @@ export function generateCustomerPropertyMessage(
   add('Approval Type', label(p.approvalType));
   add('Road Type', label(p.roadType));
   add('Road Access', p.roadAccess);
-  add('Nearby Village / City', p.nearbyVillageOrCity);
+  add('Nearby Village / City', locationText(p.nearbyVillageOrCity));
   add('Water Source', label(p.waterSource));
   add('Water Supply', p.waterSupply);
   add('Electricity Supply', p.electricitySupply);
@@ -118,9 +130,7 @@ export function generateCustomerPropertyMessage(
   add('Garden', p.garden);
   add('Fencing', p.fencing);
   add('Farm / Garden Area', p.farmGarden);
-  add('Property Reference', p.id);
-  add('Listed On', p.createdAt);
-  add('Last Updated', p.updatedAt);
+  // Internal IDs and database timestamps are never customer-facing specs.
 
   const lines = [
     customCustomerName?.trim() ? `Hello ${customCustomerName.trim()},` : 'Hello,',
@@ -129,10 +139,10 @@ export function generateCustomerPropertyMessage(
     '',
   ];
   if (text(p.title)) lines.push(`📍 Property: ${text(p.title)}`);
-  const location = [...new Set([p.locality, p.location, p.city].map(text).filter(Boolean))].join(', ');
+  const location = [...new Set([p.locality, p.location, p.city].map(locationText).filter(Boolean))].join(', ');
   if (location) lines.push(`📌 Location: ${location}`);
   const landmark = first(p.nearbyLandmark, p.landmark);
-  if (filled(landmark)) lines.push(`🗺️ Landmark: ${text(landmark)}`);
+  if (filled(landmark)) lines.push(`🗺️ Landmark: ${locationText(landmark)}`);
   lines.push('', '📋 Property Details & Specs:', ...specs);
   const amenities = Array.isArray(p.amenities) ? p.amenities.map(text).filter(Boolean) : [];
   if (amenities.length) lines.push('', '✨ Amenities & Key Features:', ...amenities.map((item) => `• ${item}`));
