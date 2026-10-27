@@ -64,11 +64,11 @@ export function generateCustomerPropertyMessage(
   const specs: string[] = [];
   const add = (name: string, value: unknown) => {
     const rendered = text(value);
-    if (rendered) specs.push(`• ${name}: ${rendered}`);
+    if (rendered) specs.push(`• *${name}:* ${rendered}`);
   };
   const area = (name: string, canonical: unknown, ...legacy: unknown[]) => {
     const value = first(canonical, ...legacy);
-    if (filled(value)) add(name, `${text(value)} sq.ft`);
+    if (filled(value)) add(name, `${text(value)} sq. ft.`);
   };
   const feet = (value: unknown): string => {
     const rendered = text(value);
@@ -76,15 +76,15 @@ export function generateCustomerPropertyMessage(
   };
 
   const type = first(p.propertyType, p.type);
-  add('Type', PROPERTY_TYPE_LABELS[text(type) as Property['propertyType']] || label(type));
-  add('Purpose', p.forSale === true ? 'For Sale' : label(p.transactionType));
+  const propertyType = PROPERTY_TYPE_LABELS[text(type) as Property['propertyType']] || label(type);
+  const configuration = text(first(p.bhk, p.configuration)) || (filled(p.bedrooms) ? `${text(p.bedrooms)} BHK` : '');
+  add('Configuration', [configuration, propertyType].filter(Boolean).join(' | '));
+  add('Purpose', p.forSale === true ? 'Sale' : label(p.transactionType) || 'Sale');
   const negotiable = p.priceNegotiable ?? p.isNegotiable;
   if (filled(p.price)) {
     const rent = p.transactionType === 'rent' || p.transactionType === 'lease';
-    add('Price', `${sharePrice(p.price)}${rent ? ' / month' : ''}${negotiable === true ? ' (Negotiable)' : ''}`);
+    add('Price', `${sharePrice(p.price)}${rent ? ' / month' : ''}${negotiable === true ? ' (Negotiable)' : negotiable === false ? ' (Non-negotiable)' : ''}`);
   }
-  add('Negotiable', negotiable);
-  add('Configuration', first(p.bhk, p.configuration));
   area('Carpet Area', p.carpetAreaSqFt, p.carpetArea);
   area('Super Built-Up Area', p.superBuiltUpAreaSqFt, p.superBuiltUpArea);
   area('Built-Up Area', p.builtUpAreaSqFt, p.builtUpArea);
@@ -96,18 +96,21 @@ export function generateCustomerPropertyMessage(
   area('Land Area', p.landAreaSqFt);
   area('Terrace Area', p.terraceAreaSqFt);
   add('Dimensions', first(p.plotDimension, p.dimensions));
-  if (filled(p.floor)) add('Floor', `${text(p.floor)}${filled(p.totalFloors) ? ` of ${text(p.totalFloors)}` : ''}`);
-  else add('Total Floors', p.totalFloors);
-  add('Facing', p.facing);
-  add('Furnishing', label(p.furnishing));
+  const floor = text(p.floor);
+  const floorNumber = /^\d+$/.test(floor) ? Number(floor) : null;
+  const ordinal = floorNumber === null ? floor : `${floorNumber}${floorNumber % 100 >= 11 && floorNumber % 100 <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[floorNumber % 10] || 'th'}`;
+  const floorLabel = floor ? `${ordinal}${/floor/i.test(floor) ? '' : ' Floor'}${filled(p.totalFloors) ? ` of ${text(p.totalFloors)}` : ''}` : 'N/A';
+  const facing = label(p.facing);
+  add('Floor / Facing', `${floorLabel} | ${facing ? `${facing}${/facing/i.test(facing) ? '' : ' Facing'}` : 'N/A'}`);
+  if (!floor) add('Total Floors', p.totalFloors);
+  add('Furnishing', label(p.furnishing) || 'N/A');
   add('Balconies', first(p.balconyCount, p.balconies));
-  add('Bedrooms / Rooms', p.bedrooms);
   add('Bathrooms / Washrooms', first(p.washrooms, p.bathrooms));
   add('Washroom Available', p.washroom);
   add('Parking', p.parking);
   add('Road Width', feet(first(p.roadWidth, p.roadWidthFt)));
   add('Frontage', feet(first(p.frontage, p.frontageFt)));
-  add('Status', label(first(p.status, p.possessionStatus)));
+  add('Status', label(first(p.status, p.possessionStatus)) || 'Available');
   add('Age of Property', first(p.propertyAge, p.ageOfProperty));
   add('Commercial Type', label(p.commercialType));
   add('Suitable For', label(p.suitableFor));
@@ -135,22 +138,22 @@ export function generateCustomerPropertyMessage(
   const lines = [
     customCustomerName?.trim() ? `Hello ${customCustomerName.trim()},` : 'Hello,',
     '',
-    '🏡 NEW PROPERTY RECOMMENDATION',
+    '🏡 *NEW PROPERTY RECOMMENDATION*',
     '',
   ];
-  if (text(p.title)) lines.push(`📍 Property: ${text(p.title)}`);
+  lines.push(`📌 *Property:* ${text(p.title) || 'Featured Property'}`);
   const location = [...new Set([p.locality, p.location, p.city].map(locationText).filter(Boolean))].join(', ');
-  if (location) lines.push(`📌 Location: ${location}`);
+  if (location) lines.push(`📍 *Location:* ${location}`);
   const landmark = first(p.nearbyLandmark, p.landmark);
-  if (filled(landmark)) lines.push(`🗺️ Landmark: ${locationText(landmark)}`);
-  lines.push('', '📋 Property Details & Specs:', ...specs);
+  if (filled(landmark)) lines.push(`🗺️ *Landmark:* ${locationText(landmark)}`);
+  lines.push('', '📋 *Property Details & Specs:*', ...specs);
   const amenities = Array.isArray(p.amenities) ? p.amenities.map(text).filter(Boolean) : [];
-  if (amenities.length) lines.push('', '✨ Amenities & Key Features:', ...amenities.map((item) => `• ${item}`));
+  if (amenities.length) lines.push('', '🌟 *Amenities & Key Features:*', ...amenities.map((item) => `• ${item}`));
   // CRITICAL: Do NOT list individual image URLs here. Always keep as single public gallery URL.
-  lines.push('', '📸 Photos & Full Gallery:', `👉 ${getPublicGalleryUrl(p.id)}`, '',
-    '--------------------------------', `Presented by: ${profile?.name?.trim() || 'Property Advisor'}`);
+  lines.push('', '📸 *Photos & Full Gallery:*', getPublicGalleryUrl(p.id), '',
+    '---', `Presented by: *${profile?.name?.trim() || 'Property Advisor'}*`);
   if (profile?.phone?.trim()) lines.push(`📞 Contact: ${profile.phone.trim()}`);
-  lines.push('', 'Reply to this message to schedule a private site visit.');
+  lines.push('', '_Reply to this message to schedule a private site visit._');
   return lines.join('\n');
 }
 
