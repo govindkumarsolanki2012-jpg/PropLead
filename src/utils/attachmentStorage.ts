@@ -479,7 +479,7 @@ export async function uploadPropertyPhotoToStorage({
   });
 
   const metadata = {
-    contentType: resolved.blob.type || 'image/jpeg',
+    contentType: compressedBlob.type || resolved.blob.type || 'image/jpeg',
     customMetadata: {
       userId: currentUid,
       propertyId,
@@ -524,7 +524,7 @@ export async function uploadPropertyPhotoToStorage({
     downloadUrl,
     storagePath,
     fileName: resolved.fileName,
-    contentType: resolved.blob.type || 'image/jpeg',
+    contentType: compressedBlob.type || resolved.blob.type || 'image/jpeg',
     createdAt: new Date().toISOString(),
     fileSize: compressedBlob.size,
     uploadedAt: new Date().toISOString(),

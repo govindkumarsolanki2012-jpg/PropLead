@@ -82,6 +82,9 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
   const [status, setStatus] = useState<PropertyStatus>(property?.status || 'available');
   const [amenities, setAmenities] = useState<string[]>(property?.amenities || []);
   const [photos, setPhotos] = useState<(string | PropertyPhoto)[]>(property?.photos || []);
+  const [replacementPreviews, setReplacementPreviews] = useState<Record<number, string>>({});
+  const [previewErrors, setPreviewErrors] = useState<Record<number, boolean>>({});
+  const replacementPreviewUrlsRef = useRef<Record<number, string>>({});
   const [extraFields, setExtraFields] = useState<Partial<Property>>({ ...property });
 
   // PRIVATE OWNER FIELDS
@@ -106,6 +109,10 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
     setFailedPhotoFiles([]);
     setIsUploadingPhotos(false);
     setPhotoUploadProgress(null);
+    Object.values<string>(replacementPreviewUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+    replacementPreviewUrlsRef.current = {};
+    setReplacementPreviews({});
+    setPreviewErrors({});
     if (property) {
       setTitle(property.title || '');
       setTransactionType(property.transactionType || 'sale');
@@ -135,6 +142,8 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
     return () => {
       photoUploadGenerationRef.current += 1;
       photoUploadBusyRef.current = false;
+      Object.values<string>(replacementPreviewUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+      replacementPreviewUrlsRef.current = {};
     };
   }, [property, isOpen]);
 
@@ -193,6 +202,15 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
         }
 
         try {
+          if (replacement) {
+            // UI-only blob URLs never enter photos or the Firestore save payload.
+            const oldPreview = replacementPreviewUrlsRef.current[replacement.index];
+            if (oldPreview) URL.revokeObjectURL(oldPreview);
+            const previewUrl = URL.createObjectURL(file);
+            replacementPreviewUrlsRef.current[replacement.index] = previewUrl;
+            setReplacementPreviews((prev) => ({ ...prev, [replacement.index]: previewUrl }));
+            setPreviewErrors((prev) => ({ ...prev, [replacement.index]: false }));
+          }
           const photoMeta = await uploadPropertyPhotoToStorage({
             userId: currentUid,
             propertyId: propId,
@@ -207,12 +225,29 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
             },
           });
           if (generation !== photoUploadGenerationRef.current) return;
+          const downloadUrl = getPropertyPhotoUrl(photoMeta).trim();
+          if (!/^https?:\/\//i.test(downloadUrl)) {
+            throw new Error('The uploaded photo did not return a valid image URL.');
+          }
+          const savedPhoto = { ...photoMeta, downloadURL: downloadUrl, downloadUrl };
           // Replace in place: never splice/remove then append, especially for cover index 0.
           setPhotos((prev) => replacement
-            ? prev.map((photo, index) => index === replacement.index ? photoMeta : photo)
-            : [...prev, photoMeta]);
+            ? prev.map((photo, index) => index === replacement.index ? savedPhoto : photo)
+            : [...prev, savedPhoto]);
         } catch (storageErr: any) {
           console.error('[EditPropertyModal] Photo upload failed:', storageErr);
+          if (generation !== photoUploadGenerationRef.current) return;
+          if (replacement) {
+            const previewUrl = replacementPreviewUrlsRef.current[replacement.index];
+            if (previewUrl) URL.revokeObjectURL(previewUrl);
+            delete replacementPreviewUrlsRef.current[replacement.index];
+            setReplacementPreviews((prev) => {
+              const next = { ...prev };
+              delete next[replacement.index];
+              return next;
+            });
+            setPreviewErrors((prev) => ({ ...prev, [replacement.index]: false }));
+          }
           newlyFailed.push(file);
         }
       }
@@ -266,6 +301,11 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
     replaceTargetRef.current = null;
     failedReplaceTargetRef.current = null;
     setFailedPhotoFiles([]);
+    // Removing a slot shifts indexes, so discard all transient preview mappings.
+    Object.values<string>(replacementPreviewUrlsRef.current).forEach((url) => URL.revokeObjectURL(url));
+    replacementPreviewUrlsRef.current = {};
+    setReplacementPreviews({});
+    setPreviewErrors({});
     setPhotos((prev) => prev.filter((_, photoIndex) => photoIndex !== index));
   };
 
@@ -677,12 +717,22 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                   key={idx}
                   className="relative group rounded-xl overflow-hidden aspect-4/3 border border-slate-200 dark:border-slate-700"
                 >
-                  <img
-                    src={getPropertyPhotoUrl(url)}
-                    alt={`Photo ${idx + 1}`}
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover"
-                  />
+                  {previewErrors[idx] ? (
+                    <div className="w-full h-full bg-slate-100 dark:bg-slate-800 flex flex-col items-center justify-center text-slate-500 text-[10px]">
+                      <ImageIcon className="w-5 h-5 mb-1" />
+                      Preview unavailable
+                    </div>
+                  ) : (
+                    <img
+                      key={replacementPreviews[idx] || getPropertyPhotoUrl(url)}
+                      src={replacementPreviews[idx] || getPropertyPhotoUrl(url)}
+                      alt={`Photo ${idx + 1}`}
+                      referrerPolicy="no-referrer"
+                      decoding="async"
+                      onError={() => setPreviewErrors((prev) => ({ ...prev, [idx]: true }))}
+                      className="w-full h-full object-cover"
+                    />
+                  )}
                   <button
                     type="button"
                     onClick={() => handleRemovePhoto(idx)}
