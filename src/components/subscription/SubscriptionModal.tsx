@@ -285,14 +285,25 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
   const selectedPlan = SUBSCRIPTION_PLANS[selectedPlanId] || SUBSCRIPTION_PLANS.quarterly;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[94vh] animate-in fade-in zoom-in-95 duration-150">
+    <div
+      className="fixed inset-0 z-50 h-[100dvh] box-border bg-black/60 backdrop-blur-xs flex items-center justify-center px-4 overflow-hidden"
+      style={{
+        paddingTop: 'max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px), 24px)',
+        paddingBottom: 'max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px), 16px)',
+      }}
+    >
+      <div
+        className="bg-white dark:bg-slate-900 w-full max-w-md min-h-0 rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-full animate-in fade-in zoom-in-95 duration-150"
+        style={{
+          maxHeight: 'calc(100dvh - max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px), 24px) - max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px), 16px))',
+        }}
+      >
         {/* Top Header */}
-        <div className="relative p-6 bg-gradient-to-b from-emerald-600 to-emerald-700 text-white text-center pb-6">
+        <div className="relative shrink-0 px-6 pt-7 pb-6 bg-gradient-to-b from-emerald-600 to-emerald-700 text-white text-center">
           <button
             id="btn_close_subscription_modal"
             onClick={onClose}
-            className="absolute top-4 right-4 w-8 h-8 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center text-white transition-colors"
+            className="absolute top-5 right-4 z-10 w-8 h-8 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center text-white transition-colors"
             aria-label="Close"
           >
             <X className="w-4 h-4" />
@@ -311,7 +322,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         </div>
 
         {/* Content Body */}
-        <div className="p-5 overflow-y-auto space-y-4 flex-1">
+        <div className="p-5 min-h-0 overflow-y-auto overscroll-contain space-y-4 flex-1">
           {subscriptionResolution !== 'ready' && (
             <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-600 dark:text-slate-300 flex items-center gap-2">
               <RefreshCw className={`w-4 h-4 ${subscriptionResolution === 'loading' ? 'animate-spin' : ''}`} />
@@ -643,7 +654,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         </div>
 
         {/* Bottom Actions */}
-        <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 space-y-2">
+        <div className="shrink-0 p-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 space-y-2">
           {/* Main Action Button */}
           {status === 'ACTIVE' ? (
             <button
