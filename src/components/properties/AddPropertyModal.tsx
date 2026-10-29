@@ -37,7 +37,7 @@ import {
 } from '../../utils/attachmentStorage';
 import { PropertyPhoto } from '../../types';
 import { PropertyTypeSpecificFields } from './PropertyTypeSpecificFields';
-import { getBhkLabel, isPropertyFieldVisible, PROPERTY_TYPE_AMENITIES } from '../../utils/propertyTypeFields';
+import { getBhkLabel, isPropertyFieldVisible, PROPERTY_TYPE_AMENITIES, sanitizePropertyForType } from '../../utils/propertyTypeFields';
 
 interface AddPropertyModalProps {
   isOpen: boolean;
@@ -115,6 +115,10 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
     setIsSubmitting(false);
   }, []);
 
+  const [isUploadingPhotos, setIsUploadingPhotos] = useState<boolean>(false);
+  const [photoUploadProgress, setPhotoUploadProgress] = useState<UploadProgress | null>(null);
+  const [failedPhotoFiles, setFailedPhotoFiles] = useState<File[]>([]);
+
   // Reset form whenever modal opens to guarantee a completely new, empty form
   useEffect(() => {
     if (isOpen) {
@@ -136,10 +140,6 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
       setAmenities([...amenities, item]);
     }
   };
-
-  const [isUploadingPhotos, setIsUploadingPhotos] = useState<boolean>(false);
-  const [photoUploadProgress, setPhotoUploadProgress] = useState<UploadProgress | null>(null);
-  const [failedPhotoFiles, setFailedPhotoFiles] = useState<File[]>([]);
 
   const uploadFileList = async (fileList: File[]) => {
     if (fileList.length === 0) return;
@@ -218,6 +218,11 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
     await uploadFileList(toRetry);
   };
 
+  const showSuperBuiltUpArea = isPropertyFieldVisible(propertyType, 'superBuiltUpAreaSqFt');
+  const showCarpetArea = isPropertyFieldVisible(propertyType, 'carpetAreaSqFt');
+  const specsColumns = ['floor', 'facing', 'furnishing'].filter((field) =>
+    isPropertyFieldVisible(propertyType, field as 'floor' | 'facing' | 'furnishing')).length;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -235,7 +240,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
       return;
     }
 
-    const newProperty: Property = {
+    const newProperty = sanitizePropertyForType({
       ...extraFields,
       id: formPropertyId,
       title: title.trim(),
@@ -243,15 +248,17 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
       transactionType,
       price: typeof price === 'number' ? price : 0,
       priceNegotiable,
-      bhk: bhk.trim() || undefined,
-      superBuiltUpAreaSqFt: typeof superBuiltUpAreaSqFt === 'number' && superBuiltUpAreaSqFt > 0 ? superBuiltUpAreaSqFt : undefined,
-      carpetAreaSqFt: typeof carpetAreaSqFt === 'number' && carpetAreaSqFt > 0 ? carpetAreaSqFt : undefined,
+      ...(isPropertyFieldVisible(propertyType, 'bhk') && bhk.trim() ? { bhk: bhk.trim() } : {}),
+      ...(showSuperBuiltUpArea && typeof superBuiltUpAreaSqFt === 'number' && Number.isFinite(superBuiltUpAreaSqFt) && superBuiltUpAreaSqFt > 0
+        ? { superBuiltUpAreaSqFt } : {}),
+      ...(showCarpetArea && typeof carpetAreaSqFt === 'number' && Number.isFinite(carpetAreaSqFt) && carpetAreaSqFt > 0
+        ? { carpetAreaSqFt } : {}),
       locality: locality.trim(),
       city: city.trim(),
       amenities,
-      furnishing: (furnishing as FurnishingStatus) || 'unfurnished',
-      floor: floor.trim() || undefined,
-      facing: facing ? (facing as FacingDirection) : undefined,
+      furnishing: furnishing || 'unfurnished',
+      ...(isPropertyFieldVisible(propertyType, 'floor') && floor.trim() ? { floor: floor.trim() } : {}),
+      ...(isPropertyFieldVisible(propertyType, 'facing') && facing ? { facing } : {}),
       status,
       photos: photos,
       ownerName: ownerName.trim(),
@@ -262,7 +269,7 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
       documents: [],
       createdAt: new Date().toISOString().split('T')[0],
       updatedAt: new Date().toISOString().split('T')[0],
-    };
+    });
 
     console.log('[AddPropertyModal] final saved photo field:', newProperty.photos);
 
@@ -449,8 +456,9 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
               2. Location & Specifications (Public Details)
             </span>
 
-            {(isPropertyFieldVisible(propertyType, 'superBuiltUpAreaSqFt') || isPropertyFieldVisible(propertyType, 'carpetAreaSqFt')) && <div className="grid grid-cols-2 gap-3">
-              {isPropertyFieldVisible(propertyType, 'superBuiltUpAreaSqFt') && <div>
+            {/* Universal required location fields; never gate these on area visibility. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Locality / Area * (Customer Sees This)
                 </label>
@@ -462,9 +470,9 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   placeholder="e.g. Indiranagar, Sector 62, Jubilee Hills..."
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-medium"
                 />
-              </div>}
+              </div>
 
-              {isPropertyFieldVisible(propertyType, 'carpetAreaSqFt') && <div>
+              <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   City *
                 </label>
@@ -476,12 +484,12 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   placeholder="e.g. Bengaluru, Hyderabad, Mumbai..."
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 font-medium"
                 />
-              </div>}
-            </div>}
+              </div>
+            </div>
 
             {/* Area (Super Built-up & Carpet) */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
+            {(showSuperBuiltUpArea || showCarpetArea) && <div className={`grid grid-cols-1 ${showSuperBuiltUpArea && showCarpetArea ? 'sm:grid-cols-2' : ''} gap-3`}>
+              {showSuperBuiltUpArea && <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Super Built-Up Area (sq.ft)
                 </label>
@@ -495,9 +503,9 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   placeholder="e.g. 1500"
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
                 />
-              </div>
+              </div>}
 
-              <div>
+              {showCarpetArea && <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Carpet Area (sq.ft)
                 </label>
@@ -511,11 +519,11 @@ export const AddPropertyModal: React.FC<AddPropertyModalProps> = ({
                   placeholder="e.g. 1200"
                   className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500"
                 />
-              </div>
-            </div>
+              </div>}
+            </div>}
 
             {/* Floor, Facing, Furnishing */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+            <div className={`grid grid-cols-1 ${specsColumns === 3 ? 'sm:grid-cols-3' : specsColumns === 2 ? 'sm:grid-cols-2' : ''} gap-2 text-xs`}>
               {isPropertyFieldVisible(propertyType, 'floor') && <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Floor

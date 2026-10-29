@@ -1,5 +1,6 @@
 import React from 'react';
 import { Property, PropertyType } from '../../types';
+import { isPropertyExtraFieldVisible } from '../../utils/propertyTypeFields';
 
 type ExtraPropertyFields = Partial<Property>;
 
@@ -12,8 +13,8 @@ interface Props {
 const inputClass = 'w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500';
 
 export const PropertyTypeSpecificFields: React.FC<Props> = ({ propertyType, values, onChange }) => {
-  const textField = (field: keyof Property, label: string, placeholder?: string) => (
-    <label className="block">
+  const textField = (field: keyof Property, label: string, placeholder?: string) => !isPropertyExtraFieldVisible(propertyType, field) ? null : (
+    <label className="block min-w-0">
       <span className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">{label}</span>
       <input
         type="text"
@@ -25,8 +26,8 @@ export const PropertyTypeSpecificFields: React.FC<Props> = ({ propertyType, valu
     </label>
   );
 
-  const numberField = (field: keyof Property, label: string) => (
-    <label className="block">
+  const numberField = (field: keyof Property, label: string) => !isPropertyExtraFieldVisible(propertyType, field) ? null : (
+    <label className="block min-w-0">
       <span className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">{label}</span>
       <input
         type="number"
@@ -38,8 +39,8 @@ export const PropertyTypeSpecificFields: React.FC<Props> = ({ propertyType, valu
     </label>
   );
 
-  const yesNoField = (field: keyof Property, label: string) => (
-    <label className="block">
+  const yesNoField = (field: keyof Property, label: string) => !isPropertyExtraFieldVisible(propertyType, field) ? null : (
+    <label className="block min-w-0">
       <span className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">{label}</span>
       <select
         value={values[field] === undefined ? '' : values[field] ? 'yes' : 'no'}
@@ -53,8 +54,8 @@ export const PropertyTypeSpecificFields: React.FC<Props> = ({ propertyType, valu
     </label>
   );
 
-  const selectField = (field: keyof Property, label: string, options: Array<[string, string]>) => (
-    <label className="block">
+  const selectField = (field: keyof Property, label: string, options: Array<[string, string]>) => !isPropertyExtraFieldVisible(propertyType, field) ? null : (
+    <label className="block min-w-0">
       <span className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">{label}</span>
       <select
         value={(values[field] as string | undefined) || ''}
@@ -68,7 +69,7 @@ export const PropertyTypeSpecificFields: React.FC<Props> = ({ propertyType, valu
   );
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
       {propertyType === 'flat' && <>
         {numberField('balconyCount', 'Balcony Count')}
         {textField('parking', 'Parking', 'e.g. 1 covered parking')}
@@ -78,9 +79,10 @@ export const PropertyTypeSpecificFields: React.FC<Props> = ({ propertyType, valu
         {numberField('plotAreaSqFt', 'Plot Area (sq.ft)')}
         {numberField('builtUpAreaSqFt', 'Built-Up Area (sq.ft)')}
         {numberField('totalFloors', 'Total Floors')}
+        {numberField('balconyCount', 'Balcony Count')}
         {textField('parking', 'Parking')}
         {yesNoField('garden', propertyType === 'villa' ? 'Private Garden' : 'Garden')}
-        {propertyType === 'house' && yesNoField('terrace', 'Terrace')}
+        {yesNoField('terrace', 'Terrace')}
         {propertyType === 'house' && yesNoField('waterAvailability', 'Water Availability')}
         {propertyType === 'house' && yesNoField('electricityAvailability', 'Electricity Availability')}
         {propertyType === 'house' && yesNoField('boundaryWall', 'Boundary Wall')}

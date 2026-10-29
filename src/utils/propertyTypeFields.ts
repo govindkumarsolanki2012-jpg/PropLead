@@ -10,10 +10,10 @@ export type BasePropertyField =
 
 const BASE_FIELDS: Record<PropertyType, readonly BasePropertyField[]> = {
   flat: ['bhk', 'superBuiltUpAreaSqFt', 'carpetAreaSqFt', 'floor', 'facing', 'furnishing'],
-  house: ['bhk', 'facing', 'furnishing'],
-  villa: ['bhk', 'facing', 'furnishing'],
+  house: ['bhk', 'superBuiltUpAreaSqFt', 'carpetAreaSqFt', 'facing', 'furnishing'],
+  villa: ['bhk', 'superBuiltUpAreaSqFt', 'carpetAreaSqFt', 'facing', 'furnishing'],
   plot: ['facing'],
-  commercial: ['carpetAreaSqFt', 'floor', 'facing', 'furnishing'],
+  commercial: ['superBuiltUpAreaSqFt', 'carpetAreaSqFt', 'floor', 'facing', 'furnishing'],
   land: ['facing'],
   penthouse: ['bhk', 'superBuiltUpAreaSqFt', 'carpetAreaSqFt', 'floor', 'facing', 'furnishing'],
   farmhouse: ['bhk', 'facing', 'furnishing'],
@@ -32,6 +32,81 @@ export const PROPERTY_TYPE_AMENITIES: Record<PropertyType, readonly string[]> = 
 
 export function isPropertyFieldVisible(propertyType: PropertyType, field: BasePropertyField): boolean {
   return BASE_FIELDS[propertyType]?.includes(field) ?? false;
+}
+
+
+// Canonical optional fields for both form rendering and submission sanitization.
+const EXTRA_FIELDS: Record<PropertyType, readonly (keyof Property)[]> = {
+  flat: ['balconyCount', 'parking'],
+  house: ['plotAreaSqFt', 'builtUpAreaSqFt', 'totalFloors', 'balconyCount', 'parking', 'garden', 'terrace', 'waterAvailability', 'electricityAvailability', 'boundaryWall'],
+  villa: ['plotAreaSqFt', 'builtUpAreaSqFt', 'totalFloors', 'balconyCount', 'parking', 'garden', 'terrace'],
+  plot: ['plotAreaSqFt', 'plotDimension', 'roadWidth', 'cornerPlot', 'boundaryWall', 'approvalType', 'waterAvailability', 'electricityAvailability', 'drainageAvailability', 'roadType', 'nearbyLandmark'],
+  land: ['plotAreaSqFt', 'plotDimension', 'roadWidth', 'cornerPlot', 'boundaryWall', 'approvalType', 'waterAvailability', 'electricityAvailability', 'drainageAvailability', 'roadType', 'nearbyLandmark'],
+  commercial: ['commercialType', 'builtUpAreaSqFt', 'washroom', 'parking', 'frontage', 'roadWidth', 'suitableFor'],
+  penthouse: ['totalFloors', 'terraceAreaSqFt', 'balconyCount', 'parking', 'privateTerrace'],
+  farmhouse: ['landAreaSqFt', 'builtUpAreaSqFt', 'roadAccess', 'roadWidth', 'waterSource', 'electricityAvailability', 'boundaryWall', 'fencing', 'treesOrGarden', 'parking', 'nearbyVillageOrCity'],
+};
+
+// Recognized legacy aliases follow the same relevance rules as their canonical field.
+const FIELD_ALIASES: Partial<Record<keyof Property, keyof Property>> = {
+  balconies: 'balconyCount',
+  bedrooms: 'bhk',
+  roadWidthFt: 'roadWidth',
+  isCornerPlot: 'cornerPlot',
+  waterSupply: 'waterAvailability',
+  electricitySupply: 'electricityAvailability',
+  washrooms: 'washroom',
+  frontageFt: 'frontage',
+  farmGarden: 'treesOrGarden',
+};
+const CATEGORY_FIELDS = new Set<keyof Property>([
+  ...Object.values(BASE_FIELDS).flat(),
+  ...Object.values(EXTRA_FIELDS).flat(),
+  ...Object.keys(FIELD_ALIASES) as (keyof Property)[],
+  'lift',
+]);
+
+export function isPropertyExtraFieldVisible(propertyType: PropertyType, field: keyof Property): boolean {
+  return EXTRA_FIELDS[propertyType]?.includes(field) ?? false;
+}
+
+/**
+ * Build a clean save payload without mutating the form draft or original property.
+ * Omitted fields do not delete legacy Firestore fields when the caller uses merge:true.
+ */
+export function sanitizePropertyForType(property: Property): Property {
+  const result = { ...property };
+  const allowed = new Set<keyof Property>([
+    ...(BASE_FIELDS[property.propertyType] || []),
+    ...(EXTRA_FIELDS[property.propertyType] || []),
+  ]);
+  for (const [alias, canonical] of Object.entries(FIELD_ALIASES)) {
+    if (allowed.has(canonical)) allowed.add(alias as keyof Property);
+  }
+  if (PROPERTY_TYPE_AMENITIES[property.propertyType]?.includes('Lift with Power Backup')) allowed.add('lift');
+
+  for (const field of CATEGORY_FIELDS) {
+    // Required by the existing Property interface; hidden furnishing never carries old selections.
+    if (field === 'furnishing') continue;
+    const value = result[field];
+    if (!allowed.has(field) || value === undefined || value === null ||
+      (typeof value === 'string' && !value.trim()) ||
+      (typeof value === 'number' && (!Number.isFinite(value) || value < 0))) {
+      Reflect.deleteProperty(result, field);
+    } else if (typeof value === 'string') {
+      Object.assign(result, { [field]: value.trim() });
+    }
+  }
+  result.furnishing = allowed.has('furnishing') &&
+    ['unfurnished', 'semi_furnished', 'fully_furnished'].includes(property.furnishing)
+    ? property.furnishing : 'unfurnished';
+  const knownAmenities = new Set(Object.values(PROPERTY_TYPE_AMENITIES).flat());
+  const relevantAmenities = PROPERTY_TYPE_AMENITIES[property.propertyType] || [];
+  // Preserve unclassified legacy/custom amenities; remove known amenities from other categories.
+  result.amenities = (Array.isArray(property.amenities) ? property.amenities : []).filter((item) =>
+    typeof item === 'string' && item.trim() &&
+    (relevantAmenities.includes(item) || !knownAmenities.has(item)));
+  return result;
 }
 
 export function usesBhkForMatching(propertyType: PropertyType): boolean {
@@ -71,10 +146,11 @@ export function getRelevantPropertySpecs(property: Property): PropertySpec[] {
     add('Plot Area', area(property.plotAreaSqFt));
     add('Built-Up Area', area(property.builtUpAreaSqFt));
     add('Total Floors', property.totalFloors);
+    add('Balconies', property.balconyCount);
     add('Parking', property.parking);
     add(property.propertyType === 'villa' ? 'Private Garden' : 'Garden', yesNo(property.garden));
+    add('Terrace', yesNo(property.terrace));
     if (property.propertyType === 'house') {
-      add('Terrace', yesNo(property.terrace));
       add('Water Available', yesNo(property.waterAvailability));
       add('Electricity Available', yesNo(property.electricityAvailability));
       add('Boundary Wall', yesNo(property.boundaryWall));

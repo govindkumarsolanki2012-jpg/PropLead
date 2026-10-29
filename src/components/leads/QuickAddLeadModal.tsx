@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import {
   X,
   Plus,
@@ -118,12 +118,46 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
     }
   }, [isOpen, resetForm]);
 
+  const [visibleViewport, setVisibleViewport] = useState<{ height: number; top: number } | null>(null);
+
+  // Keep the overlay inside the visible WebView when autofocus opens the keyboard.
+  useLayoutEffect(() => {
+    if (!isOpen || typeof window === 'undefined') return;
+    const viewport = window.visualViewport;
+    const updateViewport = () => {
+      const height = viewport?.height ?? window.innerHeight;
+      const top = Math.max(0, viewport?.offsetTop ?? 0);
+      if (!Number.isFinite(height) || height <= 0) return;
+      setVisibleViewport((previous) =>
+        previous?.height === height && previous.top === top ? previous : { height, top });
+    };
+    updateViewport();
+    viewport?.addEventListener('resize', updateViewport);
+    viewport?.addEventListener('scroll', updateViewport);
+    window.addEventListener('resize', updateViewport);
+    return () => {
+      viewport?.removeEventListener('resize', updateViewport);
+      viewport?.removeEventListener('scroll', updateViewport);
+      window.removeEventListener('resize', updateViewport);
+    };
+  }, [isOpen]);
+
+  const overlayStyle: React.CSSProperties = {
+    top: visibleViewport?.top ?? 0,
+    height: visibleViewport ? `${visibleViewport.height}px` : undefined,
+    paddingTop: 'max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px), 24px)',
+    paddingBottom: 'max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px), 16px)',
+  };
+
   if (!isOpen) return null;
 
   if (isLocked) {
     return (
-      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-        <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-3xl p-6 text-center shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+      <div
+        className="fixed inset-x-0 top-0 z-50 h-[100dvh] box-border bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-hidden"
+        style={overlayStyle}
+      >
+        <div className="bg-white dark:bg-slate-900 w-full max-w-sm max-h-full min-h-0 overflow-y-auto overscroll-contain rounded-3xl p-6 text-center shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
           <div className="w-14 h-14 rounded-2xl bg-amber-500/10 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center justify-center mx-auto shadow-xs">
             <Sparkles className="w-7 h-7" />
           </div>
@@ -302,11 +336,14 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[92vh] flex flex-col overflow-hidden">
+    <div
+      className="fixed inset-x-0 top-0 z-50 h-[100dvh] box-border bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-hidden animate-in fade-in duration-200"
+      style={overlayStyle}
+    >
+      <div className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 max-h-full min-h-0 flex flex-col overflow-hidden">
         {/* SUCCESS POST-SAVE VIEW */}
         {createdLead ? (
-          <div className="p-6 text-center space-y-5">
+          <div className="p-6 text-center space-y-5 min-h-0 overflow-y-auto overscroll-contain">
             <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto shadow-md border-2 border-emerald-300 dark:border-emerald-700">
               <CheckCircle2 className="w-9 h-9" />
             </div>
@@ -378,7 +415,7 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
           /* QUICK CAPTURE FORM */
           <>
             {/* Header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-800">
+            <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-800">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-lg bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
                   <Plus className="w-4 h-4" />
@@ -400,7 +437,7 @@ export const QuickAddLeadModal: React.FC<QuickAddLeadModalProps> = ({
             </div>
 
             {/* Form Fields */}
-            <form onSubmit={handleSave} className="p-5 overflow-y-auto space-y-4 flex-1">
+            <form onSubmit={handleSave} className="p-5 overflow-y-auto overscroll-contain space-y-4 flex-1 min-h-0">
               {/* Mandatory Name & Phone */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>

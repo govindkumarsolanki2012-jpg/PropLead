@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Check,
@@ -32,6 +32,66 @@ import {
 } from '../../utils/billing';
 import { auth } from '../../lib/firebase';
 import confetti from 'canvas-confetti';
+
+
+type TrialViewState = 'checking' | 'eligible' | 'active' | 'exhausted' | 'unavailable' | 'paid';
+type ModalSnapshot = {
+  uid: string;
+  resolution: 'checking' | 'ready' | 'unavailable';
+  profile: UserProfile | null;
+};
+type OperationTicket = { uid: string; generation: number };
+
+// Session-only, UID-scoped memory survives modal close/reopen, never crosses accounts.
+const exhaustedTrialUids = new Set<string>();
+
+function resolveTrialView(
+  entitlement: ReturnType<typeof getEffectiveSubscriptionStatus>,
+  resolved: boolean,
+  exhausted: boolean,
+  unavailable: boolean
+): TrialViewState {
+  if (entitlement.isSubscribed) return 'paid';
+  if (exhausted) return 'exhausted';
+  if (!resolved) return unavailable ? 'unavailable' : 'checking';
+  if (entitlement.status === 'TRIAL' && entitlement.trialStatus === 'active' && entitlement.daysRemaining > 0) return 'active';
+  if (entitlement.status === 'NOT_STARTED' && entitlement.trialStatus === 'not_started' && !entitlement.trialEverStarted) return 'eligible';
+  return 'unavailable';
+}
+
+function readStatusProfile(data: Record<string, any>): Partial<UserProfile> {
+  const status = String(data.subscriptionStatus || '').toUpperCase();
+  if (!['NOT_STARTED', 'TRIAL', 'ACTIVE', 'CANCELED_BUT_ACTIVE', 'PAYMENT_ISSUE', 'EXPIRED'].includes(status)) {
+    throw new Error('Invalid subscription status response.');
+  }
+  const trialStatus = data.trialStatus;
+  if (!['not_started', 'active', 'expired'].includes(trialStatus)) {
+    throw new Error('Invalid trial status response.');
+  }
+  const expiry = data.subscriptionExpiryTime || data.subscriptionExpiryDate || data.expiryDate || null;
+  return {
+    subscriptionStatus: status as UserProfile['subscriptionStatus'],
+    isSubscribed: data.isSubscribed === true,
+    trialStatus: status === 'EXPIRED' ? 'expired' : trialStatus,
+    trialAlreadyUsed: data.trialAlreadyUsed === true || trialStatus === 'expired' || status === 'EXPIRED',
+    trialEverStarted: data.trialEverStarted === true || data.trialAlreadyUsed === true ||
+      Boolean(data.trialStartDate || data.trialEndDate) || status === 'TRIAL' || status === 'EXPIRED' || trialStatus === 'expired',
+    trialStartDate: data.trialStartDate || null,
+    trialEndDate: data.trialEndDate || null,
+    trialDaysRemaining: data.trialDaysRemaining ?? 0,
+    isTrialActive: status === 'TRIAL' && trialStatus === 'active',
+    subscriptionExpiryDate: expiry,
+    subscriptionExpiryTime: expiry,
+    expiryDate: expiry,
+    subscriptionProductId: data.subscriptionProductId,
+    subscriptionBasePlan: data.subscriptionBasePlanId || data.subscriptionBasePlan,
+    subscriptionBasePlanId: data.subscriptionBasePlanId || data.subscriptionBasePlan,
+    planId: data.planId || data.subscriptionBasePlanId || data.subscriptionBasePlan,
+    autoRenewing: data.autoRenewing,
+    lastVerifiedAt: data.lastVerifiedAt,
+    paymentIssueMessage: data.paymentIssueMessage,
+  };
+}
 
 interface SubscriptionModalProps {
   isOpen: boolean;
@@ -71,224 +131,380 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
     error: null,
   });
 
-  const [backendSubscriptionData, setBackendSubscriptionData] = useState<any>(null);
 
-  const isExpiredBase =
-    profile.subscriptionStatus === 'EXPIRED' ||
-    profile.trialStatus === 'expired' ||
-    Boolean(profile.trialAlreadyUsed) ||
-    backendSubscriptionData?.subscriptionStatus === 'EXPIRED' ||
-    backendSubscriptionData?.trialStatus === 'expired' ||
-    Boolean(backendSubscriptionData?.trialAlreadyUsed);
+  const currentUid = auth.currentUser?.uid || '';
+  const [snapshot, setSnapshot] = useState<ModalSnapshot>({ uid: '', resolution: 'checking', profile: null });
+  const [exhaustedUid, setExhaustedUid] = useState<string | null>(null);
+  const requestGenerationRef = useRef(0);
+  const operationRef = useRef<OperationTicket | null>(null);
+  const snapshotRef = useRef(snapshot);
+  snapshotRef.current = snapshot;
+  const contextRef = useRef({ uid: currentUid, isOpen, profile, onUpdateProfile });
+  contextRef.current = { uid: currentUid, isOpen, profile, onUpdateProfile };
 
-  const effectiveProfile: UserProfile = backendSubscriptionData
-    ? {
-        ...profile,
-        subscriptionStatus: backendSubscriptionData.isSubscribed
-          ? backendSubscriptionData.subscriptionStatus
-          : (isExpiredBase ? 'EXPIRED' : backendSubscriptionData.subscriptionStatus),
-        trialStatus: backendSubscriptionData.isSubscribed
-          ? 'expired'
-          : (isExpiredBase ? 'expired' : backendSubscriptionData.trialStatus),
-        trialAlreadyUsed: Boolean(backendSubscriptionData.trialAlreadyUsed || isExpiredBase),
-        trialDaysRemaining: isExpiredBase ? 0 : (backendSubscriptionData.trialDaysRemaining ?? 0),
-        trialEndDate: isExpiredBase ? null : backendSubscriptionData.trialEndDate,
-        isTrialActive: !isExpiredBase && !backendSubscriptionData.isSubscribed && (backendSubscriptionData.trialStatus === 'active' || backendSubscriptionData.subscriptionStatus === 'TRIAL'),
-        isSubscribed: Boolean(backendSubscriptionData.isSubscribed),
-      }
-    : isExpiredBase
-    ? {
-        ...profile,
-        subscriptionStatus: 'EXPIRED',
-        trialStatus: 'expired',
-        trialAlreadyUsed: true,
-        trialDaysRemaining: 0,
-        trialEndDate: null,
-        isTrialActive: false,
-        isSubscribed: false,
-      }
-    : profile;
-
+  const hasTrialPermanentlyExhausted = Boolean(currentUid) &&
+    (exhaustedUid === currentUid || exhaustedTrialUids.has(currentUid));
+  const currentSnapshot = snapshot.uid === currentUid ? snapshot : null;
+  const effectiveProfile = currentSnapshot?.profile ||
+    (profile.id === currentUid ? profile : null);
+  const entitlement = getEffectiveSubscriptionStatus(effectiveProfile);
   const {
-    status,
-    trialStatus,
-    trialEverStarted,
-    trialAlreadyUsed,
-    daysRemaining,
-    isSubscribed,
-    expiryFormatted,
-    isLocked,
-    isTrialEndDateMissingOrInvalid,
-  } = getEffectiveSubscriptionStatus(effectiveProfile);
+    status, daysRemaining, expiryFormatted, isLocked,
+  } = entitlement;
+  const trialViewState = resolveTrialView(
+    entitlement,
+    currentSnapshot?.resolution === 'ready' && subscriptionResolution === 'ready',
+    hasTrialPermanentlyExhausted,
+    currentSnapshot?.resolution === 'unavailable' || subscriptionResolution === 'offline'
+  );
+  const trialViewRef = useRef(trialViewState);
+  trialViewRef.current = trialViewState;
+  const isBusy = isProcessing || isStartingTrial;
+  const contextMatches = (uid: string) =>
+    contextRef.current.isOpen && contextRef.current.uid === uid && auth.currentUser?.uid === uid;
+  const ticketIsCurrent = (ticket: OperationTicket) =>
+    contextMatches(ticket.uid) && requestGenerationRef.current === ticket.generation;
+
+  const latchExhausted = (uid: string) => {
+    exhaustedTrialUids.add(uid);
+    setExhaustedUid(uid);
+  };
+
+  const beginOperation = (): OperationTicket | null => {
+    if (!currentUid || contextRef.current.profile.id !== currentUid || !contextMatches(currentUid) || operationRef.current || isBusy) return null;
+    // Invalidates every status read started before this user action.
+    const ticket = { uid: currentUid, generation: ++requestGenerationRef.current };
+    operationRef.current = ticket;
+    return ticket;
+  };
+
+  const applyMutation = (ticket: OperationTicket, updates: Partial<UserProfile>) => {
+    if (!ticketIsCurrent(ticket)) return;
+    const prior = snapshotRef.current.uid === ticket.uid ? snapshotRef.current.profile : null;
+    setSnapshot({
+      uid: ticket.uid,
+      resolution: 'ready',
+      profile: { ...contextRef.current.profile, ...prior, ...updates, id: ticket.uid },
+    });
+    contextRef.current.onUpdateProfile(updates);
+  };
+
+  const finishOperation = (ticket: OperationTicket) => {
+    if (!ticketIsCurrent(ticket)) return;
+    operationRef.current = null;
+    setIsProcessing(false);
+    setIsStartingTrial(false);
+    setProcessingStatus('');
+  };
 
   useEffect(() => {
     if (isOpen) {
       setErrorMessage(initialMessage || null);
       setSuccessMessage(null);
-      setProductState((prev) => ({ ...prev, isLoading: true }));
+    }
+  }, [isOpen, initialMessage, currentUid]);
 
-      // Authoritative subscription status refresh directly from backend
-      const targetUid = profile.id || auth.currentUser?.uid;
-      const targetEmail = auth.currentUser?.email || profile.email;
-      if (targetUid) {
-        const currentUser = auth.currentUser;
-        if (currentUser) {
-          currentUser.getIdToken().then(async (token) => {
-            if (!token) return;
-            try {
-              const emailParam = targetEmail ? `&email=${encodeURIComponent(targetEmail)}` : '';
-              const url = getBillingApiUrl(`/api/billing/subscription-status?userId=${encodeURIComponent(targetUid)}${emailParam}`);
-              const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-              if (res.ok) {
-                const data = await res.json();
-                if (data && data.subscriptionStatus) {
-                  setBackendSubscriptionData(data);
-                  const isPaidSub = Boolean(data.isSubscribed);
-                  const isExp = data.subscriptionStatus === 'EXPIRED' || (Boolean(data.trialAlreadyUsed) && !isPaidSub);
-                  onUpdateProfile({
-                    subscriptionStatus: isPaidSub ? data.subscriptionStatus : (isExp ? 'EXPIRED' : data.subscriptionStatus),
-                    trialStatus: isExp ? 'expired' : data.trialStatus,
-                    trialAlreadyUsed: Boolean(data.trialAlreadyUsed || isExp),
-                    trialEverStarted: Boolean(data.trialEverStarted || data.trialAlreadyUsed || isExp),
-                    isTrialActive: !isExp && !isPaidSub && (data.trialStatus === 'active' || data.subscriptionStatus === 'TRIAL'),
-                    trialDaysRemaining: isExp ? 0 : (data.trialDaysRemaining ?? 0),
-                    isSubscribed: isPaidSub,
-                  });
-                }
-              }
-            } catch (err) {
-              console.warn('[SubscriptionModal] Error refreshing status:', err);
-            }
+  useEffect(() => {
+    const generation = ++requestGenerationRef.current;
+    const uid = currentUid;
+    const controller = new AbortController();
+    let cancelled = false;
+    operationRef.current = null;
+    setIsProcessing(false);
+    setIsStartingTrial(false);
+    setProcessingStatus('');
+    setRestoreDebug(null);
+    setSnapshot({ uid, resolution: 'checking', profile: null });
+    const isCurrent = () => !cancelled && contextMatches(uid) &&
+      generation === requestGenerationRef.current;
+    if (isOpen && uid) {
+      void (async () => {
+        try {
+          const token = await auth.currentUser?.getIdToken();
+          if (!isCurrent()) return;
+          if (!token) throw new Error('Authentication required.');
+          const url = getBillingApiUrl(`/api/billing/subscription-status?userId=${encodeURIComponent(uid)}`);
+          const response = await fetch(url, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal,
           });
+          const data = await response.json();
+          if (!isCurrent()) return;
+          if (!response.ok || data.success === false) throw new Error('Subscription check unavailable.');
+          if (data.userId && data.userId !== uid) throw new Error('Subscription account mismatch.');
+          const updates = readStatusProfile(data);
+          const confirmed = { ...contextRef.current.profile, ...updates, id: uid };
+          if (updates.trialAlreadyUsed || updates.trialStatus === 'expired') latchExhausted(uid);
+          setSnapshot({ uid, resolution: 'ready', profile: confirmed });
+          setErrorMessage(null);
+          // A historical rejection cannot be undone by a later NOT_STARTED snapshot.
+          const exhausted = exhaustedTrialUids.has(uid) &&
+            !getEffectiveSubscriptionStatus(confirmed).isSubscribed;
+          contextRef.current.onUpdateProfile(exhausted ? {
+            ...updates, subscriptionStatus: 'EXPIRED', trialStatus: 'expired',
+            trialAlreadyUsed: true, trialEverStarted: true, isTrialActive: false,
+          } : updates);
+        } catch (error) {
+          if (!isCurrent()) return;
+          console.warn('[SubscriptionModal] Status check unavailable.');
+          setSnapshot({ uid, resolution: 'unavailable', profile: null });
         }
-      }
+      })();
+    }
+    return () => {
+      cancelled = true;
+      controller.abort();
+      // Invalidate reads AND newer mutations when this modal closes, unmounts, or changes UID.
+      requestGenerationRef.current += 1;
+    };
+  }, [isOpen, currentUid]);
 
-      fetchGooglePlayProduct().then((res: GooglePlayProductResult) => {
+  useEffect(() => {
+    let cancelled = false;
+    const uid = currentUid;
+    if (isOpen) {
+      setProductState((prev) => ({ ...prev, isLoading: true }));
+      void fetchGooglePlayProduct().then((result: GooglePlayProductResult) => {
+        if (cancelled || !contextMatches(uid)) return;
         setProductState({
-          isLoading: false,
-          isAvailable: res.isAvailable,
-          product: res.product,
-          error: res.error || null,
+          isLoading: false, isAvailable: result.isAvailable,
+          product: result.product, error: result.error || null,
         });
+      }).catch(() => {
+        if (cancelled || !contextMatches(uid)) return;
+        setProductState({ isLoading: false, isAvailable: false, product: null, error: 'Unable to load Google Play plans.' });
       });
     }
-  }, [isOpen, initialMessage, profile.id]);
+    return () => { cancelled = true; };
+  }, [isOpen, currentUid]);
 
   if (!isOpen) return null;
 
   const handleStartTrial = async () => {
+    if (trialViewRef.current !== 'eligible' || exhaustedTrialUids.has(currentUid)) return;
+    const ticket = beginOperation();
+    if (!ticket) return;
     setIsStartingTrial(true);
     setErrorMessage(null);
     setSuccessMessage(null);
     try {
-      const res = await startFreeTrialServer(profile.id);
-      if (res.success && res.trialEndDate) {
-        onUpdateProfile({
-          trialStatus: 'active',
-          trialStartDate: res.trialStartDate,
-          trialEndDate: res.trialEndDate,
-          trialEverStarted: true,
-          trialAlreadyUsed: false,
-          subscriptionStatus: 'TRIAL',
-          isTrialActive: true,
+      const result = await startFreeTrialServer(ticket.uid);
+      if (!ticketIsCurrent(ticket)) return;
+      if (result.success && result.trialEndDate) {
+        applyMutation(ticket, {
+          trialStatus: 'active', trialStartDate: result.trialStartDate,
+          trialEndDate: result.trialEndDate, trialEverStarted: true,
+          trialAlreadyUsed: false, subscriptionStatus: 'TRIAL',
+          isTrialActive: true, isSubscribed: false,
+          subscriptionExpiryDate: null, subscriptionExpiryTime: null, expiryDate: null,
         });
         setSuccessMessage('🎉 7-day free trial activated! All features unlocked.');
-        try {
-          confetti({
-            particleCount: 60,
-            spread: 70,
-            origin: { y: 0.6 },
-          });
-        } catch {}
+        try { confetti({ particleCount: 60, spread: 70, origin: { y: 0.6 } }); } catch {}
+      } else if (result.trialAlreadyUsed || result.error === 'TRIAL_ALREADY_USED') {
+        latchExhausted(ticket.uid);
+        applyMutation(ticket, {
+          trialAlreadyUsed: true, trialEverStarted: true,
+          subscriptionStatus: 'EXPIRED', trialStatus: 'expired',
+          isTrialActive: false, isSubscribed: false,
+        });
+        // The exclusive exhausted card carries this message; no duplicate error banner.
+        setErrorMessage(null);
       } else {
-        if (res.trialAlreadyUsed || res.error === 'TRIAL_ALREADY_USED') {
-          onUpdateProfile({ trialAlreadyUsed: true, trialEverStarted: true, subscriptionStatus: 'EXPIRED', trialStatus: 'expired' });
-        }
-        setErrorMessage(res.message || res.error || 'Free trial already used. Please subscribe to continue.');
+        setErrorMessage(result.message || result.error || 'Unable to start trial. Please try again.');
       }
-    } catch (err: any) {
-      setErrorMessage(err?.message || 'Error activating free trial.');
+    } catch (error: any) {
+      if (ticketIsCurrent(ticket)) setErrorMessage(error?.message || 'Error activating free trial.');
     } finally {
-      setIsStartingTrial(false);
+      finishOperation(ticket);
     }
   };
 
   const handleStartPurchase = async () => {
+    const ticket = beginOperation();
+    if (!ticket) return;
     setIsProcessing(true);
     setErrorMessage(null);
     setSuccessMessage(null);
     setProcessingStatus('Starting Google Play Billing flow...');
-
     try {
-      const result = await launchGooglePlayPurchase(
-        profile.id,
-        (step) => {
-          setProcessingStatus(step);
-        },
-        selectedPlanId
-      );
-
+      const result = await launchGooglePlayPurchase(ticket.uid, (step) => {
+        if (ticketIsCurrent(ticket)) setProcessingStatus(step);
+      }, selectedPlanId);
+      if (!ticketIsCurrent(ticket)) return;
       if (result.success && result.profileUpdates) {
-        onUpdateProfile(result.profileUpdates);
+        applyMutation(ticket, result.profileUpdates);
         onSubscribe?.('property_agent_pro');
         setSuccessMessage('🎉 Subscription activated successfully!');
-
-        try {
-          confetti({
-            particleCount: 70,
-            spread: 75,
-            origin: { y: 0.6 },
-          });
-        } catch {}
-
-        setTimeout(() => {
-          onClose();
-        }, 1500);
+        try { confetti({ particleCount: 70, spread: 75, origin: { y: 0.6 } }); } catch {}
+        setTimeout(() => { if (ticketIsCurrent(ticket)) onClose(); }, 1500);
       } else {
         setErrorMessage(result.error || 'Failed to complete Google Play purchase');
       }
-    } catch (err: any) {
-      setErrorMessage(err?.message || 'Google Play purchase was interrupted.');
+    } catch (error: any) {
+      if (ticketIsCurrent(ticket)) setErrorMessage(error?.message || 'Google Play purchase was interrupted.');
     } finally {
-      setIsProcessing(false);
-      setProcessingStatus('');
+      finishOperation(ticket);
     }
   };
 
   const handleRestore = async () => {
+    const ticket = beginOperation();
+    if (!ticket) return;
     setIsProcessing(true);
     setErrorMessage(null);
     setSuccessMessage(null);
     setRestoreDebug(null);
     setProcessingStatus('Checking Google Play...');
-
     try {
-      const result = await restoreGooglePlayPurchases(profile.id, (step) => setProcessingStatus(step));
+      const result = await restoreGooglePlayPurchases(ticket.uid, (step) => {
+        if (ticketIsCurrent(ticket)) setProcessingStatus(step);
+      });
+      if (!ticketIsCurrent(ticket)) return;
       setRestoreDebug(result.debug ?? null);
       if (result.success && result.restored && result.profileUpdates) {
-        onUpdateProfile(result.profileUpdates);
+        applyMutation(ticket, result.profileUpdates);
         setSuccessMessage(result.message);
-        try {
-          confetti({ particleCount: 40, spread: 60, origin: { y: 0.6 } });
-        } catch {}
+        try { confetti({ particleCount: 40, spread: 60, origin: { y: 0.6 } }); } catch {}
       } else {
         setErrorMessage('No active subscription found for this account.');
       }
-    } catch (err) {
-      setErrorMessage('No active subscription found for this account.');
+    } catch {
+      if (ticketIsCurrent(ticket)) setErrorMessage('No active subscription found for this account.');
     } finally {
-      setIsProcessing(false);
-      setProcessingStatus('');
+      finishOperation(ticket);
     }
   };
 
   const selectedPlan = SUBSCRIPTION_PLANS[selectedPlanId] || SUBSCRIPTION_PLANS.quarterly;
 
+
+  const renderTrialContent = () => {
+    if (trialViewState === 'paid') return null;
+    if (trialViewState === 'exhausted') {
+      if (BYPASS_TRIAL_FOR_TESTING) return null;
+      return (
+        <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-700 rounded-2xl text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2.5">
+          <div className="w-7 h-7 rounded-xl bg-rose-600 text-white flex items-center justify-center flex-shrink-0 mt-0.5 shadow-2xs">
+            <AlertCircle className="w-3.5 h-3.5" />
+          </div>
+          <div>
+            <div className="font-bold text-rose-900 dark:text-rose-100 text-xs">
+              Free trial already used. Please subscribe to continue.
+            </div>
+            <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 leading-relaxed">
+              Your 7-day free trial has already been used for this account. Choose a plan below to continue adding leads, properties, and follow-ups.
+            </p>
+          </div>
+        </div>
+      );
+    } else if (trialViewState === 'active') {
+      return (
+        <div
+          className={`p-3.5 rounded-2xl border text-xs flex flex-col gap-2 transition-all ${
+            daysRemaining <= 2
+              ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700'
+              : daysRemaining <= 4
+              ? 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800'
+              : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700/60'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div
+                className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 text-white shadow-2xs ${
+                  daysRemaining <= 2 ? 'bg-amber-500' : 'bg-emerald-600'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+              </div>
+              <div className="min-w-0">
+                <div className="font-bold text-slate-900 dark:text-white text-xs truncate">
+                  Free Trial Active
+                </div>
+                <div
+                  className={`text-[11px] font-bold mt-0.5 ${
+                    daysRemaining <= 2
+                      ? 'text-amber-700 dark:text-amber-300'
+                      : 'text-emerald-700 dark:text-emerald-400'
+                  }`}
+                >
+                  {daysRemaining} {daysRemaining === 1 ? 'day' : 'days'} remaining
+                </div>
+              </div>
+            </div>
+            <div className="shrink-0 pl-2">
+              <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60 px-2.5 py-1 rounded-full whitespace-nowrap">
+                ₹0 Today
+              </span>
+            </div>
+          </div>
+
+          {effectiveProfile?.trialEndDate && (
+            <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 text-[11px] text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <span>{formatTrialEndDateTime(effectiveProfile?.trialEndDate)}</span>
+            </div>
+          )}
+        </div>
+      );
+    } else if (trialViewState === 'eligible') {
+      return (
+        <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-emerald-500/5 border-2 border-emerald-500/30 dark:border-emerald-500/20 text-xs flex flex-col gap-3 shadow-xs">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-slate-900 dark:text-white text-sm">
+                  7-Day Free Trial
+                </span>
+                <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded-full">
+                  Free • ₹0
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
+                Try all PropLead Pro features risk-free for 7 days. Start whenever you are ready.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            id="btn_modal_start_trial"
+            disabled={isBusy || trialViewState !== 'eligible'}
+            onClick={handleStartTrial}
+            className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
+          >
+            {isStartingTrial ? (
+              <>
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Activating Trial...</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Start 7-Day Free Trial Now</span>
+              </>
+            )}
+          </button>
+        </div>
+      );
+    }
+    return null;
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[94vh] animate-in fade-in zoom-in-95 duration-150">
+    <div
+      className="fixed inset-x-0 top-0 z-50 h-[100dvh] box-border bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-hidden"
+      style={{
+        paddingTop: 'max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px), 24px)',
+        paddingBottom: 'max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px), 16px)',
+      }}
+    >
+      <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-full min-h-0 animate-in fade-in zoom-in-95 duration-150">
         {/* Top Header */}
-        <div className="relative p-6 bg-gradient-to-b from-emerald-600 to-emerald-700 text-white text-center pb-6">
+        <div className="relative shrink-0 p-6 bg-gradient-to-b from-emerald-600 to-emerald-700 text-white text-center pb-6">
           <button
             id="btn_close_subscription_modal"
             onClick={onClose}
@@ -311,11 +527,11 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         </div>
 
         {/* Content Body */}
-        <div className="p-5 overflow-y-auto space-y-4 flex-1">
-          {subscriptionResolution !== 'ready' && (
+        <div className="p-5 overflow-y-auto overscroll-contain space-y-4 flex-1 min-h-0">
+          {(trialViewState === 'checking' || trialViewState === 'unavailable') && (
             <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-600 dark:text-slate-300 flex items-center gap-2">
-              <RefreshCw className={`w-4 h-4 ${subscriptionResolution === 'loading' ? 'animate-spin' : ''}`} />
-              <span>{subscriptionResolution === 'offline' ? 'Subscription check unavailable. Showing the last verified access.' : 'Checking subscription...'}</span>
+              <RefreshCw className={`w-4 h-4 ${trialViewState === 'checking' ? 'animate-spin' : ''}`} />
+              <span>{trialViewState === 'unavailable' ? 'Subscription check unavailable. Please try again.' : 'Checking subscription...'}</span>
             </div>
           )}
           {/* Status Message Banners */}
@@ -343,7 +559,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                 </span>
               </div>
               <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium">
-                {profile.planId === 'monthly' ? '₹79/month' : '₹199 / 3 months'}
+                {effectiveProfile?.planId === 'monthly' ? '₹79/month' : '₹199 / 3 months'}
               </span>
             </div>
           )}
@@ -367,7 +583,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
                 <span>Payment Issue with Google Play</span>
               </div>
               <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                {profile.paymentIssueMessage || 'Google Play could not renew your subscription. Please update your payment method.'}
+                {effectiveProfile?.paymentIssueMessage || 'Google Play could not renew your subscription. Please update your payment method.'}
               </p>
               <div className="flex items-center gap-2 pt-1">
                 <button
@@ -387,117 +603,8 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
             </div>
           )}
 
-          {/* Manual Free Trial Available Banner */}
-          {subscriptionResolution === 'ready' && trialStatus === 'not_started' && status !== 'ACTIVE' && status !== 'CANCELED_BUT_ACTIVE' && status !== 'PAYMENT_ISSUE' && !trialEverStarted && !trialAlreadyUsed && !profile.trialAlreadyUsed && (
-            <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-teal-500/10 to-emerald-500/5 border-2 border-emerald-500/30 dark:border-emerald-500/20 text-xs flex flex-col gap-3 shadow-xs">
-              <div className="flex items-start gap-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                  <Sparkles className="w-5 h-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-extrabold text-slate-900 dark:text-white text-sm">
-                      7-Day Free Trial
-                    </span>
-                    <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded-full">
-                      Free • ₹0
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
-                    Try all PropLead Pro features risk-free for 7 days. Start whenever you are ready.
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                id="btn_modal_start_trial"
-                disabled={isStartingTrial || isProcessing}
-                onClick={handleStartTrial}
-                className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
-              >
-                {isStartingTrial ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Activating Trial...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Start 7-Day Free Trial Now</span>
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-
-          {/* Dynamic Real Trial Countdown Indicator */}
-          {status === 'TRIAL' && !trialAlreadyUsed && !profile.trialAlreadyUsed && trialStatus === 'active' && daysRemaining > 0 && (
-            <div
-              className={`p-3.5 rounded-2xl border text-xs flex flex-col gap-2 transition-all ${
-                daysRemaining <= 2
-                  ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700'
-                  : daysRemaining <= 4
-                  ? 'bg-amber-50/70 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800'
-                  : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700/60'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div
-                    className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 text-white shadow-2xs ${
-                      daysRemaining <= 2 ? 'bg-amber-500' : 'bg-emerald-600'
-                    }`}
-                  >
-                    <Clock className="w-3.5 h-3.5" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="font-bold text-slate-900 dark:text-white text-xs truncate">
-                      Free Trial Active
-                    </div>
-                    <div
-                      className={`text-[11px] font-bold mt-0.5 ${
-                        daysRemaining <= 2
-                          ? 'text-amber-700 dark:text-amber-300'
-                          : 'text-emerald-700 dark:text-emerald-400'
-                      }`}
-                    >
-                      {daysRemaining} {daysRemaining === 1 ? 'day' : 'days'} remaining
-                    </div>
-                  </div>
-                </div>
-                <div className="shrink-0 pl-2">
-                  <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-900/60 px-2.5 py-1 rounded-full whitespace-nowrap">
-                    ₹0 Today
-                  </span>
-                </div>
-              </div>
-
-              {profile.trialEndDate && (
-                <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 text-[11px] text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  <span>{formatTrialEndDateTime(profile.trialEndDate)}</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Trial Already Used / Expired State */}
-          {!BYPASS_TRIAL_FOR_TESTING && subscriptionResolution === 'ready' && (status === 'EXPIRED' || trialAlreadyUsed || profile.trialAlreadyUsed || trialStatus === 'expired' || (!isSubscribed && trialEverStarted)) && !isSubscribed && (
-            <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-700 rounded-2xl text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2.5">
-              <div className="w-7 h-7 rounded-xl bg-rose-600 text-white flex items-center justify-center flex-shrink-0 mt-0.5 shadow-2xs">
-                <AlertCircle className="w-3.5 h-3.5" />
-              </div>
-              <div>
-                <div className="font-bold text-rose-900 dark:text-rose-100 text-xs">
-                  Free trial already used. Please subscribe to continue.
-                </div>
-                <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 leading-relaxed">
-                  Your 7-day free trial has already been used for this account. Choose a plan below to continue adding leads, properties, and follow-ups.
-                </p>
-              </div>
-            </div>
-          )}
+          {/* Exactly one trial view may render; paid access takes precedence. */}
+          {renderTrialContent()}
 
           {/* 2 PRICING CARDS (Selection: Default 3 Months) */}
           <div className="space-y-1.5">
@@ -640,59 +747,7 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
               Secure checkout via Google Play. Auto-renews. Cancel anytime.
             </span>
           </div>
-        </div>
-
-        {/* Bottom Actions */}
-        <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 space-y-2">
-          {/* Main Action Button */}
-          {status === 'ACTIVE' ? (
-            <button
-              id="btn_manage_subscription"
-              onClick={openGooglePlayManageSubscriptions}
-              className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold rounded-xl shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 text-sm transition-all"
-            >
-              <ExternalLink className="w-4 h-4" />
-              <span>Manage Google Play Subscription</span>
-            </button>
-          ) : (
-            <button
-              id="btn_subscribe_cta"
-              disabled={isProcessing || productState.isLoading}
-              onClick={handleStartPurchase}
-              className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60 text-white font-bold rounded-xl shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 text-sm transition-all cursor-pointer"
-            >
-              {isProcessing ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <CreditCard className="w-4 h-4" />
-              )}
-              <span>
-                {isProcessing
-                  ? processingStatus || 'Processing...'
-                  : selectedPlan.ctaText}
-              </span>
-            </button>
-          )}
-
-          {/* Secondary Actions */}
-          <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-0.5">
-            <button
-              id="btn_restore_purchase"
-              disabled={isProcessing}
-              onClick={handleRestore}
-              className="hover:text-emerald-600 dark:hover:text-emerald-400 underline font-medium flex items-center gap-1 cursor-pointer"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>Restore Purchase</span>
-            </button>
-            <button
-              id="btn_close_modal_bottom"
-              onClick={onClose}
-              className="hover:text-slate-800 dark:hover:text-slate-200 font-medium cursor-pointer"
-            >
-              {isLocked ? 'View-Only Mode' : 'Close'}
-            </button>
-          </div>
+          {/* Diagnostics share the body scroller; never expand the action footer. */}
           {restoreDebug && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] leading-5 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
               <div className="font-semibold">Temporary restore diagnostics</div>
@@ -716,6 +771,60 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
               )}
             </div>
           )}
+        </div>
+
+        {/* Bottom Actions */}
+        <div className="shrink-0 p-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 space-y-2">
+          {/* Main Action Button */}
+          {status === 'ACTIVE' ? (
+            <button
+              id="btn_manage_subscription"
+              onClick={openGooglePlayManageSubscriptions}
+              className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold rounded-xl shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 text-sm transition-all"
+            >
+              <ExternalLink className="w-4 h-4" />
+              <span>Manage Google Play Subscription</span>
+            </button>
+          ) : (
+            <button
+              id="btn_subscribe_cta"
+              disabled={isBusy || productState.isLoading}
+              onClick={handleStartPurchase}
+              className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] disabled:opacity-60 text-white font-bold rounded-xl shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 text-sm transition-all cursor-pointer"
+            >
+              {isProcessing ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <CreditCard className="w-4 h-4" />
+              )}
+              <span>
+                {isProcessing
+                  ? processingStatus || 'Processing...'
+                  : selectedPlan.ctaText}
+              </span>
+            </button>
+          )}
+
+          {/* Secondary Actions */}
+          <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-0.5">
+            <button
+              id="btn_restore_purchase"
+              disabled={isBusy}
+              onClick={handleRestore}
+              className="hover:text-emerald-600 dark:hover:text-emerald-400 underline font-medium flex items-center gap-1 cursor-pointer"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Restore Purchase</span>
+            </button>
+            <button
+              id="btn_close_modal_bottom"
+              onClick={onClose}
+              className="hover:text-slate-800 dark:hover:text-slate-200 font-medium cursor-pointer"
+            >
+              {isLocked ? 'View-Only Mode' : 'Close'}
+            </button>
+          </div>
+
         </div>
       </div>
     </div>

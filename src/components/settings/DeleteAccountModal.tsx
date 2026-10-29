@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback, useLayoutEffect } from 'react';
 import {
   AlertTriangle,
   X,
@@ -35,6 +35,62 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
   const [confirmText, setConfirmText] = useState<string>('');
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const confirmationInputRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [visibleViewport, setVisibleViewport] = useState<{ height: number; top: number } | null>(null);
+
+  const ensureConfirmationVisible = useCallback(() => {
+    const input = confirmationInputRef.current;
+    const body = bodyRef.current;
+    if (!input || !body || typeof document === 'undefined' || document.activeElement !== input) return;
+    const inputBounds = input.getBoundingClientRect();
+    const bodyBounds = body.getBoundingClientRect();
+    if (bodyBounds.height <= 0) return;
+    const gap = 12;
+    const delta = inputBounds.bottom > bodyBounds.bottom - gap
+      ? inputBounds.bottom - bodyBounds.bottom + gap
+      : inputBounds.top < bodyBounds.top + gap
+        ? inputBounds.top - bodyBounds.top - gap
+        : 0;
+    // Scroll only the confirmation body; never move the overlay, header, or footer.
+    if (Math.abs(delta) > 1) body.scrollTop += delta;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isOpen || typeof window === 'undefined') return;
+    const viewport = window.visualViewport;
+    const updateViewport = () => {
+      const height = viewport?.height ?? window.innerHeight;
+      const top = Math.max(0, viewport?.offsetTop ?? 0);
+      if (!Number.isFinite(height) || height <= 0) return;
+      setVisibleViewport((previous) =>
+        previous?.height === height && previous.top === top ? previous : { height, top });
+    };
+    updateViewport();
+    viewport?.addEventListener('resize', updateViewport);
+    viewport?.addEventListener('scroll', updateViewport);
+    window.addEventListener('resize', updateViewport);
+    return () => {
+      viewport?.removeEventListener('resize', updateViewport);
+      viewport?.removeEventListener('scroll', updateViewport);
+      window.removeEventListener('resize', updateViewport);
+    };
+  }, [isOpen]);
+
+  useLayoutEffect(() => {
+    if (!isOpen || typeof window === 'undefined') return;
+    ensureConfirmationVisible();
+    const frame = window.requestAnimationFrame(ensureConfirmationVisible);
+    return () => window.cancelAnimationFrame(frame);
+  }, [isOpen, isDeleting, errorMessage, visibleViewport?.height, visibleViewport?.top, ensureConfirmationVisible]);
+
+  const overlayStyle: React.CSSProperties = {
+    top: visibleViewport?.top ?? 0,
+    height: visibleViewport ? `${visibleViewport.height}px` : undefined,
+    paddingTop: 'max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px), 24px)',
+    paddingBottom: 'max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px), 16px)',
+  };
 
   if (!isOpen) return null;
 
@@ -132,11 +188,12 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex min-h-[100dvh] items-start justify-center overflow-y-auto bg-black/70 p-4 pb-[calc(2rem+env(safe-area-inset-bottom))] backdrop-blur-xs animate-in fade-in duration-200 sm:items-center"
+      className="fixed inset-x-0 top-0 z-50 flex h-[100dvh] box-border items-start justify-center overflow-hidden bg-black/70 p-4 backdrop-blur-xs animate-in fade-in duration-200 sm:items-center"
+      style={overlayStyle}
       onClick={isDeleting ? undefined : onClose}
     >
       <div
-        className="relative flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-rose-200 bg-white shadow-2xl dark:border-rose-900/60 dark:bg-slate-900"
+        className="relative flex max-h-full min-h-0 w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-rose-200 bg-white shadow-2xl dark:border-rose-900/60 dark:bg-slate-900"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -166,7 +223,7 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
         </div>
 
         {/* Body */}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 pb-6 sm:p-6 sm:pb-8 space-y-4 text-xs text-slate-600 dark:text-slate-300">
+        <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 pb-6 sm:p-6 sm:pb-8 space-y-4 text-xs text-slate-600 dark:text-slate-300">
           {isDeleting ? (
             /* Progress State */
             <div className="py-8 flex flex-col items-center justify-center text-center space-y-4 animate-in fade-in duration-200">
@@ -234,12 +291,8 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
                   type="text"
                   value={confirmText}
                   onChange={(e) => setConfirmText(e.target.value)}
-                  onFocus={(e) => {
-                    const input = e.currentTarget;
-                    window.setTimeout(() => {
-                      input.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }, 250);
-                  }}
+                  ref={confirmationInputRef}
+                  onFocus={ensureConfirmationVisible}
                   placeholder="DELETE"
                   disabled={isDeleting}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-rose-500"
@@ -257,7 +310,7 @@ export const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({
 
         {/* Footer */}
         {!isDeleting && (
-          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-5 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] dark:border-slate-800 dark:bg-slate-850">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 dark:border-slate-800 dark:bg-slate-850">
             <button
               type="button"
               disabled={isDeleting}

@@ -38,7 +38,7 @@ import {
 } from '../../utils/attachmentStorage';
 import { hasProAccess } from '../../utils/billing';
 import { PropertyTypeSpecificFields } from './PropertyTypeSpecificFields';
-import { getBhkLabel, isPropertyFieldVisible, PROPERTY_TYPE_AMENITIES } from '../../utils/propertyTypeFields';
+import { getBhkLabel, isPropertyFieldVisible, PROPERTY_TYPE_AMENITIES, sanitizePropertyForType } from '../../utils/propertyTypeFields';
 
 interface EditPropertyModalProps {
   isOpen: boolean;
@@ -309,6 +309,11 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
     setPhotos((prev) => prev.filter((_, photoIndex) => photoIndex !== index));
   };
 
+  const showSuperBuiltUpArea = isPropertyFieldVisible(propertyType, 'superBuiltUpAreaSqFt');
+  const showCarpetArea = isPropertyFieldVisible(propertyType, 'carpetAreaSqFt');
+  const specsColumns = ['floor', 'facing', 'furnishing'].filter((field) =>
+    isPropertyFieldVisible(propertyType, field as 'floor' | 'facing' | 'furnishing')).length;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (photoUploadBusyRef.current || isSubmitting) return;
@@ -335,7 +340,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
       return;
     }
 
-    const updatedProperty: Property = {
+    const updatedProperty = sanitizePropertyForType({
       ...property,
       ...extraFields,
       id: property.id, // Strictly preserve existing ID
@@ -363,7 +368,7 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
       documents: property.documents || [],
       createdAt: property.createdAt || new Date().toISOString().split('T')[0],
       updatedAt: new Date().toISOString().split('T')[0],
-    };
+    });
 
     try {
       setIsSubmitting(true);
@@ -558,10 +563,11 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    City
+                    City *
                   </label>
                   <input
                     type="text"
+                    required
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
                     className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-emerald-500 box-border"
@@ -570,8 +576,8 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
               </div>
 
               {/* Area */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
+              {(showSuperBuiltUpArea || showCarpetArea) && <div className={`grid grid-cols-1 ${showSuperBuiltUpArea && showCarpetArea ? 'sm:grid-cols-2' : ''} gap-3`}>
+                {showSuperBuiltUpArea && <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Super Built-Up Area (sq.ft)
                   </label>
@@ -581,9 +587,9 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                     onChange={(e) => setSuperBuiltUpAreaSqFt(Number(e.target.value))}
                     className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden box-border"
                   />
-                </div>
+                </div>}
 
-                <div>
+                {showCarpetArea && <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Carpet Area (sq.ft)
                   </label>
@@ -593,11 +599,11 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
                     onChange={(e) => setCarpetAreaSqFt(Number(e.target.value))}
                     className="w-full px-3 py-2 text-xs rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-hidden box-border"
                   />
-                </div>
-              </div>
+                </div>}
+              </div>}
 
               {/* Floor, Facing, Furnishing */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+              <div className={`grid grid-cols-1 ${specsColumns === 3 ? 'sm:grid-cols-3' : specsColumns === 2 ? 'sm:grid-cols-2' : ''} gap-2.5 text-xs`}>
                 {isPropertyFieldVisible(propertyType, 'floor') && <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Floor
