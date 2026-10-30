@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import {
   LeadPriority,
   LeadStatus,
@@ -340,13 +341,27 @@ export interface PropertyPhotoMetadata {
   fileName?: string;
 }
 
+// Normalize display sources only; persisted Storage URLs and metadata stay unchanged.
 export function getPropertyPhotoUrl(photo: unknown): string {
   if (!photo) return '';
-  if (typeof photo === 'string') return photo;
-  if (typeof photo !== 'object') return '';
-  const metadata = photo as PropertyPhotoMetadata;
-  return [metadata.downloadURL, metadata.downloadUrl, metadata.url]
-    .find((url): url is string => typeof url === 'string' && url.length > 0) || '';
+  const metadata = typeof photo === 'object' ? photo as PropertyPhotoMetadata : null;
+  const source = typeof photo === 'string' ? photo : metadata
+    ? [metadata.downloadURL, metadata.downloadUrl, metadata.url]
+      .find((url): url is string => typeof url === 'string' && url.trim().length > 0) || ''
+    : '';
+  const url = source.trim();
+  if (!url) return '';
+  if (/^(file|content):\/\//i.test(url)) return Capacitor.convertFileSrc(url);
+  // Recognize image signatures rather than treating arbitrary text/paths as Base64.
+  const base64 = url.replace(/\s/g, '');
+  const mimeType = base64.startsWith('/9j/') ? 'image/jpeg'
+    : base64.startsWith('iVBORw0KGgo') ? 'image/png'
+    : base64.startsWith('R0lGOD') ? 'image/gif'
+    : '';
+  if (mimeType && base64.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+    return `data:${mimeType};base64,${base64}`;
+  }
+  return url;
 }
 
 export function normalizePropertyPhotos(photos: (string | PropertyPhoto)[] | undefined | null): string[] {
