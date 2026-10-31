@@ -337,31 +337,76 @@ export interface PropertyPhotoMetadata {
   downloadURL?: string;
   downloadUrl?: string;
   url?: string;
+  webPath?: string;
+  uri?: string;
+  path?: string;
+  src?: string;
   storagePath?: string;
   fileName?: string;
+}
+
+function normalizePhotoSource(source: string): string {
+  const url = source.trim();
+  if (!url) return '';
+
+  // Native paths → WebView-accessible URL
+  if (/^(file|content):\/\//i.test(url) || (Capacitor.isNativePlatform() && url.startsWith('/'))) {
+    return Capacitor.convertFileSrc(url);
+  }
+
+  // Already usable
+  if (
+    url.startsWith('https://') ||
+    url.startsWith('http://') ||
+    url.startsWith('data:image/') ||
+    url.startsWith('blob:')
+  ) {
+    return url;
+  }
+
+  // Recognize image signatures rather than treating arbitrary text/paths as Base64.
+  const base64 = url.replace(/\s/g, '');
+  const mimeType = base64.startsWith('/9j/')
+    ? 'image/jpeg'
+    : base64.startsWith('iVBORw0KGgo')
+      ? 'image/png'
+      : base64.startsWith('R0lGOD')
+        ? 'image/gif'
+        : '';
+  if (mimeType && base64.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+    return `data:${mimeType};base64,${base64}`;
+  }
+
+  return url;
 }
 
 // Normalize display sources only; persisted Storage URLs and metadata stay unchanged.
 export function getPropertyPhotoUrl(photo: unknown): string {
   if (!photo) return '';
-  const metadata = typeof photo === 'object' ? photo as PropertyPhotoMetadata : null;
-  const source = typeof photo === 'string' ? photo : metadata
-    ? [metadata.downloadURL, metadata.downloadUrl, metadata.url]
-      .find((url): url is string => typeof url === 'string' && url.trim().length > 0) || ''
-    : '';
-  const url = source.trim();
-  if (!url) return '';
-  if (/^(file|content):\/\//i.test(url)) return Capacitor.convertFileSrc(url);
-  // Recognize image signatures rather than treating arbitrary text/paths as Base64.
-  const base64 = url.replace(/\s/g, '');
-  const mimeType = base64.startsWith('/9j/') ? 'image/jpeg'
-    : base64.startsWith('iVBORw0KGgo') ? 'image/png'
-    : base64.startsWith('R0lGOD') ? 'image/gif'
-    : '';
-  if (mimeType && base64.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
-    return `data:${mimeType};base64,${base64}`;
+
+  if (typeof photo === 'string') {
+    return normalizePhotoSource(photo);
   }
-  return url;
+
+  if (typeof photo === 'object' && photo !== null) {
+    const metadata = photo as PropertyPhotoMetadata;
+    const candidates = [
+      metadata.downloadURL,
+      metadata.downloadUrl,
+      metadata.url,
+      metadata.webPath,
+      metadata.uri,
+      metadata.path,
+      metadata.src,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        return normalizePhotoSource(candidate);
+      }
+    }
+  }
+
+  return '';
 }
 
 export function normalizePropertyPhotos(photos: (string | PropertyPhoto)[] | undefined | null): string[] {
