@@ -377,7 +377,8 @@ function normalizePhotoSource(source: string): string {
     return `data:${mimeType};base64,${base64}`;
   }
 
-  return url;
+  // A Storage object key or arbitrary text is not an image URL.
+  return '';
 }
 
 // Normalize display sources only; persisted Storage URLs and metadata stay unchanged.
@@ -401,7 +402,8 @@ export function getPropertyPhotoUrl(photo: unknown): string {
     ];
     for (const candidate of candidates) {
       if (typeof candidate === 'string' && candidate.trim().length > 0) {
-        return normalizePhotoSource(candidate);
+        const normalized = normalizePhotoSource(candidate);
+        if (normalized) return normalized;
       }
     }
   }

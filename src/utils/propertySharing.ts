@@ -1,14 +1,14 @@
 import { Property, UserProfile } from '../types';
 import { PROPERTY_TYPE_LABELS, normalizePropertyPhotos } from './formatters';
 import { openWhatsApp } from './whatsapp';
-import { savePublicPhotoShare } from '../services/firebaseService';
+import { savePublicPhotoShare, getPublicPhotoShareId } from '../services/firebaseService';
 
 /**
  * Get the public photo gallery share URL using Firebase Hosting domain
  * to prevent 404s and Google login barriers.
  */
 export function getPublicGalleryUrl(propertyId: string): string {
-  return `https://proplead-e5c6a.web.app/share/photos/${encodeURIComponent(propertyId)}`;
+  return `https://proplead-e5c6a.web.app/share/photos/${encodeURIComponent(getPublicPhotoShareId(propertyId))}`;
 }
 
 /**

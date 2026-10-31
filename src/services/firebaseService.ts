@@ -6,10 +6,12 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   onSnapshot,
   query,
   orderBy,
   writeBatch,
+  runTransaction,
   serverTimestamp,
   Unsubscribe,
 } from 'firebase/firestore';
@@ -724,6 +726,36 @@ export async function updateLeadInFirestore(userId: string, lead: Lead): Promise
   }), { merge: true });
 }
 
+// Completing a reminder must delete stored fields, not omit them from a merge payload.
+export async function completeLeadFollowUpInFirestore(userId: string, expected: Lead): Promise<Lead> {
+  if (auth.currentUser?.uid !== userId) throw new Error('Please sign in again.');
+  const leadRef = doc(db, 'users', userId, 'leads', expected.id);
+  const completed = await runTransaction(db, async transaction => {
+    if (auth.currentUser?.uid !== userId) throw new Error('Your account changed.');
+    const snapshot = await transaction.get(leadRef);
+    if (!snapshot.exists()) throw new Error('This lead no longer exists.');
+    const current = snapshot.data() as Lead;
+    if (!current.nextFollowUpDate) return { ...current, id: expected.id };
+    if (current.nextFollowUpDate !== expected.nextFollowUpDate ||
+        current.nextFollowUpTime !== expected.nextFollowUpTime) {
+      throw new Error('This follow-up changed. Reopen the lead before completing it.');
+    }
+    const activity = { id: `act_${Date.now()}`, leadId: expected.id,
+      type: 'followup_completed' as const, title: 'Follow-Up Completed',
+      description: current.nextFollowUpNote || 'Follow-up marked as completed.',
+      timestamp: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) };
+    const activities = [activity, ...(current.activities || [])];
+    const lastContactedAt = new Date().toISOString().split('T')[0];
+    const updatedAt = new Date().toISOString();
+    transaction.update(leadRef, { nextFollowUpDate: deleteField(), nextFollowUpTime: deleteField(),
+      nextFollowUpNote: deleteField(), nextFollowUpType: deleteField(), activities, lastContactedAt, updatedAt });
+    const { nextFollowUpDate, nextFollowUpTime, nextFollowUpNote, nextFollowUpType, ...rest } = current;
+    return { ...rest, id: expected.id, activities, lastContactedAt, updatedAt };
+  });
+  if (auth.currentUser?.uid !== userId) throw new Error('Your account changed.');
+  return completed;
+}
+
 export async function deleteLeadFromFirestore(userId: string, leadId: string): Promise<void> {
   const leadRef = doc(db, 'users', userId, 'leads', leadId);
   await deleteDoc(leadRef);
@@ -857,21 +889,32 @@ export async function batchDeletePropertiesFromFirestore(userId: string, propert
   }
 }
 
+// New shares are namespaced by the authenticated owner. Existing legacy links stay readable.
+export function getPublicPhotoShareId(propertyId: string): string {
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('Please sign in to share property photos.');
+  if (!propertyId || propertyId.includes('/')) throw new Error('Invalid property ID.');
+  return `${uid}__${propertyId}`;
+}
+
 export async function savePublicPhotoShare(propertyId: string, photoUrls: string[]): Promise<string> {
-  const shareId = propertyId;
+  const ownerUid = auth.currentUser?.uid;
+  const shareId = getPublicPhotoShareId(propertyId);
   const shareRef = doc(db, 'publicPhotoShares', shareId);
-  try {
-    await setDoc(shareRef, {
-      shareId,
-      propertyId,
-      photoUrls,
-      createdAt: new Date().toISOString(),
-    }, { merge: true });
-    return shareId;
-  } catch (err) {
-    console.error('[Firestore] savePublicPhotoShare error:', err);
-    throw err;
-  }
+  await runTransaction(db, async transaction => {
+    if (!ownerUid || auth.currentUser?.uid !== ownerUid) throw new Error('Your account changed. Please share again.');
+    const snapshot = await transaction.get(shareRef);
+    if (snapshot.exists() && snapshot.data().ownerUid !== ownerUid) {
+      throw new Error('This photo gallery belongs to another account.');
+    }
+    const now = new Date().toISOString();
+    transaction.set(shareRef, {
+      ownerUid, shareId, propertyId, photoUrls,
+      createdAt: snapshot.exists() ? snapshot.data().createdAt || now : now,
+      updatedAt: now,
+    });
+  });
+  return shareId;
 }
 
 export async function getPublicPhotoShare(shareId: string): Promise<string[]> {

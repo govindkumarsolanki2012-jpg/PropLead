@@ -560,9 +560,7 @@ export const ImportContactsModal: React.FC<ImportContactsModalProps> = ({
       priority: 'warm',
       source: 'Phone Contacts',
       notes: '',
-      nextFollowUpDate: today,
-      nextFollowUpTime: '11:30',
-      nextFollowUpNote: 'First follow-up call from imported phone contact',
+      // Imported contacts have no reminder until the agent explicitly schedules one.
       createdAt: today,
       updatedAt: today,
       voiceNotes: [],

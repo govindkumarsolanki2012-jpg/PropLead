@@ -76,6 +76,7 @@ export interface ActivityLog {
 }
 
 export interface VoiceNote {
+  storagePath?: string;
   id: string;
   leadId: string;
   audioUrl: string;

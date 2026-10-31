@@ -104,8 +104,26 @@ service cloud.firestore {
 
     // Public Photo Shares collection for WhatsApp property photo galleries
     match /publicPhotoShares/{shareId} {
-      allow read: if true;
-      allow write: if isAuthenticated();
+      // Anyone with a link may view that gallery; gallery enumeration is private.
+      allow get: if true;
+      allow list: if false;
+      allow create: if isAuthenticated()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.propertyId is string
+        && request.resource.data.shareId == shareId
+        && shareId == request.auth.uid + '__' + request.resource.data.propertyId
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid)/properties/$(request.resource.data.propertyId))
+        && request.resource.data.photoUrls is list
+        && request.resource.data.keys().hasOnly(['ownerUid', 'shareId', 'propertyId', 'photoUrls', 'createdAt', 'updatedAt']);
+      allow update: if isAuthenticated()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.propertyId == resource.data.propertyId
+        && request.resource.data.shareId == shareId
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid)/properties/$(resource.data.propertyId))
+        && request.resource.data.photoUrls is list
+        && request.resource.data.keys().hasOnly(['ownerUid', 'shareId', 'propertyId', 'photoUrls', 'createdAt', 'updatedAt']);
+      allow delete: if isAuthenticated() && resource.data.ownerUid == request.auth.uid;
     }
 
     // Fallback: deny all other paths

@@ -65,6 +65,8 @@ interface LeadDetailModalProps {
   profile?: UserProfile;
   properties?: Property[];
   onUpdateLead: (updated: Lead) => void;
+  onVoiceNotesChanged: (updated: Lead) => void;
+  onCompleteFollowUp: (lead: Lead) => Promise<void>;
   onDeleteLead: (leadId: string) => Promise<void> | void;
   onOpenWhatsApp: (lead: Lead) => void;
   onOpenSchedule: (lead: Lead) => void;
@@ -82,6 +84,8 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   profile,
   properties = [],
   onUpdateLead,
+  onVoiceNotesChanged,
+  onCompleteFollowUp,
   onDeleteLead,
   onOpenWhatsApp,
   onOpenSchedule,
@@ -97,6 +101,8 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isCompletingFollowUp, setIsCompletingFollowUp] = useState(false);
+  const [followUpError, setFollowUpError] = useState<string | null>(null);
 
   useEffect(() => { setActiveTab(initialTab); }, [lead.id, initialTab]);
 
@@ -135,36 +141,13 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   };
 
   // Mark Follow-Up Complete
-  const handleMarkFollowUpComplete = () => {
-    if (!hasProAccess(profile)) {
-      if (onRequirePro) {
-        onRequirePro('Follow-Ups');
-      } else {
-        onOpenSchedule(lead);
-      }
-      return;
-    }
-
-    const updatedActivities = [
-      {
-        id: `act_${Date.now()}`,
-        leadId: lead.id,
-        type: 'followup_completed' as const,
-        title: 'Follow-Up Completed',
-        description: lead.nextFollowUpNote || 'Follow-up marked as completed.',
-        timestamp: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
-      },
-      ...lead.activities,
-    ];
-
-    onUpdateLead({
-      ...lead,
-      nextFollowUpDate: undefined,
-      nextFollowUpTime: undefined,
-      nextFollowUpNote: undefined,
-      lastContactedAt: new Date().toISOString().split('T')[0],
-      activities: updatedActivities,
-    });
+  const handleMarkFollowUpComplete = async () => {
+    if (isCompletingFollowUp) return;
+    setIsCompletingFollowUp(true);
+    setFollowUpError(null);
+    try { await onCompleteFollowUp(lead); }
+    catch (error: any) { setFollowUpError(error?.message || 'Could not complete this follow-up. Please retry.'); }
+    finally { setIsCompletingFollowUp(false); }
   };
 
   // Add Quick Note
@@ -373,6 +356,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                 <button
                   type="button"
                   id="btn-lead-detail-mark-complete"
+                  disabled={isCompletingFollowUp}
                   onClick={(e) => {
                     e.stopPropagation();
                     if (!hasProAccess(profile)) {
@@ -388,7 +372,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                   className="px-2.5 py-1.5 bg-white dark:bg-slate-800 hover:bg-emerald-50 text-emerald-700 dark:text-emerald-300 rounded-lg text-xs font-bold border border-emerald-300 dark:border-emerald-700 flex items-center gap-1 transition-colors cursor-pointer"
                 >
                   <Check className="w-3.5 h-3.5" />
-                  <span className="hidden xs:inline">Done</span>
+                  <span className="hidden xs:inline">{isCompletingFollowUp ? 'Saving...' : 'Done'}</span>
                 </button>
               )}
               <button
@@ -412,6 +396,8 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               </button>
             </div>
           </div>
+
+          {followUpError && <p role="alert" className="text-xs text-rose-600">{followUpError}</p>}
 
           {/* Property Requirement Specifications Box */}
           <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2.5">
@@ -729,40 +715,8 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
               <VoiceNoteRecorder
                 leadId={lead.id}
                 voiceNotes={lead.voiceNotes || []}
-                onAddVoiceNote={(newVn) => {
-                  if (!hasProAccess(profile)) {
-                    if (onRequirePro) {
-                      onRequirePro('Voice Notes');
-                    } else if (onOpenSchedule) {
-                      onOpenSchedule(lead);
-                    }
-                    return;
-                  }
-                  if (!newVn || !newVn.audioUrl || newVn.audioUrl.trim().length < 20) {
-                    return;
-                  }
-                  onUpdateLead({
-                    ...lead,
-                    voiceNotes: [newVn, ...(lead.voiceNotes || [])],
-                    activities: [
-                      {
-                        id: `act_${Date.now()}`,
-                        leadId: lead.id,
-                        type: 'voice_note',
-                        title: 'Voice Note Recorded',
-                        description: newVn.note || `${newVn.durationSeconds}s audio memo recorded`,
-                        timestamp: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
-                      },
-                      ...lead.activities,
-                    ],
-                  });
-                }}
-                onDeleteVoiceNote={(id) => {
-                  onUpdateLead({
-                    ...lead,
-                    voiceNotes: (lead.voiceNotes || []).filter((v) => v.id !== id),
-                  });
-                }}
+                canManageVoiceNotes={hasProAccess(profile)}
+                onVoiceNotesChanged={onVoiceNotesChanged}
               />
             )}
 

@@ -64,6 +64,7 @@ import {
   subscribePropertiesFromFirestore,
   addLeadToFirestore,
   updateLeadInFirestore,
+  completeLeadFollowUpInFirestore,
   deleteLeadFromFirestore,
   batchDeleteLeadsFromFirestore,
   batchAddLeadsToFirestore,
@@ -1080,6 +1081,30 @@ export function App() {
     showToast('Lead details updated.');
   };
 
+  // These transactions have already persisted; update UI/cache without a second lead write.
+  const handlePersistedLeadChanged = (updatedLead: Lead) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || uid !== currentUser?.uid) return;
+    setLeads(previous => {
+      const updated = previous.map(item => item.id === updatedLead.id ? updatedLead : item);
+      saveStoredLeads(updated, uid);
+      return updated;
+    });
+    setDetailLead(previous => previous?.id === updatedLead.id ? updatedLead : previous);
+  };
+
+  const handleCompleteFollowUp = async (lead: Lead) => {
+    const uid = currentUser?.uid;
+    if (!uid || auth.currentUser?.uid !== uid) throw new Error('Please sign in again.');
+    const access = canUseProFeatures(profile, !isAuthResolved);
+    if (!access.allowed) throw new Error(access.message || 'An active plan is required.');
+    const completed = await completeLeadFollowUpInFirestore(uid, lead);
+    if (auth.currentUser?.uid !== uid) return;
+    handlePersistedLeadChanged(completed);
+    await cancelNotificationsForLead(lead.id, uid);
+    showToast('Follow-up completed.');
+  };
+
   const handleDeleteLead = async (leadId: string): Promise<void> => {
     cancelNotificationsForLead(leadId, currentUser?.uid);
     if (currentUser?.uid) {
@@ -1823,6 +1848,8 @@ export function App() {
           profile={profile}
           properties={properties}
           onUpdateLead={handleUpdateLead}
+          onVoiceNotesChanged={handlePersistedLeadChanged}
+          onCompleteFollowUp={handleCompleteFollowUp}
           onDeleteLead={handleDeleteLead}
           onOpenWhatsApp={(l) => setWhatsAppLead(l)}
           onOpenSchedule={(l) => guardLockedFeature('Follow-Ups', () => setScheduleLead(l))}

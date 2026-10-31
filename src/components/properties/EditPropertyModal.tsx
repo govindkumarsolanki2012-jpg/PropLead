@@ -230,6 +230,18 @@ export const EditPropertyModal: React.FC<EditPropertyModalProps> = ({
             throw new Error('The uploaded photo did not return a valid image URL.');
           }
           const savedPhoto = { ...photoMeta, downloadURL: downloadUrl, downloadUrl };
+          if (replacement) {
+            // Once upload succeeds, render its durable URL instead of a stale blob preview.
+            const previewUrl = replacementPreviewUrlsRef.current[replacement.index];
+            delete replacementPreviewUrlsRef.current[replacement.index];
+            setReplacementPreviews(previous => {
+              const next = { ...previous };
+              delete next[replacement.index];
+              return next;
+            });
+            setPreviewErrors(previous => ({ ...previous, [replacement.index]: false }));
+            if (previewUrl) URL.revokeObjectURL(previewUrl);
+          }
           // Replace in place: never splice/remove then append, especially for cover index 0.
           setPhotos((prev) => replacement
             ? prev.map((photo, index) => index === replacement.index ? savedPhoto : photo)

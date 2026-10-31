@@ -15,9 +15,10 @@ import {
   UploadCloud,
   Settings,
 } from 'lucide-react';
-import { VoiceNote } from '../../types';
+import { Lead, VoiceNote } from '../../types';
+import { auth } from '../../lib/firebase';
+import { saveVoiceNoteToCloud, deleteVoiceNoteFromCloud, deleteVoiceNoteFile } from '../../utils/voiceNoteStorage';
 import {
-  blobToDataUrl,
   formatAudioDuration,
   getAudioFromIndexedDB,
   getSupportedAudioMimeType,
@@ -35,13 +36,15 @@ import {
 interface VoiceNoteRecorderProps {
   leadId: string;
   voiceNotes: VoiceNote[];
-  onAddVoiceNote: (voiceNote: VoiceNote) => void;
-  onDeleteVoiceNote: (id: string) => void;
+  onVoiceNotesChanged: (lead: Lead) => void;
+  canManageVoiceNotes: boolean;
 }
 
 interface PendingRecording {
   id: string;
-  dataUrl: string;
+  blob: Blob;
+  previewUrl: string;
+  ownerUid: string;
   mimeType: string;
   durationSeconds: number;
 }
@@ -49,9 +52,18 @@ interface PendingRecording {
 export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   leadId,
   voiceNotes,
-  onAddVoiceNote,
-  onDeleteVoiceNote,
+  onVoiceNotesChanged,
+  canManageVoiceNotes,
 }) => {
+  const [isSaving, setIsSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [pendingAudioCleanup, setPendingAudioCleanup] = useState<VoiceNote | null>(null);
+  const operationBusyRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; canceledRef.current = true; };
+  }, []);
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [isStopping, setIsStopping] = useState<boolean>(false);
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
@@ -73,6 +85,10 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   const startTimeRef = useRef<number>(0);
   const canceledRef = useRef<boolean>(false);
   const audioElementRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    return () => { if (pendingRecording?.previewUrl) URL.revokeObjectURL(pendingRecording.previewUrl); };
+  }, [pendingRecording?.previewUrl]);
 
   // Check live microphone permission on mount and on app resume
   const refreshMicPermission = useCallback(async () => {
@@ -155,6 +171,9 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   };
 
   const startRecording = async () => {
+    if (operationBusyRef.current) return;
+    const recordingUid = auth.currentUser?.uid;
+    if (!recordingUid) { setErrorMessage('Please sign in before recording.'); return; }
     setErrorMessage(null);
     canceledRef.current = false;
     setPendingRecording(null);
@@ -267,14 +286,17 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
         }
 
         try {
-          // Convert blob to persistent Base64 Data URL (playable across sessions)
-          const dataUrl = await blobToDataUrl(audioBlob);
+          // Preview stays local; only a Storage download URL may enter Firestore.
+          if (!mountedRef.current || auth.currentUser?.uid !== recordingUid) return;
+          const previewUrl = URL.createObjectURL(audioBlob);
           const noteId = `vn_${Date.now()}`;
 
           // Set pending recording so user can play and preview before saving
           setPendingRecording({
             id: noteId,
-            dataUrl,
+            blob: audioBlob,
+            previewUrl,
+            ownerUid: recordingUid,
             mimeType: finalMime,
             durationSeconds: elapsedSeconds,
           });
@@ -395,52 +417,55 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   };
 
   const savePendingRecording = async () => {
-    if (!pendingRecording || !pendingRecording.dataUrl) return;
-
+    if (!pendingRecording || operationBusyRef.current) return;
+    if (!canManageVoiceNotes) { setErrorMessage('An active trial or plan is required to save voice notes.'); return; }
+    if (auth.currentUser?.uid !== pendingRecording.ownerUid) {
+      setErrorMessage('Your account changed. Please record again.'); return;
+    }
+    const recording = pendingRecording;
+    operationBusyRef.current = true;
+    setIsSaving(true);
+    setErrorMessage(null);
     try {
-      // 1. Save to IndexedDB for offline reliability
-      await saveAudioToIndexedDB(
-        pendingRecording.id,
-        pendingRecording.dataUrl,
-        pendingRecording.mimeType
-      );
-
-      // 2. Create VoiceNote attached to this lead
-      const newNote: VoiceNote = {
-        id: pendingRecording.id,
-        leadId,
-        audioUrl: pendingRecording.dataUrl,
-        durationSeconds: pendingRecording.durationSeconds,
-        createdAt: new Date().toISOString(),
-        note: voiceTextNote.trim() || `Voice Memo (${formatAudioDuration(pendingRecording.durationSeconds)})`,
-        mimeType: pendingRecording.mimeType,
-      };
-
-      onAddVoiceNote(newNote);
+      const updatedLead = await saveVoiceNoteToCloud(leadId, recording.id, recording.blob,
+        recording.durationSeconds, voiceTextNote.trim() || `Voice Memo (${formatAudioDuration(recording.durationSeconds)})`);
+      if (!mountedRef.current || auth.currentUser?.uid !== recording.ownerUid) return;
+      // This optional cache contains the cloud URL, never authoritative audio bytes.
+      const savedNote = updatedLead.voiceNotes.find(note => note.id === recording.id)!;
+      await saveAudioToIndexedDB(savedNote.id, savedNote.audioUrl, savedNote.mimeType || 'audio/webm', recording.ownerUid);
+      if (!mountedRef.current || auth.currentUser?.uid !== recording.ownerUid) return;
+      onVoiceNotesChanged(updatedLead);
+      audioElementRef.current?.pause();
+      setPlayingId(null);
+      setPlaybackProgress(null);
       setVoiceTextNote('');
       setPendingRecording(null);
       setSavedSuccess(true);
-      setTimeout(() => {
-        setSavedSuccess(false);
-      }, 4000);
-    } catch (err) {
-      console.error('[VoiceNoteRecorder] Error saving pending voice note:', err);
-      setErrorMessage('Failed to save voice note. Please try again.');
+      setTimeout(() => { if (mountedRef.current) setSavedSuccess(false); }, 4000);
+    } catch (error) {
+      console.error('[VoiceNoteRecorder] Cloud save failed:', error);
+      if (mountedRef.current) setErrorMessage('Voice note upload/save failed. Your recording is still here; please retry.');
+    } finally {
+      operationBusyRef.current = false;
+      if (mountedRef.current) setIsSaving(false);
     }
   };
 
   const handleAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    const uploadUid = auth.currentUser?.uid;
+    if (!file || !uploadUid || operationBusyRef.current) return;
 
     try {
-      const dataUrl = await blobToDataUrl(file);
+      const previewUrl = URL.createObjectURL(file);
       const noteId = `vn_${Date.now()}`;
       const finalMime = file.type || 'audio/webm';
 
       setPendingRecording({
         id: noteId,
-        dataUrl,
+        blob: file,
+        previewUrl,
+        ownerUid: uploadUid,
         mimeType: finalMime,
         durationSeconds: 0,
       });
@@ -536,19 +561,50 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
   );
 
   const handleDelete = async (noteId: string) => {
-    if (playingId === noteId) {
-      if (audioElementRef.current) {
-        audioElementRef.current.pause();
+    if (operationBusyRef.current) return;
+    const voiceNote = voiceNotes.find(note => note.id === noteId);
+    const uid = auth.currentUser?.uid;
+    if (!voiceNote || !uid) return;
+    operationBusyRef.current = true;
+    setDeletingId(noteId);
+    setErrorMessage(null);
+    try {
+      if (playingId === noteId) {
+        audioElementRef.current?.pause();
+        setPlayingId(null);
+        setPlaybackProgress(null);
       }
-      setPlayingId(null);
-      setPlaybackProgress(null);
+      const result = await deleteVoiceNoteFromCloud(leadId, voiceNote);
+      if (!mountedRef.current || auth.currentUser?.uid !== uid) return;
+      if (result.lead) onVoiceNotesChanged(result.lead);
+      await deleteAudioFromIndexedDB(noteId, uid);
+      if (result.cleanupPending) {
+        setPendingAudioCleanup(voiceNote);
+        setErrorMessage('Voice note removed, but its audio file cleanup failed. Please retry cleanup.');
+      }
+    } catch (error) {
+      console.error('[VoiceNoteRecorder] Delete failed:', error);
+      if (mountedRef.current) setErrorMessage('Could not delete this voice note. Please try again.');
+    } finally {
+      operationBusyRef.current = false;
+      if (mountedRef.current) setDeletingId(null);
     }
-    await deleteAudioFromIndexedDB(noteId);
-    onDeleteVoiceNote(noteId);
+  };
+
+  const retryAudioCleanup = async () => {
+    if (!pendingAudioCleanup || operationBusyRef.current) return;
+    operationBusyRef.current = true;
+    try {
+      await deleteVoiceNoteFile(pendingAudioCleanup);
+      if (mountedRef.current) { setPendingAudioCleanup(null); setErrorMessage(null); }
+    } catch (error) { console.error('[VoiceNoteRecorder] Audio cleanup retry failed:', error); }
+    finally { operationBusyRef.current = false; }
   };
 
   return (
     <div className="w-full max-w-full min-w-0 space-y-3">
+      {pendingAudioCleanup && <button type="button" onClick={retryAudioCleanup}
+        className="text-xs font-semibold text-rose-700 underline">Retry audio cleanup</button>}
       {/* Error Message Alert */}
       {errorMessage && (
         <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-xl flex items-start justify-between gap-2.5 text-xs text-rose-800 dark:text-rose-200 animate-in fade-in">
@@ -656,7 +712,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
                   onClick={() =>
                     togglePlay(
                       pendingRecording.id,
-                      pendingRecording.dataUrl,
+                      pendingRecording.previewUrl,
                       pendingRecording.durationSeconds
                     )
                   }
@@ -707,6 +763,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
             <div className="flex items-center justify-end gap-2 pt-1 border-t border-emerald-200/60 dark:border-emerald-800/60">
               <button
                 type="button"
+                disabled={isSaving}
                 onClick={discardPendingRecording}
                 className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
               >
@@ -715,11 +772,12 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
               </button>
               <button
                 type="button"
+                disabled={isSaving}
                 onClick={savePendingRecording}
                 className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
               >
                 <Check className="w-3.5 h-3.5" />
-                <span>Save Voice Note</span>
+                <span>{isSaving ? 'Uploading voice note...' : 'Save Voice Note'}</span>
               </button>
             </div>
           </div>
@@ -761,7 +819,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
               </div>
             </div>
             <p className="text-[11px] text-slate-400 dark:text-slate-500 px-1 leading-relaxed">
-              Audio is saved locally and synced with this lead profile for playback anytime.
+              Saved voice recordings are stored securely in the cloud with this lead.
             </p>
 
             {/* Simple Saved successfully message */}
@@ -874,6 +932,7 @@ export const VoiceNoteRecorder: React.FC<VoiceNoteRecorderProps> = ({
                     )}
                     <button
                       type="button"
+                      disabled={Boolean(deletingId) || isSaving}
                       onClick={() => handleDelete(vn.id)}
                       className="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center justify-center transition-colors cursor-pointer"
                       title="Delete voice note"

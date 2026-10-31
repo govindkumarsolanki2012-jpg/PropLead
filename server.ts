@@ -479,7 +479,7 @@ async function listFirestoreDocuments(collectionPath: string, accessToken: strin
   const documentPaths: string[] = [];
   let pageToken = '';
   do {
-    const query = new URLSearchParams({ pageSize: '100' });
+    const query = new URLSearchParams({ pageSize: '100', showMissing: 'true' });
     if (pageToken) query.set('pageToken', pageToken);
     const res = await fetch(
       `${FIRESTORE_REST_BASE}/${encodeFirestorePath(collectionPath)}?${query.toString()}`,
@@ -603,7 +603,7 @@ async function listFirestoreDocumentNames(collectionPath: string, accessToken: s
       `${FIRESTORE_REST_BASE}/${encodeFirestorePath(collectionPath)}?${query.toString()}`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
-    if (!res.ok) break;
+    if (!res.ok) throw new Error(`Could not enumerate user documents: ${await readDeletionApiError(res)}`);
     const payload = (await res.json()) as { documents?: Array<{ name?: string }>; nextPageToken?: string };
     for (const doc of payload.documents || []) {
       if (doc.name) documentNames.push(doc.name);
@@ -630,7 +630,7 @@ async function batchDeleteFirestoreDocuments(documentNames: string[], accessToke
       }),
     });
     if (!res.ok) {
-      console.warn(`[Background Cleanup] Batch delete notice (${res.status}):`, await res.text());
+      throw new Error(`Could not delete user documents: ${await readDeletionApiError(res)}`);
     }
   }
 }
@@ -645,23 +645,25 @@ async function deleteUserStorageObjectsFast(uid: string, accessToken: string): P
       `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(FIREBASE_STORAGE_BUCKET)}/o?${query.toString()}`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
-    if (listRes.status === 404 || !listRes.ok) break;
+    if (listRes.status === 404) return; // A missing bucket contains no user objects.
+    if (!listRes.ok) throw new Error(`Could not list user files: ${await readDeletionApiError(listRes)}`);
     const payload = (await listRes.json()) as { items?: Array<{ name?: string }>; nextPageToken?: string };
     const items = payload.items || [];
     if (items.length > 0) {
       const BATCH_SIZE = 20;
       for (let i = 0; i < items.length; i += BATCH_SIZE) {
         const batch = items.slice(i, i + BATCH_SIZE);
-        await Promise.allSettled(
-          batch.map((item) => {
+        await Promise.all(
+          batch.map(async (item) => {
             if (!item.name || !item.name.startsWith(prefix)) return Promise.resolve();
-            return fetch(
+            const deleted = await fetch(
               `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(FIREBASE_STORAGE_BUCKET)}/o/${encodeURIComponent(item.name)}`,
               {
                 method: 'DELETE',
                 headers: { Authorization: `Bearer ${accessToken}` },
               }
             );
+            if (!deleted.ok && deleted.status !== 404) throw new Error(`Could not delete user file: ${await readDeletionApiError(deleted)}`);
           })
         );
       }
@@ -682,79 +684,67 @@ async function deleteFirebaseAuthUser(uid: string, accessToken: string): Promise
       body: JSON.stringify({ localId: uid }),
     }
   );
-  if (!res.ok && res.status !== 400 && res.status !== 404) {
-    throw new Error(`Could not delete Firebase Authentication user: ${await readDeletionApiError(res)}`);
+  if (!res.ok) {
+    const error = await readDeletionApiError(res);
+    // Only an explicitly absent user is idempotent success; other HTTP 400s are failures.
+    if (!/USER_NOT_FOUND/.test(error)) throw new Error(`Could not delete Firebase Authentication user: ${error}`);
   }
 }
 
 async function processAccountDeletionJob(uid: string): Promise<void> {
   const adminAccessToken = await getFirebaseAdminAccessToken();
-  if (!adminAccessToken) {
-    console.warn(`[Background Cleanup] No admin access token available for deletion job ${uid}`);
-    return;
-  }
-
-  // 1. Mark status as processing
-  await createOrUpdateDeletionJob({
-    uid,
-    status: 'processing',
-    requestedAt: new Date().toISOString(),
-    retryCount: 0,
-  }, adminAccessToken);
-
+  if (!adminAccessToken) throw new Error('Deletion credentials are unavailable.');
+  const job = await fetchDeletionJobFromFirestore(uid);
+  if (!job) throw new Error('Durable account deletion job is unavailable.');
+  const attempt = (job.retryCount || 0) + 1;
   try {
-    // 2. Discover and batch-delete all Firestore subcollections in parallel
-    const [leads, properties, templates, notifs] = await Promise.all([
-      listFirestoreDocumentNames(`users/${uid}/leads`, adminAccessToken),
-      listFirestoreDocumentNames(`users/${uid}/properties`, adminAccessToken),
-      listFirestoreDocumentNames(`users/${uid}/templates`, adminAccessToken),
-      listFirestoreDocumentNames(`users/${uid}/notifications`, adminAccessToken),
-    ]);
+    if (!await createOrUpdateDeletionJob({ ...job, status: 'processing', retryCount: attempt,
+      completedAt: null, lastError: null }, adminAccessToken)) throw new Error('Could not persist deletion progress.');
+    if (!await markUserAccountDeletedInFirestore(uid, adminAccessToken)) throw new Error('Could not lock account during deletion.');
 
-    const allDocs = [...leads, ...properties, ...templates, ...notifs];
-    if (allDocs.length > 0) {
-      await batchDeleteFirestoreDocuments(allDocs, adminAccessToken);
-    }
-
-    // 3. Delete user Cloud Storage objects fast with parallel batches
+    // Discover every user subcollection, including descendants with missing parent documents.
+    const documentNames: string[] = [];
+    const collect = async (documentPath: string): Promise<void> => {
+      for (const collectionId of await listFirestoreChildCollections(documentPath, adminAccessToken)) {
+        for (const childPath of await listFirestoreDocuments(`${documentPath}/${collectionId}`, adminAccessToken)) {
+          if (!childPath.startsWith(`users/${uid}/`)) throw new Error('Unsafe account deletion path.');
+          await collect(childPath);
+          documentNames.push(`projects/${FIRESTORE_PROJECT_ID}/databases/${FIRESTORE_DATABASE_ID}/documents/${childPath}`);
+        }
+      }
+    };
+    await collect(`users/${uid}`);
+    await batchDeleteFirestoreDocuments(documentNames, adminAccessToken);
     await deleteUserStorageObjectsFast(uid, adminAccessToken);
 
-    // 4. Delete root user document & subscriptions document
-    await Promise.allSettled([
-      fetch(`${FIRESTORE_REST_BASE}/users/${encodeURIComponent(uid)}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${adminAccessToken}` },
-      }),
-      fetch(`${FIRESTORE_REST_BASE}/subscriptions/${encodeURIComponent(uid)}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${adminAccessToken}` },
-      }),
-    ]);
+    // New owner-scoped public gallery metadata belongs to this account too.
+    const sharesResponse = await fetch(`${FIRESTORE_REST_BASE}:runQuery`, {
+      method: 'POST', headers: { Authorization: `Bearer ${adminAccessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ structuredQuery: { from: [{ collectionId: 'publicPhotoShares' }],
+        where: { fieldFilter: { field: { fieldPath: 'ownerUid' }, op: 'EQUAL', value: { stringValue: uid } } } } }),
+    });
+    if (!sharesResponse.ok) throw new Error('Could not enumerate owned photo galleries.');
+    const shares = await sharesResponse.json() as Array<{ document?: { name?: string } }>;
+    await batchDeleteFirestoreDocuments(shares.flatMap(item => item.document?.name ? [item.document.name] : []), adminAccessToken);
 
-    // 5. Delete Firebase Auth user if still present
-    await deleteFirebaseAuthUser(uid, adminAccessToken).catch(() => {});
-
-    // 6. Mark job completed
-    await createOrUpdateDeletionJob({
-      uid,
-      status: 'completed',
-      requestedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
-      retryCount: 0,
-      lastError: null,
-    }, adminAccessToken);
+    for (const documentPath of [`users/${uid}`, `subscriptions/${uid}`]) {
+      const response = await fetch(`${FIRESTORE_REST_BASE}/${encodeFirestorePath(documentPath)}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${adminAccessToken}` },
+      });
+      if (!response.ok && response.status !== 404) throw new Error('Could not remove account document.');
+    }
+    await deleteFirebaseAuthUser(uid, adminAccessToken);
+    if (!await createOrUpdateDeletionJob({ ...job, status: 'completed', retryCount: attempt,
+      completedAt: new Date().toISOString(), lastError: null }, adminAccessToken)) {
+      throw new Error('Could not persist deletion completion.');
+    }
     revokedUids.delete(uid);
-
-    console.log(`[Background Cleanup] Successfully completed purge for user ${uid}.`);
-  } catch (err: any) {
-    console.warn(`[Background Cleanup] Notice during cleanup for user ${uid}:`, err);
-    await createOrUpdateDeletionJob({
-      uid,
-      status: 'failed',
-      requestedAt: new Date().toISOString(),
-      retryCount: 1,
-      lastError: err?.message || String(err),
-    }, adminAccessToken);
+    console.log('[Background Cleanup] Account cleanup completed.');
+  } catch (error: any) {
+    await createOrUpdateDeletionJob({ ...job, status: 'failed', retryCount: attempt,
+      completedAt: null, lastError: error?.message || 'Account cleanup failed.' }, adminAccessToken);
+    console.warn('[Background Cleanup] Account cleanup failed; job retained for retry.');
+    throw error;
   }
 }
 
@@ -763,45 +753,36 @@ let isDeletionWorkerRunning = false;
 async function runDeletionWorkerCycle(): Promise<void> {
   if (isDeletionWorkerRunning) return;
   isDeletionWorkerRunning = true;
-
   try {
-    const adminAccessToken = await getFirebaseAdminAccessToken();
-    if (!adminAccessToken) return;
-
-    const listUrl = `${FIRESTORE_REST_BASE}/accountDeletionJobs?pageSize=50`;
-    const res = await fetch(listUrl, {
-      headers: { Authorization: `Bearer ${adminAccessToken}` },
-    });
-    if (!res.ok) return;
-
-    const data = (await res.json()) as { documents?: Array<{ name: string; fields?: Record<string, any> }> };
-    const docs = data.documents || [];
-
-    for (const doc of docs) {
-      const uid = doc.fields?.uid?.stringValue;
-      const status = doc.fields?.status?.stringValue;
-      const retryCount = parseInt(doc.fields?.retryCount?.integerValue || '0', 10);
-      const updatedAtStr = doc.fields?.updatedAt?.stringValue || doc.fields?.requestedAt?.stringValue;
-      const updatedMs = updatedAtStr ? new Date(updatedAtStr).getTime() : 0;
-      const isStaleProcessing = status === 'processing' && Date.now() - updatedMs > 10 * 60 * 1000;
-
-      if (uid) {
-        if (status === 'pending' || status === 'processing' || (status === 'failed' && retryCount < 5) || isStaleProcessing) {
-          revokedUids.add(uid);
-        } else if (status === 'completed') {
-          revokedUids.delete(uid);
-        }
-
-        if (status === 'pending' || (status === 'failed' && retryCount < 5) || isStaleProcessing) {
-          await processAccountDeletionJob(uid);
+    const token = await getFirebaseAdminAccessToken();
+    if (!token) return;
+    let pageToken = '';
+    do {
+      const query = new URLSearchParams({ pageSize: '50' });
+      if (pageToken) query.set('pageToken', pageToken);
+      const response = await fetch(`${FIRESTORE_REST_BASE}/accountDeletionJobs?${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error('Could not read deletion queue.');
+      const page = await response.json() as { documents?: Array<{ fields?: Record<string, any> }>; nextPageToken?: string };
+      for (const document of page.documents || []) {
+        const fields = document.fields || {};
+        const uid = fields.uid?.stringValue;
+        const status = fields.status?.stringValue;
+        const retries = parseInt(fields.retryCount?.integerValue || '0', 10);
+        const updated = new Date(fields.updatedAt?.stringValue || fields.requestedAt?.stringValue || 0).getTime();
+        const stale = status === 'processing' && Date.now() - updated > 10 * 60 * 1000;
+        if (!uid) continue;
+        if (status === 'completed') { revokedUids.delete(uid); continue; }
+        revokedUids.add(uid);
+        if (retries < 5 && (status === 'pending' || status === 'failed' || stale)) {
+          await processAccountDeletionJob(uid).catch(() => {}); // Other queued jobs must still run.
         }
       }
-    }
-  } catch (err) {
-    console.warn('[Deletion Worker Cycle] Notice:', err);
-  } finally {
-    isDeletionWorkerRunning = false;
-  }
+      pageToken = page.nextPageToken || '';
+    } while (pageToken);
+  } catch (error) { console.warn('[Deletion Worker Cycle] Queue processing failed:', error); }
+  finally { isDeletionWorkerRunning = false; }
 }
 
 // Background cleanup worker: runs 5 seconds after startup, then every 60 seconds
@@ -3277,26 +3258,19 @@ async function startServer() {
         existingSub?.subscriptionStatus === 'TRIAL'
       );
 
-      // Immediately revoke in-memory access & billing cache
+      // A successful response requires a durable job and a persisted account lock.
+      const queued = await createOrUpdateDeletionJob({
+        uid: verifiedUid, email: verified.email, status: 'pending',
+        requestedAt: new Date().toISOString(), retryCount: 0, lastError: null,
+        completedAt: null, trialEverStarted: hadTrial,
+      }, adminAccessToken);
+      if (!queued) throw new Error('Could not queue account deletion. Please retry.');
+      if (!await markUserAccountDeletedInFirestore(verifiedUid, adminAccessToken)) {
+        throw new Error('Could not lock the account for deletion. Cleanup remains queued.');
+      }
       revokedUids.add(verifiedUid);
       subscriptionStore.delete(verifiedUid);
       persistSubscriptionStoreToDisk();
-
-      // 3. Mark account as deleted/disabled in durable storage (Firestore /users/{uid})
-      // This immediately causes Firestore security rules to reject any further reads/writes
-      await markUserAccountDeletedInFirestore(verifiedUid, adminAccessToken);
-
-      // 4. Create durable background deletion job in Firestore (/accountDeletionJobs/{uid})
-      await createOrUpdateDeletionJob({
-        uid: verifiedUid,
-        email: typeof req.body?.email === 'string' ? req.body.email : verified.email,
-        status: 'pending',
-        requestedAt: new Date().toISOString(),
-        retryCount: 0,
-        lastError: null,
-        completedAt: null,
-        trialEverStarted: hadTrial,
-      }, adminAccessToken);
 
       // 5. Attempt Firebase Auth user deletion on server where safely possible
       let authDeletedOnServer = false;
