@@ -4,6 +4,7 @@ import { storage, auth, db } from '../lib/firebase';
 import { cleanFirestorePayload } from '../services/firebaseService';
 import { Attachment, Lead, ActivityLog, PropertyPhoto } from '../types';
 import { Capacitor } from '@capacitor/core';
+import { preparePropertyPhoto } from './propertyPhotoProcessing';
 
 export const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024; // 10MB limit
 
@@ -532,8 +533,8 @@ export async function uploadPropertyPhotoToStorage({
   // Reject empty / non-image data before compression or upload
   assertValidImageBlob(resolved.blob, 'Selected photo');
 
-  // 2. Compress image client-side
-  const compressedBlob = await compressImage(resolved.blob, resolved.fileName, 1600, 0.80);
+  // Preserve good originals; never upload a black result from WebView canvas conversion.
+  const compressedBlob = await preparePropertyPhoto(resolved.blob);
   assertValidImageBlob(compressedBlob, 'Compressed photo');
 
   // 3. Storage path strictly inside users/{currentUserUid}/properties/{propertyId}/photos/{uniqueFileName}
