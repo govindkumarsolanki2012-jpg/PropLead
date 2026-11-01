@@ -21,6 +21,7 @@ export type RestoreDiagnosticCode =
   | 'CLIENT_NO_PLAY_PURCHASE'
   | 'BACKEND_VERIFY_FAILED'
   | 'TOKEN_OWNER_MISMATCH'
+  | 'SUBSCRIPTION_RECOVERY_REQUIRED'
   | 'FIREBASE_TOKEN_FAILED'
   | 'RESTORE_NOT_SUPPORTED'
   | 'RESTORE_PENDING';
@@ -1354,6 +1355,8 @@ export async function restoreGooglePlayPurchases(
       const code: RestoreDiagnosticCode =
         data?.code === 'TOKEN_OWNER_MISMATCH' || data?.error === 'PURCHASE_TOKEN_OWNED_BY_ANOTHER_USER'
           ? 'TOKEN_OWNER_MISMATCH'
+          : data?.code === 'SUBSCRIPTION_RECOVERY_REQUIRED' || data?.error === 'SUBSCRIPTION_RECOVERY_REQUIRED'
+            ? 'SUBSCRIPTION_RECOVERY_REQUIRED'
           : 'BACKEND_VERIFY_FAILED';
       console.warn('[Google Play Restore Notice - Server Response]', {
         endpoint: restoreEndpoint,
@@ -1365,10 +1368,12 @@ export async function restoreGooglePlayPurchases(
         success: false,
         restored: false,
         code,
-        billingUnavailable: true,
+        billingUnavailable: code === 'BACKEND_VERIFY_FAILED',
         message: code === 'TOKEN_OWNER_MISMATCH'
-          ? 'No active subscription found for this account.'
-          : 'Google Play billing is currently unavailable. Please try again.',
+          ? 'This subscription is linked to another PropLead account. Sign in with the original Google account or contact support.'
+          : code === 'SUBSCRIPTION_RECOVERY_REQUIRED'
+            ? 'Your subscription needs account recovery. Contact PropLead support; you do not need to purchase it again.'
+            : 'Google Play billing is currently unavailable. Please try again.',
       });
     }
 

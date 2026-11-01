@@ -366,10 +366,10 @@ export const SubscriptionModal: React.FC<SubscriptionModalProps> = ({
         setSuccessMessage(result.message);
         try { confetti({ particleCount: 40, spread: 60, origin: { y: 0.6 } }); } catch {}
       } else {
-        setErrorMessage('No active subscription found for this account.');
+        setErrorMessage(result.message || 'Subscription restoration could not be completed. Please try again.');
       }
     } catch {
-      if (ticketIsCurrent(ticket)) setErrorMessage('No active subscription found for this account.');
+      if (ticketIsCurrent(ticket)) setErrorMessage('Subscription restoration could not be completed. Please check your connection and try again.');
     } finally {
       finishOperation(ticket);
     }
