@@ -1897,7 +1897,7 @@ export function App() {
           isOpen={Boolean(editLead)}
           onClose={() => setEditLead(null)}
           lead={editLead}
-          onUpdateLead={handleUpdateLead}
+          onSaveLead={handleUpdateLead}
         />
       )}
 

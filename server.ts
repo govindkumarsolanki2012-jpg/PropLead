@@ -435,6 +435,32 @@ async function getFirebaseAdminAccessToken(): Promise<string | null> {
   }
 }
 
+let cachedDeletionAdminToken: { token: string; expiresAt: number } | null = null;
+
+async function getAccountDeletionAccessToken(): Promise<string | null> {
+  const now = Date.now();
+  if (cachedDeletionAdminToken && now < cachedDeletionAdminToken.expiresAt) {
+    return cachedDeletionAdminToken.token;
+  }
+
+  // Deletion needs Firebase/Firestore/Storage permissions, not Play Billing credentials.
+  // Without an explicit Firebase admin key, use Cloud Run's attached service account.
+  const credentials = parseServiceAccountCredentials(process.env.FIREBASE_ADMIN_SERVICE_ACCOUNT_KEY);
+  const authOptions: any = { scopes: ['https://www.googleapis.com/auth/cloud-platform'] };
+  if (credentials) authOptions.credentials = credentials;
+
+  try {
+    const client = await new google.auth.GoogleAuth(authOptions).getClient();
+    const response = await client.getAccessToken();
+    if (!response?.token) return null;
+    cachedDeletionAdminToken = { token: response.token, expiresAt: now + 50 * 60 * 1000 };
+    return response.token;
+  } catch {
+    console.error('[Account Deletion] Admin credentials unavailable.');
+    return null;
+  }
+}
+
 function encodeFirestorePath(documentPath: string): string {
   return documentPath.split('/').map(encodeURIComponent).join('/');
 }
@@ -554,6 +580,14 @@ async function createOrUpdateDeletionJob(job: AccountDeletionJob, accessToken: s
       },
       body: JSON.stringify({ fields }),
     });
+    if (!res.ok) {
+      const failure = await res.json().catch(() => null);
+      const status = failure?.error?.status;
+      console.error('[DeletionJob] Firestore write failed', {
+        httpStatus: res.status,
+        code: typeof status === 'string' && /^[A-Z_]+$/.test(status) ? status : 'UNKNOWN',
+      });
+    }
     return res.ok;
   } catch (err) {
     console.warn('[DeletionJob] Error writing deletion job to Firestore:', err);
@@ -692,7 +726,7 @@ async function deleteFirebaseAuthUser(uid: string, accessToken: string): Promise
 }
 
 async function processAccountDeletionJob(uid: string): Promise<void> {
-  const adminAccessToken = await getFirebaseAdminAccessToken();
+  const adminAccessToken = await getAccountDeletionAccessToken();
   if (!adminAccessToken) throw new Error('Deletion credentials are unavailable.');
   const job = await fetchDeletionJobFromFirestore(uid);
   if (!job) throw new Error('Durable account deletion job is unavailable.');
@@ -754,7 +788,7 @@ async function runDeletionWorkerCycle(): Promise<void> {
   if (isDeletionWorkerRunning) return;
   isDeletionWorkerRunning = true;
   try {
-    const token = await getFirebaseAdminAccessToken();
+    const token = await getAccountDeletionAccessToken();
     if (!token) return;
     let pageToken = '';
     do {
@@ -1169,7 +1203,7 @@ async function claimPurchaseTokenForUid(
  */
 async function fetchDeletionJobFromFirestore(uid: string): Promise<AccountDeletionJob | null> {
   try {
-    const adminToken = await getFirebaseAdminAccessToken();
+    const adminToken = await getAccountDeletionAccessToken();
     if (!adminToken) return null;
     const docUrl = `${FIRESTORE_REST_BASE}/accountDeletionJobs/${encodeURIComponent(uid)}`;
     const res = await fetch(docUrl, {
@@ -3241,7 +3275,7 @@ async function startServer() {
 
       const verifiedUid = verified.uid;
 
-      const adminAccessToken = await getFirebaseAdminAccessToken();
+      const adminAccessToken = await getAccountDeletionAccessToken();
       if (!adminAccessToken) {
         return res.status(503).json({
           success: false,
