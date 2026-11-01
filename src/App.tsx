@@ -1847,6 +1847,12 @@ export function App() {
           lead={detailLead}
           profile={profile}
           properties={properties}
+          onOpenPropertyDetail={(property) => {
+            setDetailLead(null);
+            setImportedMatchLeadId(null);
+            setCurrentTab('properties');
+            setDetailProperty(property);
+          }}
           onUpdateLead={handleUpdateLead}
           onVoiceNotesChanged={handlePersistedLeadChanged}
           onCompleteFollowUp={handleCompleteFollowUp}
@@ -1931,6 +1937,12 @@ export function App() {
           onClose={() => setDetailProperty(null)}
           property={detailProperty}
           leads={leads}
+          onOpenLeadDetail={(lead) => {
+            setDetailProperty(null);
+            setImportedMatchLeadId(null);
+            setCurrentTab('leads');
+            setDetailLead(lead);
+          }}
           profile={profile}
           onUpdateProperty={handleUpdateProperty}
           onOpenEdit={(p) => handleOpenEditProperty(p)}

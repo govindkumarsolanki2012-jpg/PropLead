@@ -57,6 +57,7 @@ interface PropertyDetailModalProps {
   onOpenEditModal?: (property: Property) => void;
   onOpenEdit?: (property: Property) => void;
   onOpenScheduleVisit?: (lead: Lead, propertyNote?: string) => void;
+  onOpenLeadDetail?: (lead: Lead) => void;
 }
 
 export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
@@ -73,6 +74,7 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
   onOpenEditModal,
   onOpenEdit,
   onOpenScheduleVisit,
+  onOpenLeadDetail,
 }) => {
   const [activePhotoIdx, setActivePhotoIdx] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<'overview' | 'matching_leads' | 'private_owner'>('overview');
@@ -509,7 +511,8 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
                 matchingLeads.map(({ lead, score, matchReasons }) => (
                   <div
                     key={lead.id}
-                    className="p-3.5 bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-emerald-400 transition-all shadow-xs space-y-2.5"
+                    onClick={() => onOpenLeadDetail?.(lead)}
+                    className="p-3.5 bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-emerald-400 transition-all shadow-xs space-y-2.5 cursor-pointer"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
@@ -528,7 +531,10 @@ export const PropertyDetailModal: React.FC<PropertyDetailModalProps> = ({
 
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={() => handleShare(property, lead)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleShare(property, lead);
+                          }}
                           className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs transition-all"
                         >
                           <Share2 className="w-3 h-3" />

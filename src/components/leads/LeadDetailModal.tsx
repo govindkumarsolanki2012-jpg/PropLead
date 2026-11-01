@@ -604,7 +604,8 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                       {groupedMatches.bestMatches.map(({ property, score, matchReasons, budgetDiffPercentage }) => (
                         <div
                           key={property.id}
-                          className="p-3.5 bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-emerald-400 transition-all shadow-xs space-y-2.5"
+                          onClick={() => onOpenPropertyDetail?.(property)}
+                          className="p-3.5 bg-white dark:bg-slate-800/90 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-emerald-400 transition-all shadow-xs space-y-2.5 cursor-pointer"
                         >
                           <div className="flex items-start gap-3">
                             {getPropertyPhotoUrl(property.photos?.[0]) ? (
@@ -670,7 +671,8 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                           {/* Action Buttons */}
                           <div className="pt-2 border-t border-slate-100 dark:border-slate-700/80 flex items-center justify-between gap-2">
                             <button
-                              onClick={() => {
+                              onClick={(event) => {
+                                event.stopPropagation();
                                 if (onOpenPropertyDetail) {
                                   onOpenPropertyDetail(property);
                                 }
@@ -682,7 +684,8 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
                             </button>
 
                             <button
-                              onClick={() => {
+                              onClick={(event) => {
+                                event.stopPropagation();
                                 if (onSharePropertyWithLead) {
                                   onSharePropertyWithLead(property, lead);
                                 }
